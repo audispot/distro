@@ -303,7 +303,6 @@ export default {
           if (response.ok) {
             const resJson = await response.json();
             const rawList = Array.isArray(resJson) ? resJson : (resJson.data || resJson.releases || []);
-            // Strict match: Only return upstream items explicitly owned by this user
             apiReleases = rawList.filter(item => item.submittedBy === userId);
           }
         } catch (e) {
@@ -351,7 +350,6 @@ export default {
         
         let tooLostAccessToken;
         try {
-          // Get valid OAuth access token for Too Lost API
           tooLostAccessToken = await getAccessToken(env);
         } catch (authError) {
           return new Response(
@@ -360,14 +358,13 @@ export default {
           );
         }
 
-        // Endpoint 1: Analytics Overview
         if (url.pathname === "/api/analytics/overview") {
           const period = url.searchParams.get("period") || "lastThirtyDays";
           const response = await fetch(`${baseUrl}/analytics/overview?period=${period}`, {
             method: "GET",
             headers: {
               "Accept": "application/json",
-              "Authorization": `Bearer ${tooLostAccessToken}`, // Use Too Lost OAuth Token here
+              "Authorization": `Bearer ${tooLostAccessToken}`,
             },
           });
           const responseText = await response.text();
@@ -377,7 +374,6 @@ export default {
           });
         }
 
-        // Endpoint 2: Analytics Tracks List
         if (url.pathname === "/api/analytics/tracks") {
           const period = url.searchParams.get("period") || "lastThirtyDays";
           const page = url.searchParams.get("page") || "1";
@@ -386,7 +382,7 @@ export default {
             method: "GET",
             headers: {
               "Accept": "application/json",
-              "Authorization": `Bearer ${tooLostAccessToken}`, // Use Too Lost OAuth Token here
+              "Authorization": `Bearer ${tooLostAccessToken}`,
             },
           });
           const responseText = await response.text();
@@ -398,7 +394,7 @@ export default {
       }
 
       // -------------------------------------------------------------
-      // ROUTE 3.6: Withdrawal Requests Route (GET & POST)
+      // ROUTE 4: Get & Submit Withdrawals (/api/withdrawals)
       // -------------------------------------------------------------
       if (url.pathname === "/api/withdrawals") {
         if (!userId) {
@@ -408,41 +404,27 @@ export default {
           );
         }
 
-        const userKvKey = `WITHDRAWALS_USER_${userId}`;
+        const kvKey = `WITHDRAWALS_USER_${userId}`;
 
-        // GET: Fetch artist's withdrawal history
+        // GET: Fetch withdrawal history for the logged-in user
         if (request.method === "GET") {
           let userWithdrawals = [];
           if (env.AUDIORY_KV) {
-            userWithdrawals = JSON.parse(await env.AUDIORY_KV.get(userKvKey) || '[]');
+            userWithdrawals = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
           }
           return new Response(JSON.stringify(userWithdrawals), {
             status: 200,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
           });
         }
 
-        // POST: Submit a new withdrawal request with backend validation
+        // POST: Request a new withdrawal
         if (request.method === "POST") {
-          const payloadText = await request.text();
-          let body = {};
-          try { body = JSON.parse(payloadText); } catch {}
-
+          const body = await request.json().catch(() => ({}));
           const amount = parseFloat(body.amount);
-          const method = body.method;
-          const details = body.details;
 
-          // 1. Minimum Threshold Validation ($20.00)
-          if (isNaN(amount) || amount < 20) {
-            return new Response(
-              JSON.stringify({ error: "Minimum withdrawal amount is $20.00." }),
-              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
-
-          // 2. Schedule Window Validation (15th - 25th)
-          const today = new Date();
-          const currentDay = today.getDate();
+          // 1. Date window check (15th - 25th)
+          const currentDay = new Date().getUTCDate();
           if (currentDay < 15 || currentDay > 25) {
             return new Response(
               JSON.stringify({ error: "Withdrawals are allowed exclusively between the 15th and 25th of each month." }),
@@ -450,51 +432,54 @@ export default {
             );
           }
 
-          // 3. Single Request Per Monthly Cycle Check
-          const currentMonthYear = `${today.getFullYear()}-${today.getMonth() + 1}`;
-          let existingRequests = [];
-          if (env.AUDIORY_KV) {
-            existingRequests = JSON.parse(await env.AUDIORY_KV.get(userKvKey) || '[]');
+          // 2. Minimum amount check
+          if (isNaN(amount) || amount < 20) {
+            return new Response(
+              JSON.stringify({ error: "Minimum withdrawal amount is $20.00." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
           }
 
-          const alreadySubmittedThisMonth = existingRequests.some(r => {
-            const reqDate = new Date(r.date);
-            return `${reqDate.getFullYear()}-${reqDate.getMonth() + 1}` === currentMonthYear;
-          });
+          let existingRequests = [];
+          if (env.AUDIORY_KV) {
+            existingRequests = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+          }
 
-          if (alreadySubmittedThisMonth) {
+          // 3. Cycle duplicate check (only 1 request per month)
+          const currentMonth = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+          const hasExisting = existingRequests.some(r => r.date && r.date.startsWith(currentMonth));
+          if (hasExisting) {
             return new Response(
               JSON.stringify({ error: "You have already submitted a withdrawal request for this monthly cycle." }),
               { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
           }
 
-          // Save new withdrawal entry to KV
+          // Create new record
           const newRequest = {
-            id: 'WD-' + Date.now().toString().slice(-6),
-            userId: userId,
-            date: new Date().toISOString(),
-            method: (method || 'UNKNOWN').toUpperCase(),
-            details: details || '',
+            id: `wd_${Date.now()}`,
             amount: amount,
-            status: 'Pending'
+            method: body.method || "mpesa",
+            details: body.details || "",
+            status: "Pending",
+            date: new Date().toISOString()
           };
 
           existingRequests.unshift(newRequest);
 
           if (env.AUDIORY_KV) {
-            await env.AUDIORY_KV.put(userKvKey, JSON.stringify(existingRequests));
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(existingRequests));
           }
 
-          return new Response(JSON.stringify({ success: true, data: newRequest }), {
+          return new Response(JSON.stringify({ success: true, request: newRequest }), {
             status: 201,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
           });
         }
       }
 
       // -------------------------------------------------------------
-      // ROUTE 3.7: Toolost Earnings & Royalty Payouts Route
+      // ROUTE 5: Get Live TooLost Earnings (/api/toolost/earnings)
       // -------------------------------------------------------------
       if (url.pathname === "/api/toolost/earnings" && request.method === "GET") {
         if (!userId) {
@@ -504,65 +489,39 @@ export default {
           );
         }
 
-        let accessToken;
-        try {
-          accessToken = await getAccessToken(env);
-        } catch (authError) {
-          return new Response(
-            JSON.stringify({ error: "Too Lost Authentication Failed", details: authError.message }),
-            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-
         const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
 
         try {
-          // Fetch analytics data from Too Lost API
-          const response = await fetch(`${baseUrl}/analytics/overview?period=allTime`, {
-            method: "GET",
+          const accessToken = await getAccessToken(env);
+          const response = await fetch(`${baseUrl}/analytics/earnings`, {
             headers: {
               "Accept": "application/json",
-              "Authorization": `Bearer ${accessToken}`,
-            },
+              "Authorization": `Bearer ${accessToken}`
+            }
           });
 
-          if (!response.ok) {
-            // Fallback response if analytics data isn't ready or endpoint fails
-            return new Response(
-              JSON.stringify({ totalBalance: 0, platformBreakdown: [] }),
-              { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
+          if (response.ok) {
+            const earningsData = await response.json();
+            return new Response(JSON.stringify(earningsData), {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
           }
-
-          const analyticsData = await response.json();
-
-          // Map Too Lost analytics structure to expected frontend format
-          const formattedData = {
-            totalBalance: analyticsData.total_revenue || analyticsData.revenue || 0,
-            platformBreakdown: (analyticsData.stores || analyticsData.platforms || []).map(item => ({
-              dsp: item.name || item.store || 'Unknown DSP',
-              streams: item.streams || item.plays || 0,
-              revenue: item.revenue || item.earnings || 0
-            }))
-          };
-
-          return new Response(JSON.stringify(formattedData), {
-            status: 200,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-
         } catch (err) {
-          return new Response(
-            JSON.stringify({ totalBalance: 0, platformBreakdown: [] }),
-            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
+          console.error("Too Lost Earnings API Error:", err);
         }
+
+        // Return empty payload fallback on API error
+        return new Response(JSON.stringify({ totalBalance: 0, platformBreakdown: [] }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
       }
 
       // -------------------------------------------------------------
-      // ROUTE 4: Proxy Requests to Too Lost API v1
+      // ROUTE 6: Proxy Requests to Too Lost API v1
       // -------------------------------------------------------------
-      if (url.pathname.startsWith("/api/toolost")) {
+      if (url.pathname.startsWith("/api/toolost") && url.pathname !== "/api/toolost/earnings") {
         let endpoint = url.pathname.replace(/^\/api\/toolost\/?/, "");
         const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
         const targetUrl = `${baseUrl}/${endpoint}${url.search}`;
@@ -605,7 +564,7 @@ export default {
       }
 
       // -------------------------------------------------------------
-      // ROUTE 5: Upload Cover & Audio Files to Cloudflare R2
+      // ROUTE 7: Upload Cover & Audio Files to Cloudflare R2
       // -------------------------------------------------------------
       if (url.pathname === "/api/upload" && request.method === "POST") {
         const formData = await request.formData();
