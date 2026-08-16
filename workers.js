@@ -337,6 +337,67 @@ export default {
       }
 
       // -------------------------------------------------------------
+      // ROUTE 3.5: Analytics Routes (Overview & Tracks)
+      // -------------------------------------------------------------
+      if (url.pathname.startsWith("/api/analytics/")) {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
+        
+        let tooLostAccessToken;
+        try {
+          // Get valid OAuth access token for Too Lost API
+          tooLostAccessToken = await getAccessToken(env);
+        } catch (authError) {
+          return new Response(
+            JSON.stringify({ error: "Too Lost Authentication Failed", details: authError.message }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // Endpoint 1: Analytics Overview
+        if (url.pathname === "/api/analytics/overview") {
+          const period = url.searchParams.get("period") || "lastThirtyDays";
+          const response = await fetch(`${baseUrl}/analytics/overview?period=${period}`, {
+            method: "GET",
+            headers: {
+              "Accept": "application/json",
+              "Authorization": `Bearer ${tooLostAccessToken}`, // Use Too Lost OAuth Token here
+            },
+          });
+          const responseText = await response.text();
+          return new Response(responseText, {
+            status: response.status,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // Endpoint 2: Analytics Tracks List
+        if (url.pathname === "/api/analytics/tracks") {
+          const period = url.searchParams.get("period") || "lastThirtyDays";
+          const page = url.searchParams.get("page") || "1";
+          const perPage = url.searchParams.get("perPage") || "10";
+          const response = await fetch(`${baseUrl}/analytics/tracks?period=${period}&page=${page}&perPage=${perPage}`, {
+            method: "GET",
+            headers: {
+              "Accept": "application/json",
+              "Authorization": `Bearer ${tooLostAccessToken}`, // Use Too Lost OAuth Token here
+            },
+          });
+          const responseText = await response.text();
+          return new Response(responseText, {
+            status: response.status,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // -------------------------------------------------------------
       // ROUTE 4: Proxy Requests to Too Lost API v1
       // -------------------------------------------------------------
       if (url.pathname.startsWith("/api/toolost")) {
