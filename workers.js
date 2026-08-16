@@ -398,6 +398,168 @@ export default {
       }
 
       // -------------------------------------------------------------
+      // ROUTE 3.6: Withdrawal Requests Route (GET & POST)
+      // -------------------------------------------------------------
+      if (url.pathname === "/api/withdrawals") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const userKvKey = `WITHDRAWALS_USER_${userId}`;
+
+        // GET: Fetch artist's withdrawal history
+        if (request.method === "GET") {
+          let userWithdrawals = [];
+          if (env.AUDIORY_KV) {
+            userWithdrawals = JSON.parse(await env.AUDIORY_KV.get(userKvKey) || '[]');
+          }
+          return new Response(JSON.stringify(userWithdrawals), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // POST: Submit a new withdrawal request with backend validation
+        if (request.method === "POST") {
+          const payloadText = await request.text();
+          let body = {};
+          try { body = JSON.parse(payloadText); } catch {}
+
+          const amount = parseFloat(body.amount);
+          const method = body.method;
+          const details = body.details;
+
+          // 1. Minimum Threshold Validation ($20.00)
+          if (isNaN(amount) || amount < 20) {
+            return new Response(
+              JSON.stringify({ error: "Minimum withdrawal amount is $20.00." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          // 2. Schedule Window Validation (15th - 25th)
+          const today = new Date();
+          const currentDay = today.getDate();
+          if (currentDay < 15 || currentDay > 25) {
+            return new Response(
+              JSON.stringify({ error: "Withdrawals are allowed exclusively between the 15th and 25th of each month." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          // 3. Single Request Per Monthly Cycle Check
+          const currentMonthYear = `${today.getFullYear()}-${today.getMonth() + 1}`;
+          let existingRequests = [];
+          if (env.AUDIORY_KV) {
+            existingRequests = JSON.parse(await env.AUDIORY_KV.get(userKvKey) || '[]');
+          }
+
+          const alreadySubmittedThisMonth = existingRequests.some(r => {
+            const reqDate = new Date(r.date);
+            return `${reqDate.getFullYear()}-${reqDate.getMonth() + 1}` === currentMonthYear;
+          });
+
+          if (alreadySubmittedThisMonth) {
+            return new Response(
+              JSON.stringify({ error: "You have already submitted a withdrawal request for this monthly cycle." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          // Save new withdrawal entry to KV
+          const newRequest = {
+            id: 'WD-' + Date.now().toString().slice(-6),
+            userId: userId,
+            date: new Date().toISOString(),
+            method: (method || 'UNKNOWN').toUpperCase(),
+            details: details || '',
+            amount: amount,
+            status: 'Pending'
+          };
+
+          existingRequests.unshift(newRequest);
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(userKvKey, JSON.stringify(existingRequests));
+          }
+
+          return new Response(JSON.stringify({ success: true, data: newRequest }), {
+            status: 201,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // -------------------------------------------------------------
+      // ROUTE 3.7: Toolost Earnings & Royalty Payouts Route
+      // -------------------------------------------------------------
+      if (url.pathname === "/api/toolost/earnings" && request.method === "GET") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        let accessToken;
+        try {
+          accessToken = await getAccessToken(env);
+        } catch (authError) {
+          return new Response(
+            JSON.stringify({ error: "Too Lost Authentication Failed", details: authError.message }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
+
+        try {
+          // Fetch analytics data from Too Lost API
+          const response = await fetch(`${baseUrl}/analytics/overview?period=allTime`, {
+            method: "GET",
+            headers: {
+              "Accept": "application/json",
+              "Authorization": `Bearer ${accessToken}`,
+            },
+          });
+
+          if (!response.ok) {
+            // Fallback response if analytics data isn't ready or endpoint fails
+            return new Response(
+              JSON.stringify({ totalBalance: 0, platformBreakdown: [] }),
+              { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          const analyticsData = await response.json();
+
+          // Map Too Lost analytics structure to expected frontend format
+          const formattedData = {
+            totalBalance: analyticsData.total_revenue || analyticsData.revenue || 0,
+            platformBreakdown: (analyticsData.stores || analyticsData.platforms || []).map(item => ({
+              dsp: item.name || item.store || 'Unknown DSP',
+              streams: item.streams || item.plays || 0,
+              revenue: item.revenue || item.earnings || 0
+            }))
+          };
+
+          return new Response(JSON.stringify(formattedData), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+
+        } catch (err) {
+          return new Response(
+            JSON.stringify({ totalBalance: 0, platformBreakdown: [] }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+
+      // -------------------------------------------------------------
       // ROUTE 4: Proxy Requests to Too Lost API v1
       // -------------------------------------------------------------
       if (url.pathname.startsWith("/api/toolost")) {
