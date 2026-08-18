@@ -394,6 +394,70 @@ export default {
       }
 
       // -------------------------------------------------------------
+// ROUTE 3.6: Too Lost Sales Routes
+// -------------------------------------------------------------
+if (url.pathname.startsWith("/api/toolost/sales/")) {
+  if (!userId) {
+    return new Response(
+      JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
+
+  let tooLostAccessToken;
+  try {
+    tooLostAccessToken = await getAccessToken(env);
+  } catch (authError) {
+    return new Response(
+      JSON.stringify({ error: "Too Lost Authentication Failed", details: authError.message }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Determine endpoint
+  let salesEndpoint = null;
+  if (url.pathname === "/api/toolost/sales/overview") salesEndpoint = "/sales/overview";
+  else if (url.pathname === "/api/toolost/sales/channels") salesEndpoint = "/sales/channels";
+  else if (url.pathname === "/api/toolost/sales/tracks") salesEndpoint = "/sales/tracks";
+  else if (url.pathname === "/api/toolost/sales/releases") salesEndpoint = "/sales/releases";
+
+  if (!salesEndpoint) {
+    return new Response(
+      JSON.stringify({ error: "Not Found", message: "Unknown Too Lost Sales endpoint." }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  try {
+    const tooLostUrl = new URL(`${baseUrl}${salesEndpoint}`);
+    url.searchParams.forEach((value, key) => tooLostUrl.searchParams.set(key, value));
+
+    const response = await fetch(tooLostUrl.toString(), {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+        "Authorization": `Bearer ${tooLostAccessToken}`
+      }
+    });
+
+    const responseText = await response.text();
+
+    return new Response(responseText, {
+      status: response.status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ error: "Too Lost Sales API Request Failed", details: err.message }),
+      { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+      // -------------------------------------------------------------
       // ROUTE 4: Get & Submit Withdrawals (/api/withdrawals)
       // -------------------------------------------------------------
       if (url.pathname === "/api/withdrawals") {
@@ -479,47 +543,7 @@ export default {
       }
 
       // -------------------------------------------------------------
-      // ROUTE 5: Get Live TooLost Earnings (/api/toolost/earnings)
-      // -------------------------------------------------------------
-      if (url.pathname === "/api/toolost/earnings" && request.method === "GET") {
-        if (!userId) {
-          return new Response(
-            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
-            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-
-        const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
-
-        try {
-          const accessToken = await getAccessToken(env);
-          const response = await fetch(`${baseUrl}/analytics/earnings`, {
-            headers: {
-              "Accept": "application/json",
-              "Authorization": `Bearer ${accessToken}`
-            }
-          });
-
-          if (response.ok) {
-            const earningsData = await response.json();
-            return new Response(JSON.stringify(earningsData), {
-              status: 200,
-              headers: { ...corsHeaders, "Content-Type": "application/json" }
-            });
-          }
-        } catch (err) {
-          console.error("Too Lost Earnings API Error:", err);
-        }
-
-        // Return empty payload fallback on API error
-        return new Response(JSON.stringify({ totalBalance: 0, platformBreakdown: [] }), {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      }
-
-      // -------------------------------------------------------------
-      // ROUTE 6: Proxy Requests to Too Lost API v1
+      // ROUTE 5: Proxy Requests to Too Lost API v1
       // -------------------------------------------------------------
       if (url.pathname.startsWith("/api/toolost") && url.pathname !== "/api/toolost/earnings") {
         let endpoint = url.pathname.replace(/^\/api\/toolost\/?/, "");
@@ -564,7 +588,7 @@ export default {
       }
 
       // -------------------------------------------------------------
-      // ROUTE 7: Upload Cover & Audio Files to Cloudflare R2
+      // ROUTE 6: Upload Cover & Audio Files to Cloudflare R2
       // -------------------------------------------------------------
       if (url.pathname === "/api/upload" && request.method === "POST") {
         const formData = await request.formData();
