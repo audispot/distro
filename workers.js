@@ -362,9 +362,18 @@ export default {
       }
 
       // =============================================================
-      // PILLAR 5: DYNAMIC SUBSCRIPTION & BILLING HISTORY (/api/billing-history)
+      // PILLAR 5: DYNAMIC SUBSCRIPTION & BILLING HISTORY
       // =============================================================
-      if (url.pathname === "/api/billing-history" || url.pathname === "/api/subscription/upgrade") {
+      
+      // Available Audiory Plans Catalog
+      const PLANS = {
+        starter: { name: "Starter Plan", price: "0.00", description: "Starter Plan (Free Tier)" },
+        pro: { name: "Pro Artist Plan", price: "19.99", description: "Pro Artist Plan (Annual Subscription)" },
+        label: { name: "Label Partner", price: "49.99", description: "Label Partner Plan (Annual Subscription)" }
+      };
+
+      // 1. GET Billing History & Active Subscription
+      if (url.pathname === "/api/billing-history" && request.method === "GET") {
         if (!userId) {
           return new Response(
             JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
@@ -375,118 +384,58 @@ export default {
         const billingKvKey = `BILLING_USER_${userId}`;
         const subscriptionKvKey = `SUBSCRIPTION_USER_${userId}`;
 
-        // Available Audiory Plans Catalog
-        const PLANS = {
-          starter: { name: "Starter Plan", price: "0.00", description: "Starter Plan (Free Tier)" },
-          pro: { name: "Pro Artist Plan", price: "19.99", description: "Pro Artist Plan (Annual Subscription)" },
-          label: { name: "Label Partner", price: "49.99", description: "Label Partner Plan (Annual Subscription)" }
-        };
+        let history = [];
+        let currentSub = null;
 
-        // GET Billing History & Active Subscription
-        if (url.pathname === "/api/billing-history" && request.method === "GET") {
-          let history = [];
-          let currentSub = null;
+        if (env.AUDIORY_KV) {
+          const rawHistory = await env.AUDIORY_KV.get(billingKvKey);
+          const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
 
-          if (env.AUDIORY_KV) {
-            const rawHistory = await env.AUDIORY_KV.get(billingKvKey);
-            const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
-
-            history = rawHistory ? JSON.parse(rawHistory) : [];
-            currentSub = rawSub ? JSON.parse(rawSub) : null;
-          }
-
-          // If no plan recorded, default to Free Starter Plan record
-          if (!currentSub) {
-            currentSub = {
-              planId: "starter",
-              planName: PLANS.starter.name,
-              amount: PLANS.starter.price,
-              status: "Active",
-              createdAt: new Date().toISOString()
-            };
-          }
-
-          return new Response(
-            JSON.stringify({
-              subscription: currentSub,
-              history: history
-            }),
-            {
-              status: 200,
-              headers: { ...corsHeaders, "Content-Type": "application/json" }
-            }
-          );
+          history = rawHistory ? JSON.parse(rawHistory) : [];
+          currentSub = rawSub ? JSON.parse(rawSub) : null;
         }
 
-        // POST Upgrade/Select Subscription Plan
-        if (url.pathname === "/api/subscription/upgrade" && request.method === "POST") {
-          const body = await request.json().catch(() => ({}));
-          const { planId, paymentMethod } = body;
-
-          const selectedPlan = PLANS[planId];
-          if (!selectedPlan) {
-            return new Response(
-              JSON.stringify({ error: "Invalid plan selected. Choose 'starter', 'pro', or 'label'." }),
-              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
-
-          const now = new Date();
-          const formattedDate = now.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric"
-          });
-
-          // Create active subscription object
-          const updatedSubscription = {
-            planId: planId,
-            planName: selectedPlan.name,
-            amount: selectedPlan.price,
-            paymentMethod: paymentMethod || "Card / Mobile",
+        // Default to Starter Plan if no record exists
+        if (!currentSub) {
+          currentSub = {
+            planId: "starter",
+            planName: PLANS.starter.name,
+            amount: PLANS.starter.price,
             status: "Active",
-            updatedAt: now.toISOString()
+            createdAt: new Date().toISOString()
           };
-
-          // Fetch existing history and prepend new invoice if it's a paid tier
-          let history = [];
-          if (env.AUDIORY_KV) {
-            const rawHistory = await env.AUDIORY_KV.get(billingKvKey);
-            history = rawHistory ? JSON.parse(rawHistory) : [];
-
-            if (selectedPlan.price !== "0.00") {
-              const newInvoice = {
-                invoiceId: `INV-${Math.floor(10000 + Math.random() * 90000)}`,
-                date: formattedDate,
-                description: selectedPlan.description,
-                amount: selectedPlan.price,
-                status: "Paid"
-              };
-              history.unshift(newInvoice);
-            }
-
-            // Store updated state to KV
-            await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(updatedSubscription));
-            await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(history));
-          }
-
-          return new Response(
-            JSON.stringify({
-              success: true,
-              subscription: updatedSubscription,
-              history: history
-            }),
-            {
-              status: 200,
-              headers: { ...corsHeaders, "Content-Type": "application/json" }
-            }
-          );
         }
+
+        return new Response(
+          JSON.stringify({ subscription: currentSub, history: history }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
 
-      // =============================================================
-      // PAYMENT & DYNAMIC KV SUBSCRIPTION ENDPOINT (/api/subscription/upgrade)
-      // =============================================================
+      // 2. GET Subscription Status Endpoint (For polling)
+      if (url.pathname === "/api/subscription/status" && request.method === "GET") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const subscriptionKvKey = `SUBSCRIPTION_USER_${userId}`;
+        let currentSub = null;
+
+        if (env.AUDIORY_KV) {
+          const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
+          currentSub = rawSub ? JSON.parse(rawSub) : null;
+        }
+
+        return new Response(
+          JSON.stringify({ status: currentSub ? currentSub.status : "Pending", subscription: currentSub }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 3. POST Payment & Subscription Upgrade
       if (url.pathname === "/api/subscription/upgrade" && request.method === "POST") {
         if (!userId) {
           return new Response(
@@ -496,21 +445,23 @@ export default {
         }
 
         const body = await request.json().catch(() => ({}));
-        const { planId, paymentMethod, phone } = body;
-
-        const PLANS = {
-          starter: { name: "Starter Plan", price: "0.00", description: "Starter Plan (Free Tier)" },
-          pro: { name: "Pro Artist Plan", price: "19.99", description: "Pro Artist Plan (Annual Subscription)" },
-          label: { name: "Label Partner", price: "49.99", description: "Label Partner Plan (Annual Subscription)" }
-        };
+        const { planId, paymentMethod, phone, email, displayName } = body;
 
         const selectedPlan = PLANS[planId] || PLANS.starter;
         let transactionId = `TXN-${Date.now()}`;
         let redirectUrl = null;
+        let requiresManualAction = false;
 
         if (selectedPlan.price !== "0.00") {
-          // 1. M-PESA DARAJA STK PUSH
+          // A. M-PESA DARAJA STK PUSH
           if (paymentMethod === "mpesa") {
+            if (!phone) {
+              return new Response(
+                JSON.stringify({ error: "A valid phone number is required for M-Pesa payments." }),
+                { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
             const darajaAuthUrl = "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials";
             
             const authRes = await fetch(darajaAuthUrl, {
@@ -519,38 +470,49 @@ export default {
               }
             }).then(r => r.json()).catch(() => null);
 
-            if (authRes && authRes.access_token) {
-              const timestamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
-              const password = btoa(`${env.DARAJA_BUSINESS_SHORTCODE}${env.DARAJA_PASSKEY}${timestamp}`);
-
-              const stkRes = await fetch("https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest", {
-                method: "POST",
-                headers: {
-                  Authorization: `Bearer ${authRes.access_token}`,
-                  "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                  BusinessShortCode: env.DARAJA_BUSINESS_SHORTCODE,
-                  Password: password,
-                  Timestamp: timestamp,
-                  TransactionType: "CustomerPayBillOnline",
-                  Amount: Math.round(parseFloat(selectedPlan.price) * 130),
-                  PartyA: phone,
-                  PartyB: env.DARAJA_BUSINESS_SHORTCODE,
-                  PhoneNumber: phone,
-                  CallBackURL: "https://distro.audiory.site/api/webhooks/mpesa",
-                  AccountReference: "AudioryDistro",
-                  TransactionDesc: `Subscription for ${selectedPlan.name}`
-                })
-              }).then(r => r.json()).catch(() => null);
-
-              if (stkRes && stkRes.CheckoutRequestID) {
-                transactionId = stkRes.CheckoutRequestID;
-              }
+            if (!authRes || !authRes.access_token) {
+              return new Response(
+                JSON.stringify({ error: "M-Pesa authorization failed. Verify Daraja Consumer Key and Secret." }),
+                { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
             }
+
+            const timestamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
+            const password = btoa(`${env.DARAJA_BUSINESS_SHORTCODE}${env.DARAJA_PASSKEY}${timestamp}`);
+
+            const stkRes = await fetch("https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${authRes.access_token}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                BusinessShortCode: env.DARAJA_BUSINESS_SHORTCODE,
+                Password: password,
+                Timestamp: timestamp,
+                TransactionType: "CustomerPayBillOnline",
+                Amount: Math.round(parseFloat(selectedPlan.price) * 130),
+                PartyA: phone,
+                PartyB: env.DARAJA_BUSINESS_SHORTCODE,
+                PhoneNumber: phone,
+                CallBackURL: "https://distro.audiory.site/api/webhooks/mpesa",
+                AccountReference: "AudioryDistro",
+                TransactionDesc: `Subscription for ${selectedPlan.name}`
+              })
+            }).then(r => r.json()).catch(() => null);
+
+            if (!stkRes || !stkRes.CheckoutRequestID) {
+              return new Response(
+                JSON.stringify({ error: "Failed to initialize M-Pesa STK Push. Check phone format or Daraja credentials." }),
+                { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
+            transactionId = stkRes.CheckoutRequestID;
+            requiresManualAction = true;
           }
 
-          // 2. PAYPAL CHECKOUT (v2 ORDERS API)
+          // B. PAYPAL CHECKOUT
           else if (paymentMethod === "paypal") {
             const paypalBase = env.PAYPAL_MODE === "sandbox" 
               ? "https://api-m.sandbox.paypal.com" 
@@ -565,115 +527,134 @@ export default {
               body: "grant_type=client_credentials"
             }).then(r => r.json()).catch(() => null);
 
-            if (authRes && authRes.access_token) {
-              const orderRes = await fetch(`${paypalBase}/v2/checkout/orders`, {
-                method: "POST",
-                headers: {
-                  Authorization: `Bearer ${authRes.access_token}`,
-                  "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                  intent: "CAPTURE",
-                  purchase_units: [{
-                    reference_id: `SUB-${userId}-${Date.now()}`,
-                    description: selectedPlan.description,
-                    amount: {
-                      currency_code: "USD",
-                      value: selectedPlan.price
-                    }
-                  }],
-                  application_context: {
-                    return_url: "https://distro.audiory.site/dashboard/?payment=success",
-                    cancel_url: "https://distro.audiory.site/signup/?payment=cancelled",
-                    brand_name: "Audiory Distribution",
-                    user_action: "PAY_NOW"
-                  }
-                })
-              }).then(r => r.json()).catch(() => null);
-
-              if (orderRes && orderRes.id) {
-                transactionId = orderRes.id;
-                const approveLink = orderRes.links?.find(link => link.rel === "approve");
-                if (approveLink) {
-                  redirectUrl = approveLink.href;
-                }
-              }
+            if (!authRes || !authRes.access_token) {
+              return new Response(
+                JSON.stringify({ error: "PayPal authorization failed. Check PayPal Client ID/Secret." }),
+                { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
             }
-          }
 
-          // 3. PESAPAL (v3 API)
-          else if (paymentMethod === "pesapal") {
-            const pesapalBase = env.PESAPAL_MODE === "sandbox" 
-              ? "https://cyb3r.pesapal.com/pesapalv3" 
-              : "https://pay.pesapal.com/v3";
-
-            // Authenticate with PesaPal v3 API
-            const authRes = await fetch(`${pesapalBase}/api/Auth/RequestToken`, {
+            const orderRes = await fetch(`${paypalBase}/v2/checkout/orders`, {
               method: "POST",
               headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json"
+                Authorization: `Bearer ${authRes.access_token}`,
+                "Content-Type": "application/json"
               },
               body: JSON.stringify({
-                consumer_key: env.PESAPAL_CONSUMER_KEY,
-                consumer_secret: env.PESAPAL_CONSUMER_SECRET
+                intent: "CAPTURE",
+                purchase_units: [{
+                  reference_id: `SUB-${userId}-${Date.now()}`,
+                  description: selectedPlan.description,
+                  amount: { currency_code: "USD", value: selectedPlan.price }
+                }],
+                application_context: {
+                  return_url: "https://distro.audiory.site/dashboard/?payment=success",
+                  cancel_url: "https://distro.audiory.site/signup/?payment=cancelled",
+                  brand_name: "Audiory Distribution",
+                  user_action: "PAY_NOW"
+                }
               })
             }).then(r => r.json()).catch(() => null);
 
-            if (authRes && authRes.token) {
-              // Register IPN URL if not already registered
-              let ipnId = env.PESAPAL_IPN_ID;
-              if (!ipnId) {
-                const ipnRes = await fetch(`${pesapalBase}/api/URLSetup/RegisterIPN`, {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${authRes.token}`,
-                    "Content-Type": "application/json",
-                    "Accept": "application/json"
-                  },
-                  body: JSON.stringify({
-                    url: "https://distro.audiory.site/api/webhooks/pesapal",
-                    ipn_notification_type: "GET"
-                  })
-                }).then(r => r.json()).catch(() => null);
-
-                if (ipnRes && ipnRes.ipn_id) {
-                  ipnId = ipnRes.ipn_id;
-                }
-              }
-
-              // Submit Order Request
-              const orderRes = await fetch(`${pesapalBase}/api/Transactions/SubmitOrderRequest`, {
-                method: "POST",
-                headers: {
-                  Authorization: `Bearer ${authRes.token}`,
-                  "Content-Type": "application/json",
-                  "Accept": "application/json"
-                },
-                body: JSON.stringify({
-                  id: `PESA-${Date.now()}`,
-                  currency: "USD",
-                  amount: parseFloat(selectedPlan.price),
-                  description: selectedPlan.description,
-                  callback_url: "https://distro.audiory.site/dashboard/?payment=success",
-                  notification_id: ipnId,
-                  billing_address: {
-                    email_address: body.email || "billing@audiory.site",
-                    phone_number: phone || "",
-                    first_name: body.displayName || "Subscriber"
-                  }
-                })
-              }).then(r => r.json()).catch(() => null);
-
-              if (orderRes && orderRes.order_tracking_id) {
-                transactionId = orderRes.order_tracking_id;
-                redirectUrl = orderRes.redirect_url;
-              }
+            const approveLink = orderRes?.links?.find(link => link.rel === "approve");
+            if (!orderRes || !orderRes.id || !approveLink) {
+              return new Response(
+                JSON.stringify({ error: "Failed to generate PayPal payment link." }),
+                { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
             }
-          }
-        }
 
-        // 4. BUILD AND PERSIST RECORDS TO CLOUDFLARE KV
+            transactionId = orderRes.id;
+            redirectUrl = approveLink.href;
+          }
+
+          // C. PESAPAL GATEWAY
+else if (paymentMethod === "pesapal") {
+    // Dynamic URL switching for Sandbox vs Production
+    const pesapalBase = env.PESAPAL_MODE === "sandbox" 
+      ? "https://cyb3r.pesapal.com/pesapalv3" 
+      : "https://pay.pesapal.com/v3";
+
+    // Step 1: Request Access Token
+    const authRes = await fetch(`${pesapalBase}/api/Auth/RequestToken`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({
+        consumer_key: env.PESAPAL_CONSUMER_KEY,
+        consumer_secret: env.PESAPAL_CONSUMER_SECRET
+      })
+    }).then(r => r.json()).catch(() => null);
+
+    if (!authRes || !authRes.token) {
+      return new Response(
+        JSON.stringify({ error: "PesaPal authorization failed. Verify Consumer Key and Secret." }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Step 2: Register IPN URL if not configured in Worker secrets
+    let ipnId = env.PESAPAL_IPN_ID;
+    if (!ipnId) {
+      const ipnRes = await fetch(`${pesapalBase}/api/URLSetup/RegisterIPN`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authRes.token}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          url: "https://distro.audiory.site/api/webhooks/pesapal",
+          ipn_notification_type: "GET"
+        })
+      }).then(r => r.json()).catch(() => null);
+
+      if (ipnRes && ipnRes.ipn_id) ipnId = ipnRes.ipn_id;
+    }
+
+    // Step 3: Format Name Fields (Required by PesaPal v3 schema)
+    const names = (displayName || "Subscriber").trim().split(" ");
+    const firstName = names[0] || "Subscriber";
+    const lastName = names.slice(1).join(" ") || "Artist";
+
+    // Step 4: Submit Order Request
+    const orderRes = await fetch(`${pesapalBase}/api/Transactions/SubmitOrderRequest`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${authRes.token}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        id: `PESA-${Date.now()}`,
+        currency: "USD",
+        amount: Number(parseFloat(selectedPlan.price).toFixed(2)),
+        description: selectedPlan.description || "Subscription Upgrade",
+        callback_url: "https://distro.audiory.site/dashboard/?payment=success",
+        notification_id: ipnId,
+        billing_address: {
+          email_address: email || "billing@audiory.site",
+          phone_number: phone || "",
+          first_name: firstName,
+          last_name: lastName
+        }
+      })
+    }).then(r => r.json()).catch(() => null);
+
+    if (!orderRes || !orderRes.redirect_url) {
+      return new Response(
+        JSON.stringify({ 
+          error: orderRes?.error?.message || "Failed to generate PesaPal payment portal. Verify IPN ID and credentials." 
+        }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    transactionId = orderRes.order_tracking_id;
+    redirectUrl = orderRes.redirect_url;
+}
+
+
+        // SAVE PENDING STATE TO CLOUDFLARE KV UNTIL WEBHOOK CONFIRMS
         const subscriptionKvKey = `SUBSCRIPTION_USER_${userId}`;
         const billingKvKey = `BILLING_USER_${userId}`;
 
@@ -683,12 +664,18 @@ export default {
           amount: selectedPlan.price,
           paymentMethod: paymentMethod || "card",
           transactionId: transactionId,
-          status: "Active",
+          // Free plan gets immediate activation; paid plans remain Pending until Webhook confirmation
+          status: selectedPlan.price === "0.00" ? "Active" : "Pending",
           updatedAt: new Date().toISOString()
         };
 
         if (env.AUDIORY_KV) {
           await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(activeSubData));
+
+          // Save transaction lookup mapping so Webhook can find the userId from CheckoutRequestID
+          if (paymentMethod === "mpesa" && transactionId) {
+            await env.AUDIORY_KV.put(`MPESA_TX_${transactionId}`, userId);
+          }
 
           if (selectedPlan.price !== "0.00") {
             const rawHistory = await env.AUDIORY_KV.get(billingKvKey);
@@ -700,7 +687,7 @@ export default {
               description: selectedPlan.description,
               amount: selectedPlan.price,
               gateway: paymentMethod,
-              status: "Paid"
+              status: "Pending"
             });
 
             await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(history));
@@ -710,12 +697,74 @@ export default {
         return new Response(JSON.stringify({ 
           success: true, 
           subscription: activeSubData,
-          redirectUrl: redirectUrl 
+          redirectUrl: redirectUrl,
+          requiresManualAction: requiresManualAction
         }), {
           status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
+
+      // M-PESA WEBHOOK CALLBACK HANDLER
+if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
+  let body = {};
+  try {
+    body = await request.json();
+  } catch (err) {
+    body = {};
+  }
+
+  const stkCallback = body?.Body?.stkCallback;
+
+  if (stkCallback && env.AUDIORY_KV) {
+    const checkoutReqId = stkCallback.CheckoutRequestID;
+    const resultCode = stkCallback.ResultCode; // 0 = Success
+
+    const targetUserId = await env.AUDIORY_KV.get(`MPESA_TX_${checkoutReqId}`);
+
+    if (targetUserId) {
+      const subscriptionKvKey = `SUBSCRIPTION_USER_${targetUserId}`;
+      const billingKvKey = `BILLING_USER_${targetUserId}`;
+
+      const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
+      const rawBilling = await env.AUDIORY_KV.get(billingKvKey);
+
+      let currentSub = rawSub ? JSON.parse(rawSub) : null;
+      let billingHistory = rawBilling ? JSON.parse(rawBilling) : [];
+
+      if (resultCode === 0) {
+        if (currentSub) {
+          currentSub.status = "Active";
+          currentSub.updatedAt = new Date().toISOString();
+          await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+        }
+
+        if (billingHistory.length > 0) {
+          billingHistory[0].status = "Paid";
+          await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(billingHistory));
+        }
+      } else {
+        if (currentSub) {
+          currentSub.status = "Failed";
+          currentSub.updatedAt = new Date().toISOString();
+          await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+        }
+
+        if (billingHistory.length > 0) {
+          billingHistory[0].status = "Failed";
+          await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(billingHistory));
+        }
+      }
+
+      await env.AUDIORY_KV.delete(`MPESA_TX_${checkoutReqId}`);
+    }
+  }
+
+  return new Response(JSON.stringify({ ResultCode: 0, ResultDesc: "Accepted" }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
+  });
+}
 
       // =============================================================
       // PILLAR 6: LOGIN HISTORY & SESSION REVOCATION (/api/login-history)
