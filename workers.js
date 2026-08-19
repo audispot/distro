@@ -127,6 +127,670 @@ export default {
     try {
       const userId = parseUserIdFromToken(request);
 
+      // =============================================================
+      // PILLAR 1: MY PROFILE API (/api/profile)
+      // =============================================================
+      if (url.pathname === "/api/profile") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const kvKey = `PROFILE_USER_${userId}`;
+
+        // GET Profile
+        if (request.method === "GET") {
+          let profile = {};
+          if (env.AUDIORY_KV) {
+            profile = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "{}");
+          }
+          return new Response(JSON.stringify(profile), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // POST/PUT Update Profile Name
+        if (request.method === "POST" || request.method === "PUT") {
+          const body = await request.json().catch(() => ({}));
+          const { displayName } = body;
+
+          if (!displayName) {
+            return new Response(
+              JSON.stringify({ error: "Profile name is required." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          const profileData = {
+            displayName,
+            updatedAt: new Date().toISOString()
+          };
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(profileData));
+          }
+
+          return new Response(JSON.stringify({ success: true, profile: profileData }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
+      // =============================================================
+      // PILLAR 2: ACCOUNT MEMBERS & ACCESS CONTROL (/api/members)
+      // =============================================================
+      if (url.pathname === "/api/members" || url.pathname === "/api/members/invite" || url.pathname.startsWith("/api/members/")) {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const kvKey = `MEMBERS_USER_${userId}`;
+
+        // GET Members
+        if (url.pathname === "/api/members" && request.method === "GET") {
+          let members = [];
+          if (env.AUDIORY_KV) {
+            members = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+          }
+          return new Response(JSON.stringify(members), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // POST Invite Member
+        if (url.pathname === "/api/members/invite" && request.method === "POST") {
+          const { email, roles } = await request.json().catch(() => ({}));
+          if (!email || !roles || !Array.isArray(roles) || roles.length === 0) {
+            return new Response(
+              JSON.stringify({ error: "Member email and at least one role (Content, Royalties, Analytics, SplitShare, Admin) are required." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          let members = [];
+          if (env.AUDIORY_KV) {
+            members = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+          }
+
+          const newMember = {
+            id: `mem_${Date.now()}`,
+            email,
+            roles,
+            status: "Pending",
+            invitedAt: new Date().toISOString()
+          };
+
+          members.unshift(newMember);
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(members));
+          }
+
+          return new Response(JSON.stringify({ success: true, member: newMember }), {
+            status: 201,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // DELETE Member
+        if (url.pathname.startsWith("/api/members/") && request.method === "DELETE") {
+          const memberId = url.pathname.split("/").pop();
+          let members = [];
+          if (env.AUDIORY_KV) {
+            members = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+            members = members.filter(m => String(m.id) !== String(memberId));
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(members));
+          }
+          return new Response(JSON.stringify({ success: true, removedId: memberId }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
+      // =============================================================
+      // PILLAR 3: TAX DETAILS & COMPLIANCE (/api/tax-details)
+      // =============================================================
+      if (url.pathname === "/api/tax-details") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const kvKey = `TAX_USER_${userId}`;
+
+        // GET Tax Details
+        if (request.method === "GET") {
+          let taxData = {};
+          if (env.AUDIORY_KV) {
+            taxData = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "{}");
+          }
+          return new Response(JSON.stringify(taxData), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // POST Tax Details
+        if (request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          const { legalName, classification, country, tin, address } = body;
+
+          if (!legalName || !country || !tin) {
+            return new Response(
+              JSON.stringify({ error: "Legal name, country, and Tax Identification Number (TIN) are required." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          const taxRecord = {
+            legalName,
+            classification: classification || "individual",
+            country,
+            tin,
+            address: address || "",
+            status: "Submitted",
+            updatedAt: new Date().toISOString()
+          };
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(taxRecord));
+          }
+
+          return new Response(JSON.stringify({ success: true, taxRecord }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
+      // =============================================================
+      // PILLAR 4: PAYOUT & PAYMENT PREFERENCES ALIAS (/api/payout-preferences)
+      // =============================================================
+      if (url.pathname === "/api/payout-preferences" || url.pathname === "/api/payout-settings") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const kvKey = `PAYOUT_SETTINGS_USER_${userId}`;
+
+        if (request.method === "GET") {
+          let payoutData = { payoutType: "bank", details: {} };
+          if (env.AUDIORY_KV) {
+            const raw = await env.AUDIORY_KV.get(kvKey);
+            payoutData = raw ? JSON.parse(raw) : payoutData;
+          }
+          return new Response(JSON.stringify(payoutData), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (request.method === "POST" || request.method === "PUT") {
+          const body = await request.json().catch(() => ({}));
+          const payoutType = body.payoutType || body.method || "bank";
+          const details = body.details || {};
+
+          const payoutRecord = {
+            payoutType,
+            details,
+            updatedAt: new Date().toISOString()
+          };
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(payoutRecord));
+          }
+
+          return new Response(JSON.stringify({ success: true, payoutSettings: payoutRecord }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
+      // =============================================================
+      // PILLAR 5: DYNAMIC SUBSCRIPTION & BILLING HISTORY (/api/billing-history)
+      // =============================================================
+      if (url.pathname === "/api/billing-history" || url.pathname === "/api/subscription/upgrade") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const billingKvKey = `BILLING_USER_${userId}`;
+        const subscriptionKvKey = `SUBSCRIPTION_USER_${userId}`;
+
+        // Available Audiory Plans Catalog
+        const PLANS = {
+          starter: { name: "Starter Plan", price: "0.00", description: "Starter Plan (Free Tier)" },
+          pro: { name: "Pro Artist Plan", price: "19.99", description: "Pro Artist Plan (Annual Subscription)" },
+          label: { name: "Label Partner", price: "49.99", description: "Label Partner Plan (Annual Subscription)" }
+        };
+
+        // GET Billing History & Active Subscription
+        if (url.pathname === "/api/billing-history" && request.method === "GET") {
+          let history = [];
+          let currentSub = null;
+
+          if (env.AUDIORY_KV) {
+            const rawHistory = await env.AUDIORY_KV.get(billingKvKey);
+            const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
+
+            history = rawHistory ? JSON.parse(rawHistory) : [];
+            currentSub = rawSub ? JSON.parse(rawSub) : null;
+          }
+
+          // If no plan recorded, default to Free Starter Plan record
+          if (!currentSub) {
+            currentSub = {
+              planId: "starter",
+              planName: PLANS.starter.name,
+              amount: PLANS.starter.price,
+              status: "Active",
+              createdAt: new Date().toISOString()
+            };
+          }
+
+          return new Response(
+            JSON.stringify({
+              subscription: currentSub,
+              history: history
+            }),
+            {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" }
+            }
+          );
+        }
+
+        // POST Upgrade/Select Subscription Plan
+        if (url.pathname === "/api/subscription/upgrade" && request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          const { planId, paymentMethod } = body;
+
+          const selectedPlan = PLANS[planId];
+          if (!selectedPlan) {
+            return new Response(
+              JSON.stringify({ error: "Invalid plan selected. Choose 'starter', 'pro', or 'label'." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          const now = new Date();
+          const formattedDate = now.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric"
+          });
+
+          // Create active subscription object
+          const updatedSubscription = {
+            planId: planId,
+            planName: selectedPlan.name,
+            amount: selectedPlan.price,
+            paymentMethod: paymentMethod || "Card / Mobile",
+            status: "Active",
+            updatedAt: now.toISOString()
+          };
+
+          // Fetch existing history and prepend new invoice if it's a paid tier
+          let history = [];
+          if (env.AUDIORY_KV) {
+            const rawHistory = await env.AUDIORY_KV.get(billingKvKey);
+            history = rawHistory ? JSON.parse(rawHistory) : [];
+
+            if (selectedPlan.price !== "0.00") {
+              const newInvoice = {
+                invoiceId: `INV-${Math.floor(10000 + Math.random() * 90000)}`,
+                date: formattedDate,
+                description: selectedPlan.description,
+                amount: selectedPlan.price,
+                status: "Paid"
+              };
+              history.unshift(newInvoice);
+            }
+
+            // Store updated state to KV
+            await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(updatedSubscription));
+            await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(history));
+          }
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              subscription: updatedSubscription,
+              history: history
+            }),
+            {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" }
+            }
+          );
+        }
+      }
+
+      // =============================================================
+      // PAYMENT & DYNAMIC KV SUBSCRIPTION ENDPOINT (/api/subscription/upgrade)
+      // =============================================================
+      if (url.pathname === "/api/subscription/upgrade" && request.method === "POST") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const body = await request.json().catch(() => ({}));
+        const { planId, paymentMethod, phone } = body;
+
+        const PLANS = {
+          starter: { name: "Starter Plan", price: "0.00", description: "Starter Plan (Free Tier)" },
+          pro: { name: "Pro Artist Plan", price: "19.99", description: "Pro Artist Plan (Annual Subscription)" },
+          label: { name: "Label Partner", price: "49.99", description: "Label Partner Plan (Annual Subscription)" }
+        };
+
+        const selectedPlan = PLANS[planId] || PLANS.starter;
+        let transactionId = `TXN-${Date.now()}`;
+        let redirectUrl = null;
+
+        if (selectedPlan.price !== "0.00") {
+          // 1. M-PESA DARAJA STK PUSH
+          if (paymentMethod === "mpesa") {
+            const darajaAuthUrl = "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials";
+            
+            const authRes = await fetch(darajaAuthUrl, {
+              headers: {
+                Authorization: `Basic ${btoa(`${env.DARAJA_CONSUMER_KEY}:${env.DARAJA_CONSUMER_SECRET}`)}`
+              }
+            }).then(r => r.json()).catch(() => null);
+
+            if (authRes && authRes.access_token) {
+              const timestamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
+              const password = btoa(`${env.DARAJA_BUSINESS_SHORTCODE}${env.DARAJA_PASSKEY}${timestamp}`);
+
+              const stkRes = await fetch("https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest", {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${authRes.access_token}`,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  BusinessShortCode: env.DARAJA_BUSINESS_SHORTCODE,
+                  Password: password,
+                  Timestamp: timestamp,
+                  TransactionType: "CustomerPayBillOnline",
+                  Amount: Math.round(parseFloat(selectedPlan.price) * 130),
+                  PartyA: phone,
+                  PartyB: env.DARAJA_BUSINESS_SHORTCODE,
+                  PhoneNumber: phone,
+                  CallBackURL: "https://distro.audiory.site/api/webhooks/mpesa",
+                  AccountReference: "AudioryDistro",
+                  TransactionDesc: `Subscription for ${selectedPlan.name}`
+                })
+              }).then(r => r.json()).catch(() => null);
+
+              if (stkRes && stkRes.CheckoutRequestID) {
+                transactionId = stkRes.CheckoutRequestID;
+              }
+            }
+          }
+
+          // 2. PAYPAL CHECKOUT (v2 ORDERS API)
+          else if (paymentMethod === "paypal") {
+            const paypalBase = env.PAYPAL_MODE === "sandbox" 
+              ? "https://api-m.sandbox.paypal.com" 
+              : "https://api-m.paypal.com";
+
+            const authRes = await fetch(`${paypalBase}/v1/oauth2/token`, {
+              method: "POST",
+              headers: {
+                Authorization: `Basic ${btoa(`${env.PAYPAL_CLIENT_ID}:${env.PAYPAL_CLIENT_SECRET}`)}`,
+                "Content-Type": "application/x-www-form-urlencoded"
+              },
+              body: "grant_type=client_credentials"
+            }).then(r => r.json()).catch(() => null);
+
+            if (authRes && authRes.access_token) {
+              const orderRes = await fetch(`${paypalBase}/v2/checkout/orders`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${authRes.access_token}`,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  intent: "CAPTURE",
+                  purchase_units: [{
+                    reference_id: `SUB-${userId}-${Date.now()}`,
+                    description: selectedPlan.description,
+                    amount: {
+                      currency_code: "USD",
+                      value: selectedPlan.price
+                    }
+                  }],
+                  application_context: {
+                    return_url: "https://distro.audiory.site/dashboard/?payment=success",
+                    cancel_url: "https://distro.audiory.site/signup/?payment=cancelled",
+                    brand_name: "Audiory Distribution",
+                    user_action: "PAY_NOW"
+                  }
+                })
+              }).then(r => r.json()).catch(() => null);
+
+              if (orderRes && orderRes.id) {
+                transactionId = orderRes.id;
+                const approveLink = orderRes.links?.find(link => link.rel === "approve");
+                if (approveLink) {
+                  redirectUrl = approveLink.href;
+                }
+              }
+            }
+          }
+
+          // 3. PESAPAL (v3 API)
+          else if (paymentMethod === "pesapal") {
+            const pesapalBase = env.PESAPAL_MODE === "sandbox" 
+              ? "https://cyb3r.pesapal.com/pesapalv3" 
+              : "https://pay.pesapal.com/v3";
+
+            // Authenticate with PesaPal v3 API
+            const authRes = await fetch(`${pesapalBase}/api/Auth/RequestToken`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+              },
+              body: JSON.stringify({
+                consumer_key: env.PESAPAL_CONSUMER_KEY,
+                consumer_secret: env.PESAPAL_CONSUMER_SECRET
+              })
+            }).then(r => r.json()).catch(() => null);
+
+            if (authRes && authRes.token) {
+              // Register IPN URL if not already registered
+              let ipnId = env.PESAPAL_IPN_ID;
+              if (!ipnId) {
+                const ipnRes = await fetch(`${pesapalBase}/api/URLSetup/RegisterIPN`, {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${authRes.token}`,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                  },
+                  body: JSON.stringify({
+                    url: "https://distro.audiory.site/api/webhooks/pesapal",
+                    ipn_notification_type: "GET"
+                  })
+                }).then(r => r.json()).catch(() => null);
+
+                if (ipnRes && ipnRes.ipn_id) {
+                  ipnId = ipnRes.ipn_id;
+                }
+              }
+
+              // Submit Order Request
+              const orderRes = await fetch(`${pesapalBase}/api/Transactions/SubmitOrderRequest`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${authRes.token}`,
+                  "Content-Type": "application/json",
+                  "Accept": "application/json"
+                },
+                body: JSON.stringify({
+                  id: `PESA-${Date.now()}`,
+                  currency: "USD",
+                  amount: parseFloat(selectedPlan.price),
+                  description: selectedPlan.description,
+                  callback_url: "https://distro.audiory.site/dashboard/?payment=success",
+                  notification_id: ipnId,
+                  billing_address: {
+                    email_address: body.email || "billing@audiory.site",
+                    phone_number: phone || "",
+                    first_name: body.displayName || "Subscriber"
+                  }
+                })
+              }).then(r => r.json()).catch(() => null);
+
+              if (orderRes && orderRes.order_tracking_id) {
+                transactionId = orderRes.order_tracking_id;
+                redirectUrl = orderRes.redirect_url;
+              }
+            }
+          }
+        }
+
+        // 4. BUILD AND PERSIST RECORDS TO CLOUDFLARE KV
+        const subscriptionKvKey = `SUBSCRIPTION_USER_${userId}`;
+        const billingKvKey = `BILLING_USER_${userId}`;
+
+        const activeSubData = {
+          planId: planId,
+          planName: selectedPlan.name,
+          amount: selectedPlan.price,
+          paymentMethod: paymentMethod || "card",
+          transactionId: transactionId,
+          status: "Active",
+          updatedAt: new Date().toISOString()
+        };
+
+        if (env.AUDIORY_KV) {
+          await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(activeSubData));
+
+          if (selectedPlan.price !== "0.00") {
+            const rawHistory = await env.AUDIORY_KV.get(billingKvKey);
+            const history = rawHistory ? JSON.parse(rawHistory) : [];
+
+            history.unshift({
+              invoiceId: `INV-${Math.floor(10000 + Math.random() * 90000)}`,
+              date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+              description: selectedPlan.description,
+              amount: selectedPlan.price,
+              gateway: paymentMethod,
+              status: "Paid"
+            });
+
+            await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(history));
+          }
+        }
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          subscription: activeSubData,
+          redirectUrl: redirectUrl 
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+
+      // =============================================================
+      // PILLAR 6: LOGIN HISTORY & SESSION REVOCATION (/api/login-history)
+      // =============================================================
+      if (url.pathname === "/api/login-history" || url.pathname === "/api/login-history/revoke-all" || url.pathname.startsWith("/api/login-history/")) {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const kvKey = `SESSIONS_USER_${userId}`;
+        const clientIp = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "197.237.12.89";
+        const userAgent = request.headers.get("user-agent") || "Chrome on macOS";
+
+        // GET Sessions
+        if (url.pathname === "/api/login-history" && request.method === "GET") {
+          let sessions = [];
+          if (env.AUDIORY_KV) {
+            const raw = await env.AUDIORY_KV.get(kvKey);
+            sessions = raw ? JSON.parse(raw) : [];
+          }
+
+          if (sessions.length === 0) {
+            sessions = [
+              {
+                id: "sess_current",
+                device: userAgent.includes("Mobile") ? "Mobile Web Browser" : "Desktop Browser",
+                ip: clientIp,
+                location: request.cf ? `${request.cf.city}, ${request.cf.country}` : "Nairobi, Kenya",
+                lastActive: "Just now",
+                isCurrent: true
+              }
+            ];
+          }
+
+          return new Response(JSON.stringify(sessions), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // POST Terminate All Sessions Except Current
+        if (url.pathname === "/api/login-history/revoke-all" && request.method === "POST") {
+          let sessions = [];
+          if (env.AUDIORY_KV) {
+            const raw = await env.AUDIORY_KV.get(kvKey);
+            sessions = raw ? JSON.parse(raw) : [];
+            sessions = sessions.filter(s => s.isCurrent);
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(sessions));
+          }
+
+          return new Response(JSON.stringify({ success: true, message: "All non-current sessions revoked." }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // DELETE Specific Session
+        if (url.pathname.startsWith("/api/login-history/") && request.method === "DELETE") {
+          const sessionId = url.pathname.split("/").pop();
+          if (env.AUDIORY_KV) {
+            let sessions = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+            sessions = sessions.filter(s => String(s.id) !== String(sessionId));
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(sessions));
+          }
+
+          return new Response(JSON.stringify({ success: true, revokedId: sessionId }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
       // -------------------------------------------------------------
       // ROUTE 1: Release Creation & Editing Route (POST & PUT)
       // -------------------------------------------------------------
@@ -394,68 +1058,67 @@ export default {
       }
 
       // -------------------------------------------------------------
-// ROUTE 3.6: Too Lost Sales Routes
-// -------------------------------------------------------------
-if (url.pathname.startsWith("/api/toolost/sales/")) {
-  if (!userId) {
-    return new Response(
-      JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
+      // ROUTE 3.6: Too Lost Sales Routes
+      // -------------------------------------------------------------
+      if (url.pathname.startsWith("/api/toolost/sales/")) {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
 
-  const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
+        const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
 
-  let tooLostAccessToken;
-  try {
-    tooLostAccessToken = await getAccessToken(env);
-  } catch (authError) {
-    return new Response(
-      JSON.stringify({ error: "Too Lost Authentication Failed", details: authError.message }),
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
+        let tooLostAccessToken;
+        try {
+          tooLostAccessToken = await getAccessToken(env);
+        } catch (authError) {
+          return new Response(
+            JSON.stringify({ error: "Too Lost Authentication Failed", details: authError.message }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
 
-  // Determine endpoint
-  let salesEndpoint = null;
-  if (url.pathname === "/api/toolost/sales/overview") salesEndpoint = "/sales/overview";
-  else if (url.pathname === "/api/toolost/sales/channels") salesEndpoint = "/sales/channels";
-  else if (url.pathname === "/api/toolost/sales/tracks") salesEndpoint = "/sales/tracks";
-  else if (url.pathname === "/api/toolost/sales/releases") salesEndpoint = "/sales/releases";
+        let salesEndpoint = null;
+        if (url.pathname === "/api/toolost/sales/overview") salesEndpoint = "/sales/overview";
+        else if (url.pathname === "/api/toolost/sales/channels") salesEndpoint = "/sales/channels";
+        else if (url.pathname === "/api/toolost/sales/tracks") salesEndpoint = "/sales/tracks";
+        else if (url.pathname === "/api/toolost/sales/releases") salesEndpoint = "/sales/releases";
 
-  if (!salesEndpoint) {
-    return new Response(
-      JSON.stringify({ error: "Not Found", message: "Unknown Too Lost Sales endpoint." }),
-      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
+        if (!salesEndpoint) {
+          return new Response(
+            JSON.stringify({ error: "Not Found", message: "Unknown Too Lost Sales endpoint." }),
+            { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
 
-  try {
-    const tooLostUrl = new URL(`${baseUrl}${salesEndpoint}`);
-    url.searchParams.forEach((value, key) => tooLostUrl.searchParams.set(key, value));
+        try {
+          const tooLostUrl = new URL(`${baseUrl}${salesEndpoint}`);
+          url.searchParams.forEach((value, key) => tooLostUrl.searchParams.set(key, value));
 
-    const response = await fetch(tooLostUrl.toString(), {
-      method: "GET",
-      headers: {
-        "Accept": "application/json",
-        "Authorization": `Bearer ${tooLostAccessToken}`
+          const response = await fetch(tooLostUrl.toString(), {
+            method: "GET",
+            headers: {
+              "Accept": "application/json",
+              "Authorization": `Bearer ${tooLostAccessToken}`
+            }
+          });
+
+          const responseText = await response.text();
+
+          return new Response(responseText, {
+            status: response.status,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+
+        } catch (err) {
+          return new Response(
+            JSON.stringify({ error: "Too Lost Sales API Request Failed", details: err.message }),
+            { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
       }
-    });
-
-    const responseText = await response.text();
-
-    return new Response(responseText, {
-      status: response.status,
-      headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
-
-  } catch (err) {
-    return new Response(
-      JSON.stringify({ error: "Too Lost Sales API Request Failed", details: err.message }),
-      { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
-}
 
       // -------------------------------------------------------------
       // ROUTE 4: Get & Submit Withdrawals (/api/withdrawals)
@@ -470,7 +1133,6 @@ if (url.pathname.startsWith("/api/toolost/sales/")) {
 
         const kvKey = `WITHDRAWALS_USER_${userId}`;
 
-        // GET: Fetch withdrawal history for the logged-in user
         if (request.method === "GET") {
           let userWithdrawals = [];
           if (env.AUDIORY_KV) {
@@ -482,12 +1144,10 @@ if (url.pathname.startsWith("/api/toolost/sales/")) {
           });
         }
 
-        // POST: Request a new withdrawal
         if (request.method === "POST") {
           const body = await request.json().catch(() => ({}));
           const amount = parseFloat(body.amount);
 
-          // 1. Date window check (15th - 25th)
           const currentDay = new Date().getUTCDate();
           if (currentDay < 15 || currentDay > 25) {
             return new Response(
@@ -496,7 +1156,6 @@ if (url.pathname.startsWith("/api/toolost/sales/")) {
             );
           }
 
-          // 2. Minimum amount check
           if (isNaN(amount) || amount < 20) {
             return new Response(
               JSON.stringify({ error: "Minimum withdrawal amount is $20.00." }),
@@ -509,8 +1168,7 @@ if (url.pathname.startsWith("/api/toolost/sales/")) {
             existingRequests = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
           }
 
-          // 3. Cycle duplicate check (only 1 request per month)
-          const currentMonth = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+          const currentMonth = new Date().toISOString().slice(0, 7);
           const hasExisting = existingRequests.some(r => r.date && r.date.startsWith(currentMonth));
           if (hasExisting) {
             return new Response(
@@ -519,7 +1177,6 @@ if (url.pathname.startsWith("/api/toolost/sales/")) {
             );
           }
 
-          // Create new record
           const newRequest = {
             id: `wd_${Date.now()}`,
             amount: amount,
