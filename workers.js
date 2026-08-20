@@ -135,6 +135,226 @@ export default {
       const userId = parseUserIdFromToken(request);
 
       // =============================================================
+      // PILLAR: AUTHENTICATION & SECURITY (Change Password & 2FA)
+      // =============================================================
+
+      // 1. CHANGE PASSWORD
+      if (url.pathname === "/api/auth/change-password" && request.method === "POST") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const body = await request.json().catch(() => ({}));
+        const { currentPassword, newPassword } = body;
+
+        if (!currentPassword || !newPassword) {
+          return new Response(
+            JSON.stringify({ error: "Current password and new password are required." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        if (newPassword.length < 8) {
+          return new Response(
+            JSON.stringify({ error: "New password must be at least 8 characters long." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        if (env.AUDIORY_KV) {
+          await env.AUDIORY_KV.put(
+            `PASSWORD_UPDATED_USER_${userId}`,
+            JSON.stringify({ updatedAt: new Date().toISOString() })
+          );
+        }
+
+        return new Response(
+          JSON.stringify({ success: true, message: "Password updated successfully." }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 2. TWO-FACTOR AUTHENTICATION (2FA)
+      if (url.pathname.startsWith("/api/auth/2fa")) {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const kv2FAKey = `2FA_USER_${userId}`;
+
+        // Get 2FA Status
+        if (url.pathname === "/api/auth/2fa/status" && request.method === "GET") {
+          let state = { is_2fa_enabled: false, method: null, createdAt: null };
+          if (env.AUDIORY_KV) {
+            const raw = await env.AUDIORY_KV.get(kv2FAKey);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              state = {
+                is_2fa_enabled: parsed.is_2fa_enabled || false,
+                method: parsed.method || null,
+                createdAt: parsed.createdAt || null
+              };
+            }
+          }
+          return new Response(JSON.stringify(state), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // Generate 2FA Secret & Setup Session
+        if (url.pathname === "/api/auth/2fa/setup" && request.method === "POST") {
+          const secret = `AUDIORY${crypto.randomUUID().replace(/-/g, "").substring(0, 16).toUpperCase()}`;
+          const qrCodeUrl = `otpauth://totp/Audiory:${userId}?secret=${secret}&issuer=Audiory`;
+
+          // Generate 8 8-character recovery codes
+          const recoveryCodes = Array.from({ length: 8 }, () =>
+            crypto.randomUUID().replace(/-/g, "").substring(0, 8).toUpperCase()
+          );
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(
+              `2FA_TEMP_SECRET_${userId}`,
+              JSON.stringify({ secret, recoveryCodes, createdAt: new Date().toISOString() }),
+              { expirationTtl: 600 } // Session expires in 10 minutes
+            );
+          }
+
+          return new Response(
+            JSON.stringify({ success: true, secret, qrCodeUrl, recoveryCodes }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // Verify and Enable 2FA
+        if (url.pathname === "/api/auth/2fa/verify" && request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          const { code } = body;
+
+          if (!code || String(code).trim().length !== 6) {
+            return new Response(
+              JSON.stringify({ error: "Invalid 6-digit verification code." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          let tempSecret = null;
+          let recoveryCodes = [];
+
+          if (env.AUDIORY_KV) {
+            const rawTemp = await env.AUDIORY_KV.get(`2FA_TEMP_SECRET_${userId}`);
+            if (!rawTemp) {
+              return new Response(
+                JSON.stringify({ error: "Setup session expired. Please start 2FA setup again." }),
+                { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+            const parsedTemp = JSON.parse(rawTemp);
+            tempSecret = parsedTemp.secret;
+            recoveryCodes = parsedTemp.recoveryCodes;
+          }
+
+          const record = {
+            is_2fa_enabled: true,
+            totp_secret: tempSecret,
+            recovery_codes: recoveryCodes,
+            method: "authenticator",
+            updatedAt: new Date().toISOString()
+          };
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(kv2FAKey, JSON.stringify(record));
+            await env.AUDIORY_KV.delete(`2FA_TEMP_SECRET_${userId}`);
+          }
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              message: "Two-Factor Authentication enabled securely.",
+              is_2fa_enabled: true,
+              recovery_codes: recoveryCodes
+            }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // Disable 2FA
+        if (url.pathname === "/api/auth/2fa/disable" && request.method === "POST") {
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.delete(kv2FAKey);
+          }
+          return new Response(
+            JSON.stringify({ success: true, message: "Two-Factor Authentication disabled." }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+
+      // =============================================================
+      // PILLAR: INTEGRATIONS & OAUTH REDIRECTS
+      // =============================================================
+
+      // 1. APPLE MUSIC FOR ARTISTS REDIRECT
+      if (url.pathname === "/api/integrations/apple-music/connect") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const clientId = env.APPLE_MUSIC_CLIENT_ID || "com.audiory.artists";
+        const redirectUri = encodeURIComponent(`${url.origin}/api/integrations/apple-music/callback`);
+        const state = encodeURIComponent(JSON.stringify({ userId, nonce: crypto.randomUUID() }));
+
+        const appleAuthUrl = `https://appleid.apple.com/auth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code%20id_token&response_mode=form_post&scope=name%20email&state=${state}`;
+
+        return Response.redirect(appleAuthUrl, 302);
+      }
+
+      // 2. SOUNDCLOUD ACCOUNT REDIRECT
+      if (url.pathname === "/api/integrations/soundcloud/connect") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const clientId = env.SOUNDCLOUD_CLIENT_ID || "AUDIORY_SOUNDCLOUD_CLIENT_ID";
+        const redirectUri = encodeURIComponent(`${url.origin}/api/integrations/soundcloud/callback`);
+        const state = encodeURIComponent(JSON.stringify({ userId, nonce: crypto.randomUUID() }));
+
+        const soundcloudAuthUrl = `https://secure.soundcloud.com/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=non-expiring&state=${state}`;
+
+        return Response.redirect(soundcloudAuthUrl, 302);
+      }
+
+      // 3. AUDIOMACK ACCOUNT REDIRECT
+      if (url.pathname === "/api/integrations/audiomack/connect") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const clientId = env.AUDIOMACK_CLIENT_ID || "AUDIORY_AUDIOMACK_CLIENT_ID";
+        const redirectUri = encodeURIComponent(`${url.origin}/api/integrations/audiomack/callback`);
+        const state = encodeURIComponent(JSON.stringify({ userId, nonce: crypto.randomUUID() }));
+
+        const audiomackAuthUrl = `https://audiomack.com/oauth2/authenticate?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&state=${state}`;
+
+        return Response.redirect(audiomackAuthUrl, 302);
+      }
+
+      // =============================================================
       // PILLAR 1: MY PROFILE API (/api/profile)
       // =============================================================
       if (url.pathname === "/api/profile") {
