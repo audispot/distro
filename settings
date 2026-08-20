@@ -1,5 +1,5 @@
 // =============================================================
-// UI NOTIFICATION SYSTEM
+// UI NOTIFICATION SYSTEM (No Native Alerts or Popups)
 // =============================================================
 
 function showToast(message, isError = false) {
@@ -123,18 +123,18 @@ function openSettingsModal(type) {
       `;
       break;
 
-    case 'Spotify for Artists':
-      title.innerText = 'Spotify for Artists';
-      desc.innerText = 'Claim & instant-verify your Spotify Artist Profile';
+    case 'Apple Music for Artists':
+      title.innerText = 'Apple Music for Artists';
+      desc.innerText = 'Claim & instant-verify your Apple Music Artist Profile';
       body.innerHTML = `
         <div class="space-y-4">
-          <p class="text-xs text-gray-300">Enter your official Spotify Artist URL or URI to claim fast-track verification access.</p>
+          <p class="text-xs text-gray-300">Enter your official Apple Music Artist URL to claim fast-track verification access.</p>
           <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Spotify Artist Profile Link</label>
-            <input type="url" id="spotifyArtistUrl" placeholder="https://open.spotify.com/artist/..." class="w-full bg-[#1E293B] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+            <label class="block text-xs font-medium text-gray-400 mb-1">Apple Music Artist Profile Link</label>
+            <input type="url" id="appleArtistUrl" placeholder="https://music.apple.com/artist/..." class="w-full bg-[#1E293B] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-500">
           </div>
-          <button onclick="submitSpotifyClaim()" class="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm rounded-lg transition flex items-center justify-center gap-2">
-            <i class="fa-brands fa-spotify"></i> Request Artist Verification
+          <button onclick="submitAppleClaim()" class="w-full py-2.5 bg-red-500 hover:bg-red-400 text-white font-semibold text-sm rounded-lg transition flex items-center justify-center gap-2">
+            <i class="fa-brands fa-apple"></i> Request Artist Verification
           </button>
         </div>
       `;
@@ -156,42 +156,17 @@ function openSettingsModal(type) {
       `;
       break;
 
-    case 'Connect EVEN':
-      title.innerText = 'Connect EVEN Account';
-      desc.innerText = 'Direct-to-fan sales and early release access integration';
+    case 'Connect SoundCloud':
+      title.innerText = 'Connect SoundCloud Account';
+      desc.innerText = 'Direct upload and profile synchronization';
       body.innerHTML = `
         <div class="space-y-4 text-center py-2">
-          <div class="w-12 h-12 bg-cyan-500/10 rounded-full flex items-center justify-center mx-auto text-cyan-400 text-xl border border-cyan-500/20">
-            <i class="fa-solid fa-bolt"></i>
+          <div class="w-12 h-12 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto text-orange-400 text-xl border border-orange-500/20">
+            <i class="fa-brands fa-soundcloud"></i>
           </div>
-          <p class="text-xs text-gray-300">Connect EVEN to offer pre-save access and direct fan monetization before public DSP drops.</p>
-          <button onclick="startOAuthFlow('EVEN')" class="w-full py-2.5 bg-cyan-500 hover:bg-cyan-400 text-black font-semibold text-sm rounded-lg transition">
-            Connect EVEN Account
-          </button>
-        </div>
-      `;
-      break;
-
-    case 'Spotify Discovery Mode':
-      title.innerText = 'Spotify Discovery Mode Preferences';
-      desc.innerText = 'Manage algorithmic radio and autoplay promotion rules';
-      body.innerHTML = `
-        <div class="space-y-4">
-          <p class="text-xs text-gray-300">Opt-in your qualifying tracks for Spotify Radio and Autoplay promotion campaigns.</p>
-          
-          <div class="flex items-center justify-between p-3 bg-[#1E293B] rounded-xl border border-gray-800">
-            <div>
-              <p class="text-xs font-medium text-white">Auto Opt-in Eligible Catalog</p>
-              <p class="text-[10px] text-gray-400">Automatically submit new qualifying releases</p>
-            </div>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" id="discoveryAutoOptIn" class="sr-only peer" checked>
-              <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-            </label>
-          </div>
-
-          <button onclick="saveDiscoveryPreferences()" class="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm rounded-lg transition">
-            Save Preferences
+          <p class="text-xs text-gray-300">Connect SoundCloud to publish tracks automatically and sync stream metrics.</p>
+          <button onclick="startOAuthFlow('SoundCloud')" class="w-full py-2.5 bg-orange-500 hover:bg-orange-400 text-white font-semibold text-sm rounded-lg transition">
+            Connect SoundCloud Account
           </button>
         </div>
       `;
@@ -255,25 +230,19 @@ function verify2FASetup() {
   }
 }
 
-function submitSpotifyClaim() {
+function submitAppleClaim() {
   clearModalAlert();
-  const url = document.getElementById('spotifyArtistUrl').value;
-  if (!url || !url.includes('spotify.com')) {
-    showModalAlert('Please enter a valid Spotify artist profile URL.', true);
+  const url = document.getElementById('appleArtistUrl').value;
+  if (!url || !url.includes('music.apple.com')) {
+    showModalAlert('Please enter a valid Apple Music artist profile URL.', true);
     return;
   }
-  showToast('Verification request submitted! Updates will be emailed to you.');
+  showToast('Apple Music verification request submitted!');
   closeSettingsModal();
 }
 
 function startOAuthFlow(platform) {
   showToast(`Redirecting to ${platform} authorization portal...`);
-  closeSettingsModal();
-}
-
-function saveDiscoveryPreferences() {
-  const isChecked = document.getElementById('discoveryAutoOptIn').checked;
-  showToast(`Spotify Discovery preferences saved (${isChecked ? 'Opt-in Enabled' : 'Opt-in Disabled'})`);
   closeSettingsModal();
 }
 
@@ -373,12 +342,12 @@ function renderSettingsView() {
                         <i class="fa-solid fa-chevron-right text-xs text-gray-500 group-hover:translate-x-1 transition"></i>
                     </div>
 
-                    <div onclick="openSettingsModal('Spotify for Artists')" class="group bg-brand-card rounded-2xl p-5 border border-brand-border shadow-sm hover:border-emerald-500/40 hover:bg-white/[0.02] transition cursor-pointer flex items-center justify-between">
+                    <div onclick="openSettingsModal('Apple Music for Artists')" class="group bg-brand-card rounded-2xl p-5 border border-brand-border shadow-sm hover:border-red-500/40 hover:bg-white/[0.02] transition cursor-pointer flex items-center justify-between">
                         <div class="flex items-center gap-4">
-                            <i class="fa-brands fa-spotify text-gray-400 group-hover:text-emerald-400 transition"></i>
+                            <i class="fa-brands fa-apple text-gray-400 group-hover:text-red-400 transition"></i>
                             <div>
-                                <span class="text-sm font-medium text-white block">Instant Access to Spotify for Artists</span>
-                                <span class="text-[11px] text-gray-400">Claim and verify your Spotify artist profile</span>
+                                <span class="text-sm font-medium text-white block">Apple Music for Artists</span>
+                                <span class="text-[11px] text-gray-400">Claim and verify your Apple Music artist profile</span>
                             </div>
                         </div>
                         <i class="fa-solid fa-chevron-right text-xs text-gray-500 group-hover:translate-x-1 transition"></i>
@@ -395,23 +364,12 @@ function renderSettingsView() {
                         <i class="fa-solid fa-chevron-right text-xs text-gray-500 group-hover:translate-x-1 transition"></i>
                     </div>
 
-                    <div onclick="openSettingsModal('Connect EVEN')" class="group bg-brand-card rounded-2xl p-5 border border-brand-border shadow-sm hover:border-cyan-500/40 hover:bg-white/[0.02] transition cursor-pointer flex items-center justify-between">
+                    <div onclick="openSettingsModal('Connect SoundCloud')" class="group bg-brand-card rounded-2xl p-5 border border-brand-border shadow-sm hover:border-orange-500/40 hover:bg-white/[0.02] transition cursor-pointer flex items-center justify-between">
                         <div class="flex items-center gap-4">
-                            <i class="fa-solid fa-bolt text-gray-400 group-hover:text-cyan-400 transition"></i>
+                            <i class="fa-brands fa-soundcloud text-gray-400 group-hover:text-orange-400 transition"></i>
                             <div>
-                                <span class="text-sm font-medium text-white block">Connect EVEN Account</span>
-                                <span class="text-[11px] text-gray-400">Direct-to-fan sales and early music access integration</span>
-                            </div>
-                        </div>
-                        <i class="fa-solid fa-chevron-right text-xs text-gray-500 group-hover:translate-x-1 transition"></i>
-                    </div>
-
-                    <div onclick="openSettingsModal('Spotify Discovery Mode')" class="group bg-brand-card rounded-2xl p-5 border border-brand-border shadow-sm hover:border-emerald-500/40 hover:bg-white/[0.02] transition cursor-pointer flex items-center justify-between">
-                        <div class="flex items-center gap-4">
-                            <i class="fa-brands fa-spotify text-gray-400 group-hover:text-emerald-400 transition"></i>
-                            <div>
-                                <span class="text-sm font-medium text-white block">Spotify Discovery Mode Preferences</span>
-                                <span class="text-[11px] text-gray-400">Manage algorithmic radio and autoplay promotion rules</span>
+                                <span class="text-sm font-medium text-white block">Connect SoundCloud Account</span>
+                                <span class="text-[11px] text-gray-400">Direct track uploads and metadata sync integration</span>
                             </div>
                         </div>
                         <i class="fa-solid fa-chevron-right text-xs text-gray-500 group-hover:translate-x-1 transition"></i>
@@ -637,7 +595,7 @@ function renderSettingsView() {
                         <form id="taxDetailsForm" onsubmit="handleSaveTaxDetails(event)" class="space-y-4 max-w-2xl pt-2">
                             <input type="hidden" id="tax-form-type" value="w9" />
 
-                            <!-- Header status banner -->
+                            <!-- Header status badge -->
                             <div id="tax-form-header-badge" class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-center justify-between">
                                 <span class="font-semibold"><i class="fa-solid fa-file-signature mr-1.5"></i> Completing: IRS Form W-9 (U.S. Taxpayer Certification)</span>
                                 <span class="text-[10px] font-mono bg-amber-500/20 px-2 py-0.5 rounded text-amber-200">24% Backup Withholding Default</span>
@@ -857,7 +815,7 @@ function renderSettingsView() {
             </div>
         </div>
 
-        <!-- Custom Confirmation Modal -->
+        <!-- Custom Confirmation Modal (Replaces browser popups) -->
         <div id="customConfirmModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
             <div class="bg-brand-card w-full max-w-sm rounded-2xl p-6 space-y-4 shadow-2xl border border-brand-border">
                 <h3 id="confirmModalTitle" class="text-base font-bold text-white">Revoke Access</h3>
@@ -1465,7 +1423,6 @@ window.openSettingsModal = openSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
 window.handlePasswordChange = handlePasswordChange;
 window.verify2FASetup = verify2FASetup;
-window.submitSpotifyClaim = submitSpotifyClaim;
+window.submitAppleClaim = submitAppleClaim;
 window.startOAuthFlow = startOAuthFlow;
-window.saveDiscoveryPreferences = saveDiscoveryPreferences;
 window.showToast = showToast;
