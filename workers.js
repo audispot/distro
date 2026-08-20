@@ -11,7 +11,14 @@ function parseUserIdFromToken(request) {
   try {
     const payloadBase64 = token.split(".")[1];
     if (!payloadBase64) return null;
-    const decodedJson = atob(payloadBase64.replace(/-/g, "+").replace(/_/g, "/"));
+    
+    // Normalize base64 URL encoding and padding
+    let base64 = payloadBase64.replace(/-/g, "+").replace(/_/g, "/");
+    while (base64.length % 4) {
+      base64 += "=";
+    }
+
+    const decodedJson = atob(base64);
     const payload = JSON.parse(decodedJson);
     return payload.user_id || payload.uid || payload.sub || null;
   } catch (e) {
@@ -140,7 +147,6 @@ export default {
 
         const kvKey = `PROFILE_USER_${userId}`;
 
-        // GET Profile
         if (request.method === "GET") {
           let profile = {};
           if (env.AUDIORY_KV) {
@@ -152,7 +158,6 @@ export default {
           });
         }
 
-        // POST/PUT Update Profile Name
         if (request.method === "POST" || request.method === "PUT") {
           const body = await request.json().catch(() => ({}));
           const { displayName } = body;
@@ -193,7 +198,6 @@ export default {
 
         const kvKey = `MEMBERS_USER_${userId}`;
 
-        // GET Members
         if (url.pathname === "/api/members" && request.method === "GET") {
           let members = [];
           if (env.AUDIORY_KV) {
@@ -205,12 +209,11 @@ export default {
           });
         }
 
-        // POST Invite Member
         if (url.pathname === "/api/members/invite" && request.method === "POST") {
           const { email, roles } = await request.json().catch(() => ({}));
           if (!email || !roles || !Array.isArray(roles) || roles.length === 0) {
             return new Response(
-              JSON.stringify({ error: "Member email and at least one role (Content, Royalties, Analytics, SplitShare, Admin) are required." }),
+              JSON.stringify({ error: "Member email and at least one role are required." }),
               { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
           }
@@ -240,7 +243,6 @@ export default {
           });
         }
 
-        // DELETE Member
         if (url.pathname.startsWith("/api/members/") && request.method === "DELETE") {
           const memberId = url.pathname.split("/").pop();
           let members = [];
@@ -269,7 +271,6 @@ export default {
 
         const kvKey = `TAX_USER_${userId}`;
 
-        // GET Tax Details
         if (request.method === "GET") {
           let taxData = {};
           if (env.AUDIORY_KV) {
@@ -281,7 +282,6 @@ export default {
           });
         }
 
-        // POST Tax Details
         if (request.method === "POST") {
           const body = await request.json().catch(() => ({}));
           const { legalName, classification, country, tin, address } = body;
@@ -365,14 +365,12 @@ export default {
       // PILLAR 5: DYNAMIC SUBSCRIPTION & BILLING HISTORY
       // =============================================================
       
-      // Available Audiory Plans Catalog
       const PLANS = {
         starter: { name: "Starter Plan", price: "0.00", description: "Starter Plan (Free Tier)" },
         pro: { name: "Pro Artist Plan", price: "19.99", description: "Pro Artist Plan (Annual Subscription)" },
         label: { name: "Label Partner", price: "49.99", description: "Label Partner Plan (Annual Subscription)" }
       };
 
-      // 1. GET Billing History & Active Subscription
       if (url.pathname === "/api/billing-history" && request.method === "GET") {
         if (!userId) {
           return new Response(
@@ -395,7 +393,6 @@ export default {
           currentSub = rawSub ? JSON.parse(rawSub) : null;
         }
 
-        // Default to Starter Plan if no record exists
         if (!currentSub) {
           currentSub = {
             planId: "starter",
@@ -412,7 +409,6 @@ export default {
         );
       }
 
-      // 2. GET Subscription Status Endpoint (For polling)
       if (url.pathname === "/api/subscription/status" && request.method === "GET") {
         if (!userId) {
           return new Response(
@@ -435,7 +431,6 @@ export default {
         );
       }
 
-      // 3. POST Payment & Subscription Upgrade
       if (url.pathname === "/api/subscription/upgrade" && request.method === "POST") {
         if (!userId) {
           return new Response(
@@ -452,7 +447,7 @@ export default {
         let redirectUrl = null;
         let requiresManualAction = false;
 
-        if (selectedPlan.price !== "0.00") {
+        if (parseFloat(selectedPlan.price) > 0) {
           // A. M-PESA DARAJA STK PUSH
           if (paymentMethod === "mpesa") {
             if (!phone) {
@@ -569,92 +564,86 @@ export default {
           }
 
           // C. PESAPAL GATEWAY
-else if (paymentMethod === "pesapal") {
-    // Dynamic URL switching for Sandbox vs Production
-    const pesapalBase = env.PESAPAL_MODE === "sandbox" 
-      ? "https://cyb3r.pesapal.com/pesapalv3" 
-      : "https://pay.pesapal.com/v3";
+          else if (paymentMethod === "pesapal") {
+            const pesapalBase = env.PESAPAL_MODE === "sandbox" 
+              ? "https://cyb3r.pesapal.com/pesapalv3" 
+              : "https://pay.pesapal.com/v3";
 
-    // Step 1: Request Access Token
-    const authRes = await fetch(`${pesapalBase}/api/Auth/RequestToken`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({
-        consumer_key: env.PESAPAL_CONSUMER_KEY,
-        consumer_secret: env.PESAPAL_CONSUMER_SECRET
-      })
-    }).then(r => r.json()).catch(() => null);
+            const authRes = await fetch(`${pesapalBase}/api/Auth/RequestToken`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Accept": "application/json" },
+              body: JSON.stringify({
+                consumer_key: env.PESAPAL_CONSUMER_KEY,
+                consumer_secret: env.PESAPAL_CONSUMER_SECRET
+              })
+            }).then(r => r.json()).catch(() => null);
 
-    if (!authRes || !authRes.token) {
-      return new Response(
-        JSON.stringify({ error: "PesaPal authorization failed. Verify Consumer Key and Secret." }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+            if (!authRes || !authRes.token) {
+              return new Response(
+                JSON.stringify({ error: "PesaPal authorization failed. Verify Consumer Key and Secret." }),
+                { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
 
-    // Step 2: Register IPN URL if not configured in Worker secrets
-    let ipnId = env.PESAPAL_IPN_ID;
-    if (!ipnId) {
-      const ipnRes = await fetch(`${pesapalBase}/api/URLSetup/RegisterIPN`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${authRes.token}`,
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify({
-          url: "https://distro.audiory.site/api/webhooks/pesapal",
-          ipn_notification_type: "GET"
-        })
-      }).then(r => r.json()).catch(() => null);
+            let ipnId = env.PESAPAL_IPN_ID;
+            if (!ipnId) {
+              const ipnRes = await fetch(`${pesapalBase}/api/URLSetup/RegisterIPN`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${authRes.token}`,
+                  "Content-Type": "application/json",
+                  "Accept": "application/json"
+                },
+                body: JSON.stringify({
+                  url: "https://distro.audiory.site/api/webhooks/pesapal",
+                  ipn_notification_type: "GET"
+                })
+              }).then(r => r.json()).catch(() => null);
 
-      if (ipnRes && ipnRes.ipn_id) ipnId = ipnRes.ipn_id;
-    }
+              if (ipnRes && ipnRes.ipn_id) ipnId = ipnRes.ipn_id;
+            }
 
-    // Step 3: Format Name Fields (Required by PesaPal v3 schema)
-    const names = (displayName || "Subscriber").trim().split(" ");
-    const firstName = names[0] || "Subscriber";
-    const lastName = names.slice(1).join(" ") || "Artist";
+            const names = (displayName || "Subscriber").trim().split(" ");
+            const firstName = names[0] || "Subscriber";
+            const lastName = names.slice(1).join(" ") || "Artist";
 
-    // Step 4: Submit Order Request
-    const orderRes = await fetch(`${pesapalBase}/api/Transactions/SubmitOrderRequest`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${authRes.token}`,
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify({
-        id: `PESA-${Date.now()}`,
-        currency: "USD",
-        amount: Number(parseFloat(selectedPlan.price).toFixed(2)),
-        description: selectedPlan.description || "Subscription Upgrade",
-        callback_url: "https://distro.audiory.site/dashboard/?payment=success",
-        notification_id: ipnId,
-        billing_address: {
-          email_address: email || "billing@audiory.site",
-          phone_number: phone || "",
-          first_name: firstName,
-          last_name: lastName
+            const orderRes = await fetch(`${pesapalBase}/api/Transactions/SubmitOrderRequest`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${authRes.token}`,
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+              },
+              body: JSON.stringify({
+                id: `PESA-${Date.now()}`,
+                currency: "USD",
+                amount: Number(parseFloat(selectedPlan.price).toFixed(2)),
+                description: selectedPlan.description || "Subscription Upgrade",
+                callback_url: "https://distro.audiory.site/dashboard/?payment=success",
+                notification_id: ipnId,
+                billing_address: {
+                  email_address: email || "billing@audiory.site",
+                  phone_number: phone || "",
+                  first_name: firstName,
+                  last_name: lastName
+                }
+              })
+            }).then(r => r.json()).catch(() => null);
+
+            if (!orderRes || !orderRes.redirect_url) {
+              return new Response(
+                JSON.stringify({ 
+                  error: orderRes?.error?.message || "Failed to generate PesaPal payment portal. Verify IPN ID and credentials." 
+                }),
+                { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
+            transactionId = orderRes.order_tracking_id;
+            redirectUrl = orderRes.redirect_url;
+          }
         }
-      })
-    }).then(r => r.json()).catch(() => null);
 
-    if (!orderRes || !orderRes.redirect_url) {
-      return new Response(
-        JSON.stringify({ 
-          error: orderRes?.error?.message || "Failed to generate PesaPal payment portal. Verify IPN ID and credentials." 
-        }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    transactionId = orderRes.order_tracking_id;
-    redirectUrl = orderRes.redirect_url;
-}
-
-
-        // SAVE PENDING STATE TO CLOUDFLARE KV UNTIL WEBHOOK CONFIRMS
         const subscriptionKvKey = `SUBSCRIPTION_USER_${userId}`;
         const billingKvKey = `BILLING_USER_${userId}`;
 
@@ -664,20 +653,18 @@ else if (paymentMethod === "pesapal") {
           amount: selectedPlan.price,
           paymentMethod: paymentMethod || "card",
           transactionId: transactionId,
-          // Free plan gets immediate activation; paid plans remain Pending until Webhook confirmation
-          status: selectedPlan.price === "0.00" ? "Active" : "Pending",
+          status: parseFloat(selectedPlan.price) === 0 ? "Active" : "Pending",
           updatedAt: new Date().toISOString()
         };
 
         if (env.AUDIORY_KV) {
           await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(activeSubData));
 
-          // Save transaction lookup mapping so Webhook can find the userId from CheckoutRequestID
           if (paymentMethod === "mpesa" && transactionId) {
             await env.AUDIORY_KV.put(`MPESA_TX_${transactionId}`, userId);
           }
 
-          if (selectedPlan.price !== "0.00") {
+          if (parseFloat(selectedPlan.price) > 0) {
             const rawHistory = await env.AUDIORY_KV.get(billingKvKey);
             const history = rawHistory ? JSON.parse(rawHistory) : [];
 
@@ -706,65 +693,65 @@ else if (paymentMethod === "pesapal") {
       }
 
       // M-PESA WEBHOOK CALLBACK HANDLER
-if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
-  let body = {};
-  try {
-    body = await request.json();
-  } catch (err) {
-    body = {};
-  }
-
-  const stkCallback = body?.Body?.stkCallback;
-
-  if (stkCallback && env.AUDIORY_KV) {
-    const checkoutReqId = stkCallback.CheckoutRequestID;
-    const resultCode = stkCallback.ResultCode; // 0 = Success
-
-    const targetUserId = await env.AUDIORY_KV.get(`MPESA_TX_${checkoutReqId}`);
-
-    if (targetUserId) {
-      const subscriptionKvKey = `SUBSCRIPTION_USER_${targetUserId}`;
-      const billingKvKey = `BILLING_USER_${targetUserId}`;
-
-      const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
-      const rawBilling = await env.AUDIORY_KV.get(billingKvKey);
-
-      let currentSub = rawSub ? JSON.parse(rawSub) : null;
-      let billingHistory = rawBilling ? JSON.parse(rawBilling) : [];
-
-      if (resultCode === 0) {
-        if (currentSub) {
-          currentSub.status = "Active";
-          currentSub.updatedAt = new Date().toISOString();
-          await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+      if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
+        let body = {};
+        try {
+          body = await request.json();
+        } catch (err) {
+          body = {};
         }
 
-        if (billingHistory.length > 0) {
-          billingHistory[0].status = "Paid";
-          await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(billingHistory));
-        }
-      } else {
-        if (currentSub) {
-          currentSub.status = "Failed";
-          currentSub.updatedAt = new Date().toISOString();
-          await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+        const stkCallback = body?.Body?.stkCallback;
+
+        if (stkCallback && env.AUDIORY_KV) {
+          const checkoutReqId = stkCallback.CheckoutRequestID;
+          const resultCode = stkCallback.ResultCode;
+
+          const targetUserId = await env.AUDIORY_KV.get(`MPESA_TX_${checkoutReqId}`);
+
+          if (targetUserId) {
+            const subscriptionKvKey = `SUBSCRIPTION_USER_${targetUserId}`;
+            const billingKvKey = `BILLING_USER_${targetUserId}`;
+
+            const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
+            const rawBilling = await env.AUDIORY_KV.get(billingKvKey);
+
+            let currentSub = rawSub ? JSON.parse(rawSub) : null;
+            let billingHistory = rawBilling ? JSON.parse(rawBilling) : [];
+
+            if (resultCode === 0) {
+              if (currentSub) {
+                currentSub.status = "Active";
+                currentSub.updatedAt = new Date().toISOString();
+                await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+              }
+
+              if (billingHistory.length > 0) {
+                billingHistory[0].status = "Paid";
+                await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(billingHistory));
+              }
+            } else {
+              if (currentSub) {
+                currentSub.status = "Failed";
+                currentSub.updatedAt = new Date().toISOString();
+                await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+              }
+
+              if (billingHistory.length > 0) {
+                billingHistory[0].status = "Failed";
+                await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(billingHistory));
+              }
+            }
+
+            await env.AUDIORY_KV.delete(`MPESA_TX_${checkoutReqId}`);
+          }
         }
 
-        if (billingHistory.length > 0) {
-          billingHistory[0].status = "Failed";
-          await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(billingHistory));
-        }
+        return new Response(JSON.stringify({ ResultCode: 0, ResultDesc: "Accepted" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
       }
-
-      await env.AUDIORY_KV.delete(`MPESA_TX_${checkoutReqId}`);
-    }
-  }
-
-  return new Response(JSON.stringify({ ResultCode: 0, ResultDesc: "Accepted" }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" }
-  });
-}
 
       // =============================================================
       // PILLAR 6: LOGIN HISTORY & SESSION REVOCATION (/api/login-history)
@@ -781,7 +768,6 @@ if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
         const clientIp = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "197.237.12.89";
         const userAgent = request.headers.get("user-agent") || "Chrome on macOS";
 
-        // GET Sessions
         if (url.pathname === "/api/login-history" && request.method === "GET") {
           let sessions = [];
           if (env.AUDIORY_KV) {
@@ -808,7 +794,6 @@ if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
           });
         }
 
-        // POST Terminate All Sessions Except Current
         if (url.pathname === "/api/login-history/revoke-all" && request.method === "POST") {
           let sessions = [];
           if (env.AUDIORY_KV) {
@@ -824,7 +809,6 @@ if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
           });
         }
 
-        // DELETE Specific Session
         if (url.pathname.startsWith("/api/login-history/") && request.method === "DELETE") {
           const sessionId = url.pathname.split("/").pop();
           if (env.AUDIORY_KV) {
@@ -841,7 +825,7 @@ if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
       }
 
       // -------------------------------------------------------------
-      // ROUTE 1: Release Creation & Editing Route (POST & PUT)
+      // ROUTE 1: Release Creation & Editing Route
       // -------------------------------------------------------------
       const isReleaseSubmitPath = url.pathname === "/api/releases" || 
                                   url.pathname === "/api/releases/submit" || 
@@ -940,7 +924,7 @@ if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
       }
 
       // -------------------------------------------------------------
-      // ROUTE 2: Release Deletion Route (DELETE /api/releases/:id)
+      // ROUTE 2: Release Deletion Route
       // -------------------------------------------------------------
       const deleteMatch = url.pathname.match(/^\/api\/releases\/(.+)$/);
       if (deleteMatch && request.method === "DELETE") {
@@ -981,7 +965,7 @@ if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
       }
 
       // -------------------------------------------------------------
-      // ROUTE 3: Catalogue Fetching Route (Strict User Isolation)
+      // ROUTE 3: Catalogue Fetching Route
       // -------------------------------------------------------------
       if (url.pathname === "/api/releases" && request.method === "GET") {
         if (!userId) {
@@ -1049,7 +1033,7 @@ if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
       }
 
       // -------------------------------------------------------------
-      // ROUTE 3.5: Analytics Routes (Overview & Tracks)
+      // ROUTE 3.5: Analytics Routes
       // -------------------------------------------------------------
       if (url.pathname.startsWith("/api/analytics/")) {
         if (!userId) {
@@ -1297,6 +1281,13 @@ if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
       // ROUTE 6: Upload Cover & Audio Files to Cloudflare R2
       // -------------------------------------------------------------
       if (url.pathname === "/api/upload" && request.method === "POST") {
+        if (!env.MEDIA_BUCKET) {
+          return new Response(
+            JSON.stringify({ error: "Cloudflare R2 Bucket 'MEDIA_BUCKET' is not bound to this worker." }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
         const formData = await request.formData();
         const file = formData.get("file");
         const folder = formData.get("folder") || "general";
@@ -1314,7 +1305,7 @@ if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
           httpMetadata: { contentType: file.type },
         });
 
-        const fileUrl = `${env.R2_PUBLIC_DOMAIN}/${fileKey}`;
+        const fileUrl = `${env.R2_PUBLIC_DOMAIN || 'https://pub-r2.audiory.site'}/${fileKey}`;
 
         return new Response(
           JSON.stringify({
