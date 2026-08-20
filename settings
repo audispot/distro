@@ -1,5 +1,5 @@
 // =============================================================
-// UI NOTIFICATION SYSTEM (Replaces alert())
+// UI NOTIFICATION SYSTEM
 // =============================================================
 
 function showToast(message, isError = false) {
@@ -289,6 +289,30 @@ function renderSettingsView() {
     const initialLetter = userName.charAt(0).toUpperCase();
 
     return `
+        <!-- Toast Notification Container -->
+        <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+        <!-- General Settings Action Modal Wrapper -->
+        <div id="generalSettingsModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+            <div class="bg-[#0F172A] border border-gray-800 w-full max-w-md rounded-2xl p-6 space-y-4 shadow-2xl relative">
+                <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+                    <div>
+                        <h3 id="modalTitle" class="text-base font-bold text-white">Settings</h3>
+                        <p id="modalDescription" class="text-xs text-gray-400 mt-0.5"></p>
+                    </div>
+                    <button type="button" onclick="closeSettingsModal()" class="text-gray-400 hover:text-white transition p-1">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+                
+                <!-- Internal Modal Notification Alert Container -->
+                <div id="modalAlert" class="hidden"></div>
+
+                <!-- Dynamic Modal Content Injection Area -->
+                <div id="modalBody" class="pt-1"></div>
+            </div>
+        </div>
+
         <div class="max-w-6xl mx-auto space-y-6 text-gray-200">
             <!-- Header Title -->
             <div class="pb-2 border-b border-brand-border/60">
