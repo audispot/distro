@@ -2,6 +2,10 @@
 // UI NOTIFICATION SYSTEM (No Native Alerts or Popups)
 // =============================================================
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[ch]));
+}
+
 function showToast(message, isError = false) {
   const container = document.getElementById('toastContainer');
   if (!container) return;
@@ -108,22 +112,30 @@ function openSettingsModal(type) {
           </div>
 
           <div id="2faSetupArea" class="p-4 bg-[#1E293B] rounded-xl text-center border border-gray-800 space-y-3">
-            <p class="text-xs text-gray-300">Scan this QR code in your Authenticator app:</p>
-            <div class="flex justify-center my-2">
-              <div class="p-2 bg-white rounded-lg">
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=otpauth://totp/Audiory:user?secret=JBSWY3DPEHPK3PXP" alt="2FA QR Code" class="w-28 h-28">
+            <div id="2faSetupLoading" class="text-xs text-gray-400">Preparing secure authenticator setup...</div>
+            <div id="2faSetupContent" class="hidden space-y-3">
+              <p class="text-xs text-gray-300">Scan this QR code in your Authenticator app:</p>
+              <div class="flex justify-center my-2">
+                <div class="p-2 bg-white rounded-lg">
+                  <img id="twoFaQrCode" src="" alt="2FA QR Code" class="w-28 h-28">
+                </div>
+              </div>
+              <p class="text-[10px] text-gray-500 break-all" id="twoFaManualSecret"></p>
+              <input type="text" id="totpCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Enter 6-digit Code" class="w-full text-center bg-[#0F172A] border border-gray-700 rounded-lg py-2 text-sm text-white tracking-widest focus:outline-none focus:border-cyan-500">
+              <button onclick="verify2FASetup()" class="w-full py-2 bg-cyan-500 hover:bg-cyan-400 text-black font-medium text-xs rounded-lg transition">
+                Verify & Enable 2FA
+              </button>
+              <div id="twoFaRecoveryCodes" class="hidden text-left p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                <p class="text-[11px] font-bold text-amber-300 mb-2">Save your recovery codes</p>
+                <div id="twoFaRecoveryCodeList" class="grid grid-cols-2 gap-1 text-[10px] font-mono text-gray-300"></div>
               </div>
             </div>
-            <input type="text" id="totpCode" maxlength="6" placeholder="Enter 6-digit Code" class="w-full text-center bg-[#0F172A] border border-gray-700 rounded-lg py-2 text-sm text-white tracking-widest focus:outline-none focus:border-cyan-500">
-            <button onclick="verify2FASetup()" class="w-full py-2 bg-cyan-500 hover:bg-cyan-400 text-black font-medium text-xs rounded-lg transition">
-              Verify & Enable 2FA
-            </button>
           </div>
         </div>
       `;
       break;
 
-    case 'Apple Music for Artists':
+    case 'Apple Music for Artists' :
       title.innerText = 'Apple Music for Artists';
       desc.innerText = 'Claim & instant-verify your Apple Music Artist Profile';
       body.innerHTML = `
@@ -176,6 +188,10 @@ function openSettingsModal(type) {
       closeSettingsModal();
       break;
   }
+
+  if (type === 'Two Factor Authentication') {
+    load2FAStatus();
+  }
 }
 
 function closeSettingsModal() {
@@ -199,52 +215,209 @@ async function handlePasswordChange(event) {
   }
 
   try {
+    let token = "";
+
+    // Re-authenticate via Firebase SDK directly if present
     if (typeof firebase !== 'undefined' && firebase.auth().currentUser) {
       const user = firebase.auth().currentUser;
       const cred = firebase.auth.EmailAuthProvider.credential(user.email, currentPassword);
       await user.reauthenticateWithCredential(cred);
       await user.updatePassword(newPassword);
     } else {
-      const res = await fetch('/api/profile/password', {
+      // Fallback: Call Cloudflare Worker endpoint
+      if (typeof auth !== 'undefined' && auth.currentUser) {
+        token = await auth.currentUser.getIdToken();
+      }
+
+      if (!token) {
+        throw new Error('User session expired. Please sign in again.');
+      }
+
+      const res = await fetch(`${WORKER_BASE_URL}/api/auth/change-password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ currentPassword, newPassword })
       });
-      if (!res.ok) throw new Error('Password change failed.');
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Password change failed.');
     }
-    showToast('Password updated successfully!');
+
+    showToast('Password updated successfully! Please sign in with your new password.');
     closeSettingsModal();
   } catch (err) {
     showModalAlert(err.message || 'Error updating password.', true);
   }
 }
+        
+async function load2FAStatus() {
+  const badge = document.getElementById('2faStatusBadge');
+  const setupArea = document.getElementById('2faSetupArea');
+  if (!badge) return;
 
-function verify2FASetup() {
+  try {
+    const token = await getAuthToken();
+    const response = await fetch(`${getWorkerBaseUrl()}/api/auth/2fa/status`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = response.ok ? await response.json() : { is_2fa_enabled: false };
+
+    if (data.is_2fa_enabled) {
+      badge.textContent = 'Enabled';
+      badge.className = 'text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-medium';
+      if (setupArea) {
+        setupArea.innerHTML = `
+          <div class="space-y-3">
+            <div class="w-12 h-12 mx-auto rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+              <i class="fa-solid fa-shield-check text-emerald-400 text-xl"></i>
+            </div>
+            <p class="text-xs text-emerald-300 font-semibold">Authenticator 2FA is enabled.</p>
+            <p class="text-[10px] text-gray-400">Your account requires an authenticator code during protected login.</p>
+            <button onclick="disable2FA()" class="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-medium text-xs rounded-lg transition">Disable 2FA</button>
+          </div>`;
+      }
+      return true;
+    }
+
+    badge.textContent = 'Disabled';
+    badge.className = 'text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded font-medium';
+    await begin2FASetup();
+    return false;
+  } catch (err) {
+    if (badge) badge.textContent = 'Unavailable';
+    if (setupArea) setupArea.innerHTML = `<p class="text-xs text-red-400">Unable to load 2FA status. Please refresh and try again.</p>`;
+    return false;
+  }
+}
+
+async function begin2FASetup() {
+  const loading = document.getElementById('2faSetupLoading');
+  const content = document.getElementById('2faSetupContent');
+  if (!loading || !content) return;
+
+  try {
+    const token = await getAuthToken();
+    if (!token) throw new Error('Authentication required.');
+
+    const response = await fetch(`${getWorkerBaseUrl()}/api/auth/2fa/setup`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.qrCodeUrl) throw new Error(data.error || 'Unable to start 2FA setup.');
+
+    const qr = document.getElementById('twoFaQrCode');
+    const secret = document.getElementById('twoFaManualSecret');
+    if (qr) qr.src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(data.qrCodeUrl)}`;
+    if (secret) secret.textContent = `Manual setup key: ${data.secret || ''}`;
+
+    loading.classList.add('hidden');
+    content.classList.remove('hidden');
+    window.pending2FARecoveryCodes = data.recoveryCodes || [];
+  } catch (err) {
+    loading.textContent = err.message || 'Unable to prepare 2FA setup.';
+    loading.className = 'text-xs text-red-400';
+  }
+}
+
+async function verify2FASetup() {
   clearModalAlert();
-  const code = document.getElementById('totpCode').value;
-  if (code.length === 6) {
+  const input = document.getElementById('totpCode');
+  const code = String(input?.value || '').replace(/\D/g, '');
+  if (!/^\d{6}$/.test(code)) {
+    showModalAlert('Enter the current 6-digit code from your authenticator app.', true);
+    return;
+  }
+
+  try {
+    const token = await getAuthToken();
+    const response = await fetch(`${getWorkerBaseUrl()}/api/auth/2fa/verify`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) throw new Error(data.error || '2FA verification failed.');
+
+    const codes = data.recovery_codes || window.pending2FARecoveryCodes || [];
+    const list = document.getElementById('twoFaRecoveryCodeList');
+    const box = document.getElementById('twoFaRecoveryCodes');
+    if (list && codes.length) {
+      list.innerHTML = codes.map(code => `<span>${escapeHtml(code)}</span>`).join('');
+      box?.classList.remove('hidden');
+    }
+
     showToast('Two-Factor Authentication successfully enabled!');
-    closeSettingsModal();
-  } else {
-    showModalAlert('Please enter a valid 6-digit verification code.', true);
+    await load2FAStatus();
+  } catch (err) {
+    showModalAlert(err.message || 'Unable to enable 2FA.', true);
+  }
+}
+
+async function disable2FA() {
+  const confirmed = await showCustomConfirm('Disable 2FA', 'Disable authenticator protection for this account?');
+  if (!confirmed) return;
+  try {
+    const token = await getAuthToken();
+    const response = await fetch(`${getWorkerBaseUrl()}/api/auth/2fa/disable`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to disable 2FA.');
+    showToast('Two-Factor Authentication disabled.');
+    await load2FAStatus();
+  } catch (err) {
+    showToast(err.message || 'Unable to disable 2FA.', true);
   }
 }
 
 function submitAppleClaim() {
   clearModalAlert();
-  const url = document.getElementById('appleArtistUrl').value;
-  if (!url || !url.includes('music.apple.com')) {
+  const url = document.getElementById('appleArtistUrl')?.value?.trim() || '';
+  if (!/^https:\/\/music\.apple\.com\//i.test(url)) {
     showModalAlert('Please enter a valid Apple Music artist profile URL.', true);
     return;
   }
-  showToast('Apple Music verification request submitted!');
-  closeSettingsModal();
+  // The Worker owns the OAuth/claim flow. Keep the URL available for the callback flow.
+  sessionStorage.setItem('audioryAppleArtistUrl', url);
+  startOAuthFlow('Apple Music');
 }
 
 function startOAuthFlow(platform) {
-  showToast(`Redirecting to ${platform} authorization portal...`);
+  const routes = {
+    'SoundCloud': '/api/integrations/soundcloud/connect',
+    'Audiomack': '/api/integrations/audiomack/connect',
+    'Apple Music': '/api/integrations/apple-music/connect'
+  };
+  const route = routes[platform];
+  if (!route) {
+    showToast(`Unsupported integration: ${platform}`, true);
+    return;
+  }
+
+  const base = getWorkerBaseUrl();
+  if (!base) {
+    showToast('Worker base URL is not configured.', true);
+    return;
+  }
+
+  showToast(`Connecting ${platform}...`);
   closeSettingsModal();
+
+  // The integration endpoint must support authenticated browser navigation.
+  // Preferred implementation: Worker accepts a short-lived signed/query state generated
+  // by an authenticated POST before redirecting to the provider.
+  const tokenPromise = getAuthToken();
+  tokenPromise.then(token => {
+    const separator = route.includes('?') ? '&' : '?';
+    window.location.href = `${base}${route}${separator}token=${encodeURIComponent(token)}`;
+  }).catch(() => showToast(`Unable to start ${platform} authorization.`, true));
 }
+
 
 
 // =============================================================
@@ -253,7 +426,7 @@ function startOAuthFlow(platform) {
 
 function renderSettingsView() {
     const user = window.currentUser || (window.firebase && firebase.auth().currentUser) || {};
-    const userName = user.displayName || 'Artist Profile';
+    const userName = window.audioryProfile?.displayName || user.displayName || 'Artist Profile';
     const userEmail = user.email || 'artist@domain.com';
     const initialLetter = userName.charAt(0).toUpperCase();
 
@@ -542,7 +715,7 @@ function renderSettingsView() {
                                 <h3 class="text-sm font-bold text-white">Billing & Subscription Statements</h3>
                                 <p class="text-xs text-gray-400 mt-0.5">View paid annual distribution plans, extra store additions, and platform invoices.</p>
                             </div>
-                            <span class="px-3 py-1 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 uppercase">Pro Distribution Plan Active</span>
+                            <span id="subscriptionPlanBadge" class="px-3 py-1 rounded-full text-[10px] font-mono font-bold bg-gray-500/10 text-gray-400 border border-gray-500/20 uppercase">Loading subscription...</span>
                         </div>
 
                         <div class="overflow-x-auto">
@@ -899,13 +1072,41 @@ function closeConfirmModal(result) {
 
 // Page Initialization Controller
 async function initSettingsView() {
-    const user = window.currentUser || (window.firebase && firebase.auth().currentUser);
-    
+    const user = window.currentUser || (window.firebase && firebase.auth().currentUser) || {};
     const nameInput = document.getElementById('settings-user-name');
     const emailInput = document.getElementById('settings-user-email');
 
-    if (nameInput) nameInput.value = user?.displayName || user?.email?.split('@')[0] || '';
-    if (emailInput) emailInput.value = user?.email || '';
+    if (emailInput) emailInput.value = user.email || '';
+
+    // 1. First load from KV (The Source of Truth)
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(`${getWorkerBaseUrl()}/api/profile`, { 
+        headers: { 'Authorization': `Bearer ${token}` } 
+      });
+      
+      if (response.ok) {
+        const profile = await response.json();
+        window.audioryProfile = profile || {};
+        
+        if (profile.displayName) {
+          if (nameInput) nameInput.value = profile.displayName;
+          updateDashboardProfileName(profile.displayName);
+          
+          // Also sync locally to window.currentUser if present
+          if (window.currentUser) window.currentUser.displayName = profile.displayName;
+          return; // Successfully set from KV, exit early
+        }
+      }
+    } catch (err) {
+      console.warn("Could not load profile from Worker KV:", err);
+    }
+
+    // 2. Fallback to Firebase user data if KV is empty
+    if (nameInput) {
+      nameInput.value = user.displayName || user.email?.split('@')[0] || '';
+    }
+    updateDashboardProfileName(user.displayName || user.email?.split('@')[0]);
 
     await Promise.all([
         loadAccountMembers(),
@@ -916,37 +1117,77 @@ async function initSettingsView() {
     ]);
 }
 
-// Profile Save
+// Centralized DOM updater for profile display names
+function updateDashboardProfileName(name) {
+    if (!name) return;
+    
+    // Update global state
+    window.audioryProfile = window.audioryProfile || {};
+    window.audioryProfile.displayName = name;
+    if (window.currentUser) window.currentUser.displayName = name;
+
+    const selectors = [
+      '[data-user-display-name]', '#userDisplayName', '#dashboardUserName',
+      '#profileDisplayName', '.dashboard-user-name'
+    ];
+    
+    selectors.forEach(selector => {
+      document.querySelectorAll(selector).forEach(el => { el.textContent = name; });
+    });
+}
+
+// Profile Save Handler
 async function handleSaveProfile(e) {
     e.preventDefault();
     const nameInput = document.getElementById('settings-user-name');
     if (!nameInput) return;
-    const newName = nameInput.value;
     
+    const newName = nameInput.value.trim();
+    if (!newName) {
+      showToast('Display name is required.', true);
+      return;
+    }
+
     try {
         const user = window.currentUser || (window.firebase && firebase.auth().currentUser);
-        if (user && typeof user.updateProfile === 'function') {
-            await user.updateProfile({ displayName: newName });
-        }
-
         const token = await getAuthToken();
-        if (token) {
-            await fetch(`${getWorkerBaseUrl()}/api/profile`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ displayName: newName })
-            });
+
+        // 1. Save to Worker KV
+        const response = await fetch(`${getWorkerBaseUrl()}/api/profile`, {
+            method: 'POST',
+            headers: { 
+              'Authorization': `Bearer ${token}`, 
+              'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({ displayName: newName })
+        });
+        
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Failed to update profile name.');
+
+        // 2. Sync with client Firebase SDK and force refresh user instance
+        if (user && typeof user.updateProfile === 'function') {
+            try { 
+              await user.updateProfile({ displayName: newName });
+              if (typeof user.reload === 'function') {
+                await user.reload(); // Ensures SDK cache is refreshed
+              }
+            } catch (fbErr) {
+              console.warn("Firebase SDK update profile warning:", fbErr);
+            }
         }
 
-        showToast("Profile name updated successfully!");
+        // 3. Update local state & DOM immediately
+        window.audioryProfile = data.profile || { displayName: newName };
+        updateDashboardProfileName(newName);
+        nameInput.value = newName;
+        
+        showToast('Profile name updated successfully!');
     } catch (err) {
-        showToast(err.message || "Failed to update profile name.", true);
+        showToast(err.message || 'Failed to update profile name.', true);
     }
 }
-
+        
 // Payout Methods Handler
 function togglePayoutFields(type) {
     document.getElementById('payout-form-bank').classList.add('hidden');
@@ -1028,9 +1269,18 @@ async function loadPayoutPreferences() {
     }
 }
 
+function formatDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return escapeHtml(value);
+  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 // Billing History Controller
 async function loadBillingHistory() {
     const tbody = document.getElementById('settings-billing-tbody');
+    const badge = document.getElementById('subscriptionPlanBadge');
+    const details = document.getElementById('subscriptionDetails');
     if (!tbody) return;
 
     try {
@@ -1038,35 +1288,45 @@ async function loadBillingHistory() {
         const response = await fetch(`${getWorkerBaseUrl()}/api/billing-history`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
+        const data = response.ok ? await response.json() : {};
+        const subscription = data.subscription || null;
+        const history = Array.isArray(data.history) ? data.history : (Array.isArray(data) ? data : []);
 
-        const billingList = response.ok ? await response.json() : [];
+        if (badge) {
+          if (subscription) {
+            const name = subscription.planName || subscription.name || subscription.planId || 'No active plan';
+            const status = subscription.status || 'Pending';
+            badge.textContent = `${name} ${status}`;
+            badge.className = `px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase ${String(status).toLowerCase() === 'active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`;
+          } else {
+            badge.textContent = 'No active subscription';
+          }
+        }
+        if (details) {
+          details.innerHTML = subscription ? `
+            <div><span class="text-gray-500">Plan</span><div class="text-white font-semibold">${escapeHtml(subscription.planName || subscription.planId || '—')}</div></div>
+            <div><span class="text-gray-500">Status</span><div class="text-white">${escapeHtml(subscription.status || '—')}</div></div>
+            <div><span class="text-gray-500">Started</span><div class="text-white">${formatDateTime(subscription.createdAt)}</div></div>
+            <div><span class="text-gray-500">Amount</span><div class="text-white">${subscription.amount != null ? '$' + escapeHtml(subscription.amount) : '—'}</div></div>` : `<div class="text-gray-500">No subscription record found.</div>`;
+        }
 
-        if (!billingList || billingList.length === 0) {
-            tbody.innerHTML = `
-                <tr class="border-b border-brand-border/30 hover:bg-white/5 transition">
-                    <td class="py-3 px-2 font-mono text-cyan-400">INV-88291</td>
-                    <td class="py-3 px-2 text-gray-400">Jan 12, 2026</td>
-                    <td class="py-3 px-2 text-white font-medium">Pro Distribution Plan (Annual Subscription)</td>
-                    <td class="py-3 px-2 text-white font-mono">$19.99</td>
-                    <td class="py-3 px-2"><span class="px-2 py-0.5 text-[10px] rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Paid</span></td>
-                    <td class="py-3 px-2 text-right"><button class="text-xs text-gray-400 hover:text-white"><i class="fa-solid fa-download"></i></button></td>
-                </tr>
-            `;
+        if (!history.length) {
+            tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-gray-500">No billing statements generated yet.</td></tr>`;
             return;
         }
 
-        tbody.innerHTML = billingList.map(item => `
+        tbody.innerHTML = history.map(item => `
             <tr class="border-b border-brand-border/30 hover:bg-white/5 transition">
-                <td class="py-3 px-2 font-mono text-cyan-400">${item.invoiceId}</td>
-                <td class="py-3 px-2 text-gray-400">${item.date}</td>
-                <td class="py-3 px-2 text-white font-medium">${item.description}</td>
-                <td class="py-3 px-2 text-white font-mono">$${item.amount}</td>
-                <td class="py-3 px-2"><span class="px-2 py-0.5 text-[10px] rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">${item.status}</span></td>
-                <td class="py-3 px-2 text-right"><button class="text-xs text-gray-400 hover:text-white"><i class="fa-solid fa-download"></i></button></td>
+                <td class="py-3 px-2 font-mono text-cyan-400">${escapeHtml(item.invoiceId || item.id || '—')}</td>
+                <td class="py-3 px-2 text-gray-400">${formatDateTime(item.date || item.createdAt)}</td>
+                <td class="py-3 px-2 text-white font-medium">${escapeHtml(item.description || item.planName || 'Subscription')}</td>
+                <td class="py-3 px-2 text-white font-mono">${item.amount != null ? '$' + escapeHtml(item.amount) : '—'}</td>
+                <td class="py-3 px-2"><span class="px-2 py-0.5 text-[10px] rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">${escapeHtml(item.status || 'Unknown')}</span></td>
+                <td class="py-3 px-2 text-right">${item.receiptUrl ? `<a href="${escapeHtml(item.receiptUrl)}" target="_blank" rel="noopener" class="text-xs text-cyan-400 hover:text-cyan-300">View</a>` : '—'}</td>
             </tr>
         `).join('');
-    } catch {
-        tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-gray-500">No invoices generated yet.</td></tr>`;
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-gray-500">Unable to load billing information.</td></tr>`;
     }
 }
 
@@ -1117,61 +1377,73 @@ function toggleTreatyFields() {
 // Save IRS Tax Compliance Details
 async function handleSaveTaxDetails(e) {
     e.preventDefault();
-
     const formType = document.getElementById('tax-form-type')?.value || 'w9';
-    const legalName = document.getElementById('tax-legal-name')?.value || '';
-    const dbaName = document.getElementById('tax-dba-name')?.value || '';
-    const street = document.getElementById('tax-address-street')?.value || '';
-    const city = document.getElementById('tax-address-city')?.value || '';
-    const state = document.getElementById('tax-address-state')?.value || '';
-    const zip = document.getElementById('tax-address-zip')?.value || '';
-    const signature = document.getElementById('tax-signature')?.value || '';
+    const legalName = document.getElementById('tax-legal-name')?.value.trim() || '';
+    const street = document.getElementById('tax-address-street')?.value.trim() || '';
+    const city = document.getElementById('tax-address-city')?.value.trim() || '';
+    const state = document.getElementById('tax-address-state')?.value.trim() || '';
+    const zip = document.getElementById('tax-address-zip')?.value.trim() || '';
+    const signature = document.getElementById('tax-signature')?.value.trim() || '';
 
-    let payload = {
-        formType,
-        legalName,
-        dbaName,
-        address: { street, city, state, zip },
-        signature,
-        certifiedAt: new Date().toISOString()
-    };
-
-    if (formType === 'w9') {
-        payload.w9Details = {
-            classification: document.getElementById('tax-w9-classification')?.value || 'individual',
-            tin: document.getElementById('tax-w9-tin')?.value || ''
-        };
-    } else {
-        payload.w8Details = {
-            citizenship: document.getElementById('tax-w8-citizenship')?.value || '',
-            foreignTin: document.getElementById('tax-w8-ftin')?.value || '',
-            usTin: document.getElementById('tax-w8-us-tin')?.value || '',
-            dob: document.getElementById('tax-w8-dob')?.value || '',
-            treatyClaimed: document.getElementById('tax-w8-treaty-claim')?.checked || false,
-            treatyCountry: document.getElementById('tax-treaty-country')?.value || '',
-            claimedRate: document.getElementById('tax-treaty-rate')?.value || '0'
-        };
-
-        if (formType === 'w8bene') {
-            payload.w8Details.fatcaStatus = document.getElementById('tax-w8bene-fatca')?.value || 'active_nffe';
-        }
+    if (!legalName || !street || !city || !zip || !signature || !document.getElementById('tax-certify-check')?.checked) {
+      showToast('Complete all required tax fields and certification before submitting.', true);
+      return;
     }
+
+    let country = '';
+    let tin = '';
+    let classification = 'individual';
+    if (formType === 'w9') {
+      tin = document.getElementById('tax-w9-tin')?.value.trim() || '';
+      classification = document.getElementById('tax-w9-classification')?.value || 'individual';
+      country = 'United States';
+    } else {
+      country = document.getElementById('tax-w8-citizenship')?.value.trim() || '';
+      tin = document.getElementById('tax-w8-ftin')?.value.trim() || '';
+      classification = formType === 'w8bene' ? (document.getElementById('tax-w8bene-fatca')?.value || 'foreign_entity') : 'foreign_individual';
+    }
+
+    if (!country || !tin) {
+      showToast('Country and foreign tax identification number are required for this form.', true);
+      return;
+    }
+
+    const payload = {
+      formType,
+      legalName,
+      classification,
+      country,
+      tin,
+      address: { street, city, state, zip },
+      dbaName: document.getElementById('tax-dba-name')?.value.trim() || '',
+      signature,
+      certifiedAt: new Date().toISOString(),
+      w9Details: formType === 'w9' ? { classification, tin } : null,
+      w8Details: formType !== 'w9' ? {
+        citizenship: country,
+        foreignTin: tin,
+        usTin: document.getElementById('tax-w8-us-tin')?.value.trim() || '',
+        dob: document.getElementById('tax-w8-dob')?.value || '',
+        treatyClaimed: document.getElementById('tax-w8-treaty-claim')?.checked || false,
+        treatyCountry: document.getElementById('tax-treaty-country')?.value.trim() || '',
+        claimedRate: document.getElementById('tax-treaty-rate')?.value || '0',
+        fatcaStatus: formType === 'w8bene' ? (document.getElementById('tax-w8bene-fatca')?.value || '') : ''
+      } : null
+    };
 
     try {
         const token = await getAuthToken();
         const response = await fetch(`${getWorkerBaseUrl()}/api/tax-details`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-
-        if (!response.ok) throw new Error("Failed to submit tax form.");
-        showToast("Tax compliance form successfully verified and saved!");
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Failed to submit tax form.');
+        showToast('Tax compliance form successfully saved.');
+        await loadTaxDetails();
     } catch (err) {
-        showToast(err.message, true);
+        showToast(err.message || 'Failed to save tax details.', true);
     }
 }
 
@@ -1223,39 +1495,28 @@ async function loadLoginHistory() {
         const response = await fetch(`${getWorkerBaseUrl()}/api/login-history`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
-
         const sessions = response.ok ? await response.json() : [];
 
-        if (!sessions || sessions.length === 0) {
-            tbody.innerHTML = `
-                <tr class="border-b border-brand-border/30 hover:bg-white/5 transition">
-                    <td class="py-3 px-2 font-medium text-white flex items-center gap-2">
-                        <i class="fa-solid fa-desktop text-cyan-400"></i> Chrome on macOS
-                    </td>
-                    <td class="py-3 px-2 font-mono text-gray-400">197.237.12.89</td>
-                    <td class="py-3 px-2 text-gray-400">Nairobi, Kenya</td>
-                    <td class="py-3 px-2 text-gray-400">Just now</td>
-                    <td class="py-3 px-2 text-right"><span class="px-2 py-0.5 text-[10px] rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">Current Session</span></td>
-                </tr>
-            `;
+        if (!Array.isArray(sessions) || sessions.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-gray-500">No recorded login sessions yet.</td></tr>`;
             return;
         }
 
         tbody.innerHTML = sessions.map(s => `
             <tr class="border-b border-brand-border/30 hover:bg-white/5 transition">
                 <td class="py-3 px-2 font-medium text-white flex items-center gap-2">
-                    <i class="fa-solid fa-mobile-screen text-gray-400"></i> ${s.device}
+                    <i class="fa-solid ${String(s.device || '').toLowerCase().includes('mobile') ? 'fa-mobile-screen' : 'fa-desktop'} text-gray-400"></i> ${escapeHtml(s.device || 'Unknown device')}
                 </td>
-                <td class="py-3 px-2 font-mono text-gray-400">${s.ip}</td>
-                <td class="py-3 px-2 text-gray-400">${s.location}</td>
-                <td class="py-3 px-2 text-gray-400">${s.lastActive}</td>
+                <td class="py-3 px-2 font-mono text-gray-400">${escapeHtml(s.ip || '—')}</td>
+                <td class="py-3 px-2 text-gray-400">${escapeHtml(s.location || '—')}</td>
+                <td class="py-3 px-2 text-gray-400">${formatDateTime(s.lastActiveAt || s.lastActive || s.loginAt)}</td>
                 <td class="py-3 px-2 text-right">
-                    ${s.isCurrent ? `<span class="px-2 py-0.5 text-[10px] rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">Current</span>` : `<button onclick="revokeSession('${s.id}')" class="text-gray-500 hover:text-red-400 text-xs transition"><i class="fa-solid fa-right-from-bracket"></i> Revoke</button>`}
+                    ${s.isCurrent ? `<span class="px-2 py-0.5 text-[10px] rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">Current Session</span>` : `<button onclick="revokeSession('${escapeHtml(s.id)}')" class="text-gray-500 hover:text-red-400 text-xs transition"><i class="fa-solid fa-right-from-bracket"></i> Revoke</button>`}
                 </td>
             </tr>
         `).join('');
     } catch {
-        tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-gray-500">Unable to load active sessions.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-gray-500">Unable to load login history.</td></tr>`;
     }
 }
 
@@ -1423,6 +1684,9 @@ window.openSettingsModal = openSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
 window.handlePasswordChange = handlePasswordChange;
 window.verify2FASetup = verify2FASetup;
+window.load2FAStatus = load2FAStatus;
+window.begin2FASetup = begin2FASetup;
+window.disable2FA = disable2FA;
 window.submitAppleClaim = submitAppleClaim;
 window.startOAuthFlow = startOAuthFlow;
 window.showToast = showToast;
