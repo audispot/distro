@@ -1,414 +1,666 @@
-function renderTransferView() {
-  return `
-  <div class="space-y-6 max-w-6xl mx-auto pb-12">
-    <!-- Header -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
-      <div>
-        <h1 class="text-2xl font-bold text-white flex items-center gap-3">
-          <i class="fa-solid fa-file-import text-amber-400"></i> Transfer Catalog
-        </h1>
-        <p class="text-xs text-gray-400 mt-1">Migrate your tracks & releases seamlessly from your previous distributor without losing streams.</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="px-3 py-1 rounded-full text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">Zero Downtime Migration</span>
-      </div>
-    </div>
+(function() {
+    /* ==========================================================================
+       GENRE MAP DATA & TRANSFER CATALOG STATE
+       ========================================================================== */
+    window.TRANSFER_GENRE_MAP = {
+        "Afrobeats": ["Afropop", "Amapiano", "Afro-Fusion", "Afro House", "Highlife", "Alte"],
+        "Hip Hop": ["Trap", "Boom Bap", "Drill", "Conscious Hip Hop", "Melodic Rap", "Lofi Hip Hop"],
+        "Pop": ["Dance Pop", "Electropop", "Indie Pop", "Synthpop", "Teen Pop"],
+        "R&B": ["Contemporary R&B", "Neo-Soul", "Alternative R&B", "Slow Jams"],
+        "Reggae / Dancehall": ["Dancehall", "Roots Reggae", "Dub", "Reggaeton"],
+        "Electronic / Dance": ["House", "Techno", "Deep House", "EDM", "Ambiance", "Trance"],
+        "Rock": ["Alternative Rock", "Indie Rock", "Hard Rock", "Pop Punk"]
+    };
 
-    <!-- Notification Banner (Custom UI Toast) -->
-    <div id="transferAlert" class="hidden p-4 rounded-xl text-xs font-semibold flex items-center justify-between transition-all"></div>
+    window.transferState = window.transferState || {
+        previousDistributor: 'DistroKid',
+        title: '',
+        type: 'Single',
+        language: 'English',
+        primaryGenre: '',
+        secondaryGenre: '',
+        artists: [{ name: '', role: 'Primary' }],
+        label: '',
+        cLine: '',
+        pLine: '',
+        releaseDate: '',
+        timezone: 'Africa/Nairobi',
+        upc: '',
+        artwork: { file: null, url: '', inspected: null },
+        tracks: [
+            {
+                title: '',
+                version: '',
+                discNumber: 1,
+                isrc: '',
+                explicit: false,
+                audioFile: null,
+                previewUrl: '',
+                tiktokStartTime: '00:30',
+                lyrics: ''
+            }
+        ],
+        dspSpotify: '',
+        dspApple: '',
+        confirmedRights: false
+    };
 
-    <!-- Mode Selector Tabs -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <button onclick="setTransferMode('manual')" id="tab_manual" class="p-4 rounded-xl border border-brand-accent bg-brand-dark/80 text-left transition flex items-start gap-3">
-        <i class="fa-solid fa-pen-to-square text-amber-400 text-lg mt-0.5"></i>
-        <div>
-          <h4 class="text-sm font-bold text-white">Manual Release Entry</h4>
-          <p class="text-[11px] text-gray-400">Ideal for single tracks or small catalog transfers.</p>
-        </div>
-      </button>
+    /* ==========================================================================
+       RENDER TRANSFER CATALOG VIEW
+       ========================================================================== */
+    window.renderTransferCatalogView = function() {
+        return `
+            <div class="max-w-5xl mx-auto space-y-6">
+                <div class="border-b border-white/10 pb-4">
+                    <h1 class="text-2xl font-bold text-white">Catalog Transfer</h1>
+                    <p class="text-xs text-gray-400 mt-1">Import existing releases from other distributors while preserving ISRC/UPC streams and playlist metadata.</p>
+                </div>
 
-      <button onclick="setTransferMode('csv')" id="tab_csv" class="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-left transition flex items-start gap-3">
-        <i class="fa-solid fa-file-csv text-emerald-400 text-lg mt-0.5"></i>
-        <div>
-          <h4 class="text-sm font-bold text-white">Bulk Import (CSV / Excel)</h4>
-          <p class="text-[11px] text-gray-400">Upload metadata sheets for 10+ releases.</p>
-        </div>
-      </button>
+                <div id="view_manual" class="bg-brand-dark/40 border border-white/10 rounded-2xl p-6 space-y-6">
+                    <!-- 1. DISTRIBUTOR SELECTION -->
+                    <div>
+                        <h3 class="text-sm font-bold text-white border-b border-white/10 pb-3 mb-4">1. Select Previous Distributor</h3>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                            ${['DistroKid', 'TuneCore', 'CD Baby', 'UnitedMasters', 'Amuse', 'Other'].map(distro => `
+                                <label class="flex flex-col items-center justify-center p-3 rounded-xl border border-white/10 bg-white/5 cursor-pointer hover:border-amber-400/50 transition group">
+                                    <input type="radio" name="previous_distributor" value="${distro}" 
+                                           onchange="window.transferState.previousDistributor = this.value" 
+                                           class="hidden peer" ${distro === window.transferState.previousDistributor ? 'checked' : ''}>
+                                    <span class="text-xs font-bold text-gray-300 peer-checked:text-amber-400 transition">${distro}</span>
+                                    <div class="w-2 h-2 rounded-full bg-amber-400 opacity-0 peer-checked:opacity-100 mt-1"></div>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
 
-      <button onclick="setTransferMode('ddex')" id="tab_ddex" class="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-left transition flex items-start gap-3">
-        <i class="fa-solid fa-code text-cyan-400 text-lg mt-0.5"></i>
-        <div>
-          <h4 class="text-sm font-bold text-white">DDEX XML Import</h4>
-          <p class="text-[11px] text-gray-400">Enterprise XML metadata transfer package.</p>
-        </div>
-      </button>
-    </div>
+                    <form onsubmit="handleTransferSubmission(event)" class="space-y-6">
+                        <!-- 2. RELEASE & OWNERSHIP METADATA -->
+                        <div class="space-y-4">
+                            <h3 class="text-sm font-bold text-white border-b border-white/10 pb-3">2. Release Metadata</h3>
+                            
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">Release Title *</label>
+                                    <input type="text" required value="${window.transferState.title}" 
+                                           oninput="window.transferState.title = this.value; window.syncFirstTrackTitle();" 
+                                           placeholder="e.g. Midnight Memories" 
+                                           class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">Release Type *</label>
+                                    <select onchange="window.transferState.type = this.value; window.adjustTransferTracksForType();" 
+                                            class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                                        <option value="Single" ${window.transferState.type === 'Single' ? 'selected' : ''}>Single</option>
+                                        <option value="EP" ${window.transferState.type === 'EP' ? 'selected' : ''}>EP</option>
+                                        <option value="Album" ${window.transferState.type === 'Album' ? 'selected' : ''}>Album</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">Primary Language *</label>
+                                    <select onchange="window.transferState.language = this.value" 
+                                            class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                                        <option value="English" ${window.transferState.language === 'English' ? 'selected' : ''}>English</option>
+                                        <option value="Swahili" ${window.transferState.language === 'Swahili' ? 'selected' : ''}>Swahili</option>
+                                        <option value="French" ${window.transferState.language === 'French' ? 'selected' : ''}>French</option>
+                                        <option value="Spanish" ${window.transferState.language === 'Spanish' ? 'selected' : ''}>Spanish</option>
+                                        <option value="Portuguese" ${window.transferState.language === 'Portuguese' ? 'selected' : ''}>Portuguese</option>
+                                        <option value="Instrumental" ${window.transferState.language === 'Instrumental' ? 'selected' : ''}>Instrumental (No Lyrics)</option>
+                                    </select>
+                                </div>
+                            </div>
 
-    <!-- TAB 1: MANUAL ENTRY FORM -->
-    <div id="view_manual" class="bg-brand-dark/40 border border-white/10 rounded-2xl p-6 space-y-6">
-      <h3 class="text-base font-bold text-white border-b border-white/10 pb-3">1. Select Previous Distributor</h3>
-      
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-        ${['DistroKid', 'TuneCore', 'CD Baby', 'UnitedMasters', 'Amuse', 'Dapstrem'].map(distro => `
-          <label class="flex flex-col items-center justify-center p-3 rounded-xl border border-white/10 bg-white/5 cursor-pointer hover:border-amber-400/50 transition group">
-            <input type="radio" name="previous_distributor" value="${distro}" class="hidden peer" ${distro === 'DistroKid' ? 'checked' : ''}>
-            <span class="text-xs font-bold text-gray-300 peer-checked:text-amber-400 transition">${distro}</span>
-            <div class="w-2 h-2 rounded-full bg-amber-400 opacity-0 peer-checked:opacity-100 mt-1"></div>
-          </label>
-        `).join('')}
-      </div>
+                            <!-- Genre & Dynamic Subgenre Selection -->
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">Primary Genre *</label>
+                                    <select onchange="handleTransferGenreChange(this.value)" required 
+                                            class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                                        <option value="">Select Primary Genre</option>
+                                        ${Object.keys(TRANSFER_GENRE_MAP).map(g => `<option value="${g}" ${window.transferState.primaryGenre === g ? 'selected' : ''}>${g}</option>`).join('')}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">Subgenre / Secondary Genre</label>
+                                    <select id="transferSubgenreSelect" onchange="window.transferState.secondaryGenre = this.value" 
+                                            class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none" 
+                                            ${!window.transferState.primaryGenre ? 'disabled' : ''}>
+                                        <option value="">${window.transferState.primaryGenre ? 'Select Subgenre' : '-- Select Primary Genre First --'}</option>
+                                        ${window.transferState.primaryGenre && TRANSFER_GENRE_MAP[window.transferState.primaryGenre] 
+                                            ? TRANSFER_GENRE_MAP[window.transferState.primaryGenre].map(sub => `<option value="${sub}" ${window.transferState.secondaryGenre === sub ? 'selected' : ''}>${sub}</option>`).join('')
+                                            : ''}
+                                    </select>
+                                </div>
+                            </div>
 
-      <h3 class="text-base font-bold text-white border-b border-white/10 pb-3 pt-2">2. Release & Ownership Metadata</h3>
-      
-      <form id="manualTransferForm" onsubmit="submitManualTransfer(event)" class="space-y-4">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Release Title *</label>
-            <input type="text" name="title" required placeholder="e.g. Midnight Memories" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Release Type *</label>
-            <select name="type" required class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-                <option value="Single">Single</option>
-                <option value="EP">EP</option>
-                <option value="Album">Album</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Primary Language *</label>
-            <select name="language" required class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-                <option value="English">English</option>
-                <option value="Swahili">Swahili</option>
-                <option value="French">French</option>
-                <option value="Spanish">Spanish</option>
-                <option value="Portuguese">Portuguese</option>
-                <option value="Instrumental">Instrumental (No Lyrics)</option>
-            </select>
-          </div>
-        </div>
+                            <!-- Dynamic Artists List -->
+                            <div class="space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <label class="block text-xs font-medium text-gray-400">Primary & Associated Artists *</label>
+                                    <button type="button" onclick="addTransferArtist()" class="text-xs text-amber-400 hover:underline">+ Add Artist / Remixer</button>
+                                </div>
+                                <div id="transfer_artists_container" class="space-y-3">
+                                    ${window.renderTransferArtistInputs()}
+                                </div>
+                            </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Primary Artist Name *</label>
-            <input type="text" name="artist_name" required placeholder="e.g. Bigi Mikkah" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Featured Artists / Remixers</label>
-            <input type="text" name="featured_artists" placeholder="e.g. Drake (Featuring), Wizkid (Remixer)" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-        </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">Original Release Date *</label>
+                                    <input type="date" required value="${window.transferState.releaseDate}" 
+                                           onchange="window.transferState.releaseDate = this.value" 
+                                           class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">Release Timezone *</label>
+                                    <select onchange="window.transferState.timezone = this.value" 
+                                            class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                                        <option value="Africa/Nairobi" ${window.transferState.timezone === 'Africa/Nairobi' ? 'selected' : ''}>Africa/Nairobi (EAT)</option>
+                                        <option value="UTC" ${window.transferState.timezone === 'UTC' ? 'selected' : ''}>UTC</option>
+                                        <option value="America/New_York" ${window.transferState.timezone === 'America/New_York' ? 'selected' : ''}>America/New York (EST)</option>
+                                        <option value="Europe/London" ${window.transferState.timezone === 'Europe/London' ? 'selected' : ''}>Europe/London (GMT)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">Release UPC Code *</label>
+                                    <input type="text" required value="${window.transferState.upc}" 
+                                           oninput="window.transferState.upc = this.value" 
+                                           placeholder="12 or 13-digit UPC" 
+                                           class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                                </div>
+                            </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Original Release Date *</label>
-            <input type="date" name="release_date" required class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Release Timezone *</label>
-            <select name="timezone" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-                <option value="Africa/Nairobi">Africa/Nairobi (EAT)</option>
-                <option value="UTC">UTC</option>
-                <option value="America/New_York">America/New York (EST)</option>
-                <option value="Europe/London">Europe/London (GMT)</option>
-            </select>
-          </div>
-          <div>
-             <label class="block text-xs font-medium text-gray-400 mb-1">UPC Code *</label>
-             <input type="text" name="upc" required placeholder="12-digit UPC" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-        </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">Record Label *</label>
+                                    <input type="text" required value="${window.transferState.label}" 
+                                           oninput="window.transferState.label = this.value" 
+                                           placeholder="e.g. Audiory Records" 
+                                           class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">(C) Line Copyright *</label>
+                                    <input type="text" required value="${window.transferState.cLine}" 
+                                           oninput="window.transferState.cLine = this.value" 
+                                           placeholder="© 2026 Record Label" 
+                                           class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-400 mb-1">(P) Line Phonogram *</label>
+                                    <input type="text" required value="${window.transferState.pLine}" 
+                                           oninput="window.transferState.pLine = this.value" 
+                                           placeholder="℗ 2026 Record Label" 
+                                           class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                                </div>
+                            </div>
+                        </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Primary Genre *</label>
-            <select name="genre" required class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-              <option value="">Select Genre</option>
-              <option value="Afrobeats">Afrobeats</option>
-              <option value="Hip Hop">Hip Hop</option>
-              <option value="Pop">Pop</option>
-              <option value="R&B">R&B</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Subgenre (Optional)</label>
-            <input type="text" name="subgenre" placeholder="e.g. Afropop" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-        </div>
+                        <!-- 3. COVER ARTWORK WITH INSPECTOR & PREVIEW -->
+                        <div class="space-y-4 pt-2">
+                            <h3 class="text-sm font-bold text-white border-b border-white/10 pb-3">3. Artwork File</h3>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-400 mb-1">Cover Artwork (3000x3000px JPG/PNG) *</label>
+                                <input type="file" accept="image/png, image/jpeg" onchange="handleTransferArtworkSelection(event)" 
+                                       class="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-400 file:text-black hover:file:bg-amber-300">
+                            </div>
+                            <div id="transferArtworkPreviewContainer" class="${window.transferState.artwork.url ? '' : 'hidden'} p-4 rounded-xl bg-black/30 border border-white/10 flex flex-col sm:flex-row gap-4 items-center">
+                                <img id="transferArtworkPreviewImg" src="${window.transferState.artwork.url || ''}" class="w-36 h-36 rounded-xl object-cover border border-white/10 shadow-lg">
+                                <div id="transferArtworkSpecsBox" class="text-xs space-y-1.5 text-gray-300 font-mono">
+                                    ${window.transferState.artwork.inspected ? `
+                                        <p>File Name: ${window.transferState.artwork.inspected.filename}</p>
+                                        <p>Dimensions: ${window.transferState.artwork.inspected.width}x${window.transferState.artwork.inspected.height} px</p>
+                                        <p>Format: ${window.transferState.artwork.inspected.mime}</p>
+                                        <p class="${window.transferState.artwork.inspected.valid ? 'text-emerald-400' : 'text-red-400'} font-bold">
+                                            ${window.transferState.artwork.inspected.valid ? '✓ Artwork Meets Requirements' : '✗ Invalid Dimensions (Min 3000x3000px required)'}
+                                        </p>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Record Label *</label>
-            <input type="text" name="label" required placeholder="e.g. Audiory Records" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">(C) Line Copyright *</label>
-            <input type="text" name="c_line" required placeholder="© 2026 Audiory" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">(P) Line Phonogram *</label>
-            <input type="text" name="p_line" required placeholder="℗ 2026 Audiory" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-        </div>
+                        <!-- 4. TRACKS MANAGEMENT (Dynamic for Single, EP, Album) -->
+                        <div class="space-y-4 pt-2">
+                            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                                <h3 class="text-sm font-bold text-white">4. Track Data & Audio Masters (${window.transferState.tracks.length})</h3>
+                                <div id="transfer_add_track_btn_wrapper">
+                                    ${(window.transferState.type === 'EP' || window.transferState.type === 'Album') ? `
+                                        <button type="button" onclick="addTrackToTransfer()" class="px-3 py-1.5 rounded-lg bg-amber-400 text-black font-bold text-xs hover:bg-amber-300 transition">
+                                            <i class="fa-solid fa-plus mr-1"></i> Add Another Track
+                                        </button>
+                                    ` : ''}
+                                </div>
+                            </div>
 
-        <h3 class="text-base font-bold text-white border-b border-white/10 pb-3 pt-4">3. Track Data & Media Assets</h3>
+                            <div id="transfer_tracks_list_container" class="space-y-6">
+                                ${window.renderTransferTracksList()}
+                            </div>
+                        </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div class="md:col-span-2">
-            <label class="block text-xs font-medium text-gray-400 mb-1">Track ISRC Code *</label>
-            <input type="text" name="isrc" required placeholder="e.g. US-S1Z-24-00001" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Explicit Status *</label>
-            <select name="explicit" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-                <option value="false">Clean / Non-Explicit</option>
-                <option value="true">Explicit</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">TikTok Start (MM:SS)</label>
-            <input type="text" name="tiktok_start" placeholder="00:30" value="00:30" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
-          </div>
-        </div>
+                        <!-- 5. DSP STORE URLS -->
+                        <div class="space-y-4 pt-2">
+                            <h3 class="text-sm font-bold text-white border-b border-white/10 pb-3">5. Store URLs (Preserves Stream Count & Playlists)</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <input type="url" value="${window.transferState.dspSpotify}" 
+                                       oninput="window.transferState.dspSpotify = this.value" 
+                                       placeholder="Spotify Track / Album Link" 
+                                       class="bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none focus:border-amber-400">
+                                <input type="url" value="${window.transferState.dspApple}" 
+                                       oninput="window.transferState.dspApple = this.value" 
+                                       placeholder="Apple Music Track / Album Link" 
+                                       class="bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none focus:border-amber-400">
+                            </div>
+                        </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Master Audio File (WAV/FLAC) *</label>
-            <input type="file" name="audio_file" accept=".wav,.flac" required class="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-400 file:text-black hover:file:bg-amber-300">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">Cover Artwork (3000x3000px JPG/PNG) *</label>
-            <input type="file" name="artwork" accept=".jpg,.jpeg,.png" required class="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-400 file:text-black hover:file:bg-amber-300">
-          </div>
-        </div>
+                        <!-- 6. RIGHTS CONFIRMATION -->
+                        <div class="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2">
+                            <label class="flex items-center gap-3 cursor-pointer">
+                                <input type="checkbox" required ${window.transferState.confirmedRights ? 'checked' : ''} 
+                                       onchange="window.transferState.confirmedRights = this.checked" 
+                                       class="rounded accent-amber-400">
+                                <span class="text-xs text-gray-200 font-medium">I confirm I own 100% of the masters and rights to transfer this release to Audiory.</span>
+                            </label>
+                        </div>
+
+                        <button type="submit" id="btn_submit_transfer" class="w-full py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs uppercase tracking-wider transition">
+                            <i class="fa-solid fa-cloud-arrow-up mr-2"></i> Submit Release Transfer
+                        </button>
+                    </form>
+                </div>
+            </div>
+        `;
+    };
+
+    // Alias required by dashboard window.switchView
+    window.renderTransferView = window.renderTransferCatalogView;
+
+    /* ==========================================================================
+       DYNAMIC ARTIST HANDLERS
+       ========================================================================== */
+    window.renderTransferArtistInputs = function() {
+        return window.transferState.artists.map((artist, idx) => `
+            <div class="p-3 bg-black/40 rounded-xl border border-white/10 flex flex-col sm:flex-row gap-3 items-center">
+                <div class="flex-1 w-full">
+                    <input type="text" placeholder="Artist Name *" value="${artist.name || ''}" 
+                           oninput="window.transferState.artists[${idx}].name = this.value" 
+                           class="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-400 outline-none" required>
+                </div>
+                <div class="w-full sm:w-40">
+                    <select onchange="window.transferState.artists[${idx}].role = this.value" 
+                            class="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-400 outline-none">
+                        <option value="Primary" ${artist.role === 'Primary' ? 'selected' : ''}>Primary Artist</option>
+                        <option value="Featuring" ${artist.role === 'Featuring' ? 'selected' : ''}>Featured Artist</option>
+                        <option value="Remixer" ${artist.role === 'Remixer' ? 'selected' : ''}>Remixer</option>
+                    </select>
+                </div>
+                ${window.transferState.artists.length > 1 ? `
+                    <button type="button" onclick="removeTransferArtist(${idx})" class="text-red-400 text-xs px-2 hover:text-red-300">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                ` : ''}
+            </div>
+        `).join('');
+    };
+
+    window.addTransferArtist = function() {
+        window.transferState.artists.push({ name: '', role: 'Primary' });
+        const container = document.getElementById('transfer_artists_container');
+        if (container) container.innerHTML = window.renderTransferArtistInputs();
+    };
+
+    window.removeTransferArtist = function(idx) {
+        window.transferState.artists.splice(idx, 1);
+        const container = document.getElementById('transfer_artists_container');
+        if (container) container.innerHTML = window.renderTransferArtistInputs();
+    };
+
+    /* ==========================================================================
+       GENRE & TRACK LIST ADJUSTMENTS
+       ========================================================================== */
+    window.handleTransferGenreChange = function(genre) {
+        window.transferState.primaryGenre = genre;
+        window.transferState.secondaryGenre = '';
         
-        <div>
-           <label class="block text-xs font-medium text-gray-400 mb-1">Plain Lyrics (Optional)</label>
-           <textarea name="lyrics" rows="2" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none" placeholder="Paste lyrics here..."></textarea>
-        </div>
+        const subSelect = document.getElementById('transferSubgenreSelect');
+        if (!subSelect) return;
 
-        <h3 class="text-base font-bold text-white border-b border-white/10 pb-3 pt-4">4. DSP Store URLs (Optional - Preserves Playlists)</h3>
+        if (genre && window.TRANSFER_GENRE_MAP[genre]) {
+            subSelect.disabled = false;
+            subSelect.innerHTML = `<option value="">Select Subgenre</option>` + 
+                window.TRANSFER_GENRE_MAP[genre].map(sub => `<option value="${sub}">${sub}</option>`).join('');
+        } else {
+            subSelect.disabled = true;
+            subSelect.innerHTML = `<option value="">-- Select Primary Genre First --</option>`;
+        }
+    };
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input type="url" name="dsp_spotify" placeholder="Spotify Track/Album URL" class="bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none">
-          <input type="url" name="dsp_apple" placeholder="Apple Music Album URL" class="bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none">
-        </div>
+    window.syncFirstTrackTitle = function() {
+        if (window.transferState.type === 'Single' && window.transferState.tracks[0]) {
+            window.transferState.tracks[0].title = window.transferState.title;
+            const firstInput = document.getElementById('track_title_input_0');
+            if (firstInput) firstInput.value = window.transferState.title;
+        }
+    };
 
-        <!-- Rights Ownership Confirmation -->
-        <div class="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2">
-          <label class="flex items-center gap-3 cursor-pointer">
-            <input type="checkbox" id="ownership_confirm" required class="rounded accent-amber-400">
-            <span class="text-xs text-gray-200 font-medium">I confirm I own 100% of the rights to this release and authorize Audiory to transfer delivery from my previous distributor.</span>
-          </label>
-        </div>
+    window.adjustTransferTracksForType = function() {
+        const type = window.transferState.type;
 
-        <button type="submit" id="btn_submit_transfer" class="w-full py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs uppercase tracking-wider transition">
-          <i class="fa-solid fa-cloud-arrow-up mr-2"></i> Submit Release Transfer
-        </button>
-      </form>
-    </div>
+        // Toggle "Add Another Track" button depending on EP / Album / Single selection
+        const btnWrapper = document.getElementById('transfer_add_track_btn_wrapper');
+        if (btnWrapper) {
+            btnWrapper.innerHTML = (type === 'EP' || type === 'Album') ? `
+                <button type="button" onclick="addTrackToTransfer()" class="px-3 py-1.5 rounded-lg bg-amber-400 text-black font-bold text-xs hover:bg-amber-300 transition">
+                    <i class="fa-solid fa-plus mr-1"></i> Add Another Track
+                </button>
+            ` : '';
+        }
 
-    <!-- TAB 2: BULK CSV IMPORT -->
-    <div id="view_csv" class="hidden bg-brand-dark/40 border border-white/10 rounded-2xl p-6 space-y-4 text-center">
-      <i class="fa-solid fa-file-csv text-4xl text-emerald-400"></i>
-      <h3 class="text-base font-bold text-white">Bulk Transfer Metadata (CSV / Excel)</h3>
-      <p class="text-xs text-gray-400 max-w-lg mx-auto">Upload your export CSV sheet containing UPCs, ISRCs, Release Titles, and Artist Information.</p>
-      
-      <div class="border-2 border-dashed border-white/20 hover:border-emerald-400/50 rounded-2xl p-8 transition cursor-pointer max-w-xl mx-auto">
-        <input type="file" id="csv_file_input" accept=".csv" class="hidden" onchange="handleCsvSelected(event)">
-        <label for="csv_file_input" class="cursor-pointer space-y-2 block">
-          <i class="fa-solid fa-upload text-2xl text-gray-400"></i>
-          <span class="block text-xs text-gray-300 font-semibold" id="csv_file_label">Click to upload metadata CSV or drag & drop</span>
-        </label>
-      </div>
+        if (type === 'Single') {
+            window.transferState.tracks = [window.transferState.tracks[0] || {
+                title: window.transferState.title || '',
+                version: '',
+                discNumber: 1,
+                isrc: '',
+                explicit: false,
+                audioFile: null,
+                previewUrl: '',
+                tiktokStartTime: '00:30',
+                lyrics: ''
+            }];
+        }
+        
+        const container = document.getElementById('transfer_tracks_list_container');
+        if (container) container.innerHTML = window.renderTransferTracksList();
+    };
 
-      <button onclick="submitCsvTransfer()" id="btn_submit_csv" class="px-6 py-3 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-black font-bold text-xs uppercase tracking-wider transition">
-        Process CSV Import
-      </button>
-    </div>
+    /* ==========================================================================
+       DYNAMIC TRACKS RENDERER WITH AUDIO PREVIEW
+       ========================================================================== */
+    window.renderTransferTracksList = function() {
+        return window.transferState.tracks.map((track, idx) => `
+            <div class="p-5 rounded-2xl bg-black/40 border border-white/10 space-y-4">
+                <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                    <span class="text-xs font-bold text-amber-400 uppercase tracking-wider">Track ${idx + 1} of ${window.transferState.tracks.length}</span>
+                    ${window.transferState.tracks.length > 1 ? `
+                        <button type="button" onclick="removeTrackFromTransfer(${idx})" class="text-xs text-red-400 hover:text-red-300">
+                            <i class="fa-solid fa-trash mr-1"></i> Remove Track
+                        </button>
+                    ` : ''}
+                </div>
 
-    <!-- TAB 3: DDEX IMPORT -->
-    <div id="view_ddex" class="hidden bg-brand-dark/40 border border-white/10 rounded-2xl p-6 space-y-4 text-center">
-      <i class="fa-solid fa-code text-4xl text-cyan-400"></i>
-      <h3 class="text-base font-bold text-white">DDEX ERN XML Import</h3>
-      <p class="text-xs text-gray-400 max-w-lg mx-auto">Upload an enterprise-standard DDEX XML file to automatically parse release structure and track ISRCs.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Track Title *</label>
+                        <input type="text" id="track_title_input_${idx}" required value="${track.title || ''}" 
+                               oninput="window.transferState.tracks[${idx}].title = this.value" 
+                               placeholder="Track Title" class="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Version / Subtitle</label>
+                        <input type="text" value="${track.version || ''}" 
+                               oninput="window.transferState.tracks[${idx}].version = this.value" 
+                               placeholder="e.g. Extended Mix" class="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Disc Number</label>
+                        <input type="number" min="1" value="${track.discNumber || 1}" 
+                               onchange="window.transferState.tracks[${idx}].discNumber = parseInt(this.value)" 
+                               class="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                    </div>
+                </div>
 
-      <div class="border-2 border-dashed border-white/20 hover:border-cyan-400/50 rounded-2xl p-8 transition cursor-pointer max-w-xl mx-auto">
-        <input type="file" id="ddex_file_input" accept=".xml" class="hidden" onchange="handleDdexSelected(event)">
-        <label for="ddex_file_input" class="cursor-pointer space-y-2 block">
-          <i class="fa-solid fa-file-code text-2xl text-gray-400"></i>
-          <span class="block text-xs text-gray-300 font-semibold" id="ddex_file_label">Click to upload DDEX .xml file</span>
-        </label>
-      </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Track ISRC Code *</label>
+                        <input type="text" required value="${track.isrc || ''}" 
+                               oninput="window.transferState.tracks[${idx}].isrc = this.value" 
+                               placeholder="e.g. US-S1Z-24-00001" class="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Explicit Status *</label>
+                        <select onchange="window.transferState.tracks[${idx}].explicit = (this.value === 'true')" 
+                                class="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                            <option value="false" ${!track.explicit ? 'selected' : ''}>Clean / Non-Explicit</option>
+                            <option value="true" ${track.explicit ? 'selected' : ''}>Explicit</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">TikTok Start (MM:SS)</label>
+                        <input type="text" value="${track.tiktokStartTime || '00:30'}" 
+                               oninput="window.transferState.tracks[${idx}].tiktokStartTime = this.value" 
+                               placeholder="00:30" class="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                    </div>
+                </div>
 
-      <button onclick="submitDdexTransfer()" id="btn_submit_ddex" class="px-6 py-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-bold text-xs uppercase tracking-wider transition">
-        Parse DDEX XML
-      </button>
-    </div>
-  </div>`;
-}
+                <!-- Audio File Upload & Live Preview Player -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Audio Master File (WAV/FLAC) *</label>
+                        <input type="file" accept="audio/wav,audio/flac" required 
+                               onchange="handleTransferAudioPreview(${idx}, this)" 
+                               class="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-400 file:text-black hover:file:bg-amber-300">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Audio Live Waveform / Player Preview</label>
+                        <div id="transfer_audio_preview_container_${idx}" class="flex items-center h-10 px-3 rounded-xl bg-black/60 border border-white/10">
+                            ${track.previewUrl ? `
+                                <audio controls class="w-full h-8">
+                                    <source src="${track.previewUrl}">
+                                    Your browser does not support audio playback.
+                                </audio>
+                            ` : '<span class="text-xs text-gray-500">No audio uploaded yet</span>'}
+                        </div>
+                    </div>
+                </div>
 
-// Global Controller Initialization
-window.initTransferCatalog = function() {
-  window.setTransferMode = function(mode) {
-    ['manual', 'csv', 'ddex'].forEach(m => {
-      document.getElementById(`view_${m}`).classList.toggle('hidden', m !== mode);
-      const tab = document.getElementById(`tab_${m}`);
-      if (m === mode) {
-        tab.className = "p-4 rounded-xl border border-brand-accent bg-brand-dark/80 text-left transition flex items-start gap-3";
-      } else {
-        tab.className = "p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-left transition flex items-start gap-3";
-      }
-    });
-  };
-};
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Plain Text Lyrics (Optional)</label>
+                    <textarea oninput="window.transferState.tracks[${idx}].lyrics = this.value" 
+                              rows="2" class="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none" 
+                              placeholder="Paste lyrics here...">${track.lyrics || ''}</textarea>
+                </div>
+            </div>
+        `).join('');
+    };
 
-// UI Toast helper (Replaces alerts)
-function showTransferAlert(message, type = 'success') {
-  const alertBox = document.getElementById('transferAlert');
-  if (!alertBox) return;
+    window.addTrackToTransfer = function() {
+        window.transferState.tracks.push({
+            title: '',
+            version: '',
+            discNumber: 1,
+            isrc: '',
+            explicit: false,
+            audioFile: null,
+            previewUrl: '',
+            tiktokStartTime: '00:30',
+            lyrics: ''
+        });
+        const container = document.getElementById('transfer_tracks_list_container');
+        if (container) container.innerHTML = window.renderTransferTracksList();
+    };
 
-  alertBox.className = type === 'success' 
-    ? 'p-4 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-between'
-    : 'p-4 rounded-xl text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20 flex items-center justify-between';
-  
-  alertBox.innerHTML = `<span>${message}</span><button onclick="this.parentElement.classList.add('hidden')" class="text-white hover:opacity-75 text-sm ml-4">✕</button>`;
-  alertBox.classList.remove('hidden');
-}
+    window.removeTrackFromTransfer = function(idx) {
+        if (window.transferState.tracks.length <= 1) return;
+        window.transferState.tracks.splice(idx, 1);
+        const container = document.getElementById('transfer_tracks_list_container');
+        if (container) container.innerHTML = window.renderTransferTracksList();
+    };
 
-// 1. Manual Form Handler
-window.submitManualTransfer = async function(e) {
-  e.preventDefault();
-  const form = e.target;
-  const submitBtn = document.getElementById('btn_submit_transfer');
-  
-  submitBtn.disabled = true;
-  submitBtn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Validating Metadata...`;
+    /* ==========================================================================
+       FILE INSPECTION & PREVIEWS
+       ========================================================================== */
+    window.handleTransferArtworkSelection = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
 
-  try {
-    const formData = new FormData(form);
-    
-    formData.append('previous_dsp_urls', JSON.stringify({
-      spotify: formData.get('dsp_spotify') || '',
-      apple: formData.get('dsp_apple') || ''
-    }));
+        window.transferState.artwork.file = file;
+        const previewContainer = document.getElementById('transferArtworkPreviewContainer');
+        const previewImg = document.getElementById('transferArtworkPreviewImg');
+        const specsBox = document.getElementById('transferArtworkSpecsBox');
 
-    const response = await fetch('/api/catalog/transfer', {
-      method: 'POST',
-      body: formData
-    });
+        const previewUrl = URL.createObjectURL(file);
+        window.transferState.artwork.url = previewUrl;
+        if (previewImg) previewImg.src = previewUrl;
 
-    const result = await response.json();
+        const inspected = await inspectTransferImageFile(file);
+        window.transferState.artwork.inspected = inspected;
 
-    if (response.ok && result.success) {
-      showTransferAlert('Catalog release transfer submitted successfully! Status is now PENDING VERIFICATION.', 'success');
-      form.reset();
-    } else {
-      showTransferAlert(result.error || 'Failed to submit transfer.', 'error');
+        if (specsBox) {
+            specsBox.innerHTML = `
+                <p>File Name: ${inspected.filename}</p>
+                <p>Dimensions: ${inspected.width}x${inspected.height} px</p>
+                <p>Format: ${inspected.mime}</p>
+                <p class="${inspected.valid ? 'text-emerald-400' : 'text-red-400'} font-bold">
+                    ${inspected.valid ? '✓ Artwork Meets Requirements' : '✗ Invalid Dimensions (Min 3000x3000px required)'}
+                </p>
+            `;
+        }
+        if (previewContainer) previewContainer.classList.remove('hidden');
+    };
+
+    async function inspectTransferImageFile(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = (e) => {
+                const arr = (new Uint8Array(e.target.result)).subarray(0, 4);
+                let header = "";
+                for (let i = 0; i < arr.length; i++) header += arr[i].toString(16);
+                
+                let mime = "unknown";
+                if (header.startsWith("89504e47")) mime = "image/png";
+                else if (header.startsWith("ffd8ff")) mime = "image/jpeg";
+
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
+                img.onload = () => {
+                    resolve({
+                        filename: file.name,
+                        mime: mime,
+                        width: img.width,
+                        height: img.height,
+                        fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+                        valid: (mime !== "unknown" && img.width >= 3000 && img.height >= 3000)
+                    });
+                };
+            };
+            reader.readAsArrayBuffer(file.slice(0, 4));
+        });
     }
-  } catch (err) {
-    showTransferAlert('Network error occurred during submission.', 'error');
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.innerHTML = `<i class="fa-solid fa-cloud-arrow-up mr-2"></i> Submit Release Transfer`;
-  }
-};
 
-// 2. CSV File Selector & Processing Handler (No Popups)
-window.handleCsvSelected = function(e) {
-  const file = e.target.files[0];
-  if (file) {
-    document.getElementById('csv_file_label').textContent = `Selected File: ${file.name}`;
-  }
-};
+    window.handleTransferAudioPreview = function(trackIndex, inputElement) {
+        const file = inputElement.files[0];
+        if (!file) return;
 
-window.submitCsvTransfer = async function() {
-  const fileInput = document.getElementById('csv_file_input');
-  if (!fileInput.files.length) {
-    showTransferAlert('Please select a valid CSV file before submitting.', 'error');
-    return;
-  }
+        window.transferState.tracks[trackIndex].audioFile = file;
+        const previewUrl = URL.createObjectURL(file);
+        window.transferState.tracks[trackIndex].previewUrl = previewUrl;
 
-  const btn = document.getElementById('btn_submit_csv');
-  btn.disabled = true;
-  btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Parsing CSV...`;
+        const container = document.getElementById(`transfer_audio_preview_container_${trackIndex}`);
+        if (container) {
+            container.innerHTML = `
+                <audio controls class="w-full h-8">
+                    <source src="${previewUrl}" type="${file.type}">
+                    Your browser does not support audio playback.
+                </audio>
+            `;
+        }
+    };
 
-  const reader = new FileReader();
-  reader.onload = async function(e) {
-    try {
-      const text = e.target.result;
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-      
-      const rows = lines.slice(1).map(line => {
-        const values = line.split(',');
-        let rowData = {};
-        headers.forEach((h, i) => { rowData[h] = values[i] ? values[i].trim() : ''; });
-        return rowData;
-      });
+    /* ==========================================================================
+       SUBMISSION HANDLER
+       ========================================================================== */
+    window.handleTransferSubmission = async function(e) {
+        if (e) e.preventDefault();
 
-      const response = await fetch('/api/catalog/transfer/csv', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows })
-      });
+        if (!window.transferState.confirmedRights) {
+            return window.showToast ? window.showToast('Please confirm rights ownership before submitting.') : alert('Please confirm rights ownership before submitting.');
+        }
 
-      const result = await response.json();
-      if (response.ok && result.success) {
-        showTransferAlert(`Successfully imported ${result.count} releases from CSV!`, 'success');
-        fileInput.value = '';
-        document.getElementById('csv_file_label').textContent = 'Click to upload metadata CSV or drag & drop';
-      } else {
-        showTransferAlert(result.error || 'Failed to parse CSV.', 'error');
-      }
-    } catch (err) {
-      showTransferAlert('Error reading CSV file content.', 'error');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = `Process CSV Import`;
-    }
-  };
-  reader.readAsText(fileInput.files[0]);
-};
+        if (!window.transferState.artwork.file) {
+            return window.showToast ? window.showToast('Please select a valid artwork file.') : alert('Please select a valid artwork file.');
+        }
 
-// 3. DDEX File Selector & Ingestion Handler (No Popups)
-window.handleDdexSelected = function(e) {
-  const file = e.target.files[0];
-  if (file) {
-    document.getElementById('ddex_file_label').textContent = `Selected XML: ${file.name}`;
-  }
-};
+        const btn = document.getElementById('btn_submit_transfer');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin mr-2"></i> Uploading & Transferring Release...`;
+        }
 
-window.submitDdexTransfer = async function() {
-  const fileInput = document.getElementById('ddex_file_input');
-  if (!fileInput.files.length) {
-    showTransferAlert('Please select a DDEX XML file before submitting.', 'error');
-    return;
-  }
+        try {
+            // Upload Artwork File
+            let coverUrl = '';
+            if (typeof uploadFileToR2 === 'function') {
+                const artRes = await uploadFileToR2(window.transferState.artwork.file, 'artwork');
+                coverUrl = typeof artRes === 'string' ? artRes : (artRes?.url || '');
+            }
 
-  const btn = document.getElementById('btn_submit_ddex');
-  btn.disabled = true;
-  btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Ingesting DDEX XML...`;
+            // Upload Audio File(s)
+            for (let i = 0; i < window.transferState.tracks.length; i++) {
+                const t = window.transferState.tracks[i];
+                if (t.audioFile && typeof uploadFileToR2 === 'function') {
+                    const trackRes = await uploadFileToR2(t.audioFile, 'audio');
+                    window.transferState.tracks[i].audioUrl = typeof trackRes === 'string' ? trackRes : (trackRes?.url || '');
+                }
+            }
 
-  try {
-    const xmlContent = await fileInput.files[0].text();
-    const response = await fetch('/api/catalog/transfer/ddex', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/xml' },
-      body: xmlContent
-    });
+            // Build Transfer Payload
+            const payload = {
+                isTransfer: true,
+                previousDistributor: window.transferState.previousDistributor,
+                title: window.transferState.title,
+                type: window.transferState.type,
+                language: window.transferState.language,
+                genre: window.transferState.primaryGenre,
+                subgenre: window.transferState.secondaryGenre,
+                artists: window.transferState.artists,
+                releaseDate: window.transferState.releaseDate,
+                timezone: window.transferState.timezone,
+                upc: window.transferState.upc,
+                label: window.transferState.label,
+                cLine: window.transferState.cLine,
+                pLine: window.transferState.pLine,
+                coverUrl: coverUrl,
+                tracks: window.transferState.tracks.map(t => ({
+                    title: t.title,
+                    version: t.version,
+                    discNumber: t.discNumber,
+                    isrc: t.isrc,
+                    explicit: t.explicit,
+                    audioUrl: t.audioUrl || '',
+                    tiktokStartTime: t.tiktokStartTime,
+                    lyrics: t.lyrics
+                })),
+                dspUrls: {
+                    spotify: window.transferState.dspSpotify,
+                    apple: window.transferState.dspApple
+                },
+                submittedBy: window.currentUser ? window.currentUser.uid : 'anonymous',
+                createdAt: new Date().toISOString()
+            };
 
-    const result = await response.json();
-    if (response.ok && result.success) {
-      showTransferAlert(`DDEX Ingestion successful for "${result.parsed.title}" (UPC: ${result.parsed.upc})!`, 'success');
-      fileInput.value = '';
-      document.getElementById('ddex_file_label').textContent = 'Click to upload DDEX .xml file';
-    } else {
-      showTransferAlert(result.error || 'Failed to process DDEX file.', 'error');
-    }
-  } catch (err) {
-    showTransferAlert('Error transmitting DDEX payload.', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = `Parse DDEX XML`;
-  }
-};
+            const token = window.currentUser?.getIdToken ? await window.currentUser.getIdToken() : '';
+            const endpoint = `${WORKER_BASE_URL}/api/releases`;
+
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) throw new Error('Failed to submit transfer release to API');
+
+            if (window.showToast) window.showToast('Transfer request submitted successfully!');
+            if (typeof window.switchView === 'function') window.switchView('catalog');
+
+        } catch (err) {
+            console.error('Transfer submission error:', err);
+            if (window.showToast) window.showToast(`Transfer failed: ${err.message}`);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-cloud-arrow-up mr-2"></i> Submit Release Transfer`;
+            }
+        }
+    };
+})();
