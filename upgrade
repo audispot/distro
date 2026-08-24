@@ -1,0 +1,528 @@
+/* ==========================================================================
+   UPGRADE & SUBSCRIPTION MODULE (STRICT PAYMENT VERIFICATION)
+   ========================================================================== */
+
+// Tracks plan targeted for retries
+window.lastAttemptedPlanId = 'pro';
+
+function renderUpgradeView() {
+    return `
+        <div class="max-w-6xl mx-auto space-y-8 pb-12">
+            <!-- Header Banner -->
+            <div class="relative overflow-hidden rounded-3xl bg-gradient-to-r from-brand-dark via-gray-900 to-brand-dark p-8 border border-brand-border/60 shadow-2xl">
+                <div class="relative z-10 max-w-2xl space-y-3">
+                    <span class="px-3 py-1 text-[11px] font-bold tracking-wider text-brand-accent bg-brand-accent/10 border border-brand-accent/20 rounded-full uppercase">
+                        Subscription & Tier Management
+                    </span>
+                    <h1 class="text-3xl font-extrabold text-white tracking-tight">Upgrade Your Artist Membership</h1>
+                    <p class="text-sm text-gray-400">Unlock unlimited global distribution, keep 100% of your earnings, and gain access to dedicated label services.</p>
+                </div>
+            </div>
+
+            <!-- Current Verified Active Plan Banner -->
+            <div id="current-plan-card" class="bg-brand-dark/80 border border-brand-border/80 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-lg">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-brand-accent/10 border border-brand-accent/30 flex items-center justify-center text-brand-accent text-xl">
+                        <i class="fa-solid fa-crown"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-gray-400 uppercase font-semibold">Active Plan:</span>
+                            <span id="active-plan-name" class="text-sm font-bold text-white">Loading...</span>
+                        </div>
+                        <p id="active-plan-status" class="text-xs text-gray-400 mt-0.5">Fetching verified status...</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span id="active-plan-badge" class="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        Checking...
+                    </span>
+                </div>
+            </div>
+
+            <!-- Pending Transaction Banner (Appears when awaiting M-Pesa PIN confirmation or upon failure) -->
+            <div id="pending-transaction-banner" class="hidden bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 transition-all">
+                <div class="flex items-center gap-3">
+                    <i id="pending-banner-icon" class="fa-solid fa-clock text-amber-400 text-lg"></i>
+                    <div>
+                        <h4 id="pending-banner-title" class="text-xs font-bold text-amber-300">Payment Pending Confirmation</h4>
+                        <p id="pending-banner-desc" class="text-[11px] text-gray-400">An M-Pesa push was sent to your phone. Enter your PIN to activate your tier.</p>
+                    </div>
+                </div>
+                <button id="btn-check-payment-status" onclick="fetchSubscriptionAndHistory()" class="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5">
+                    <i id="check-status-icon" class="fa-solid fa-rotate-right"></i> 
+                    <span id="check-status-text">Check Payment Status</span>
+                </button>
+            </div>
+
+            <!-- Pricing Cards Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Starter Plan -->
+                <div class="bg-brand-dark/40 border border-brand-border/60 rounded-3xl p-6 flex flex-col justify-between hover:border-gray-700 transition-all">
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h3 class="text-lg font-bold text-white">Starter Plan</h3>
+                                <p class="text-xs text-gray-400 mt-1">Free Tier for New Artists</p>
+                            </div>
+                        </div>
+                        <div class="py-2">
+                            <span class="text-3xl font-extrabold text-white">$0.00</span>
+                            <span class="text-xs text-gray-400">/ forever</span>
+                        </div>
+                        <ul class="space-y-2.5 text-xs text-gray-300">
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Single Release Access</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> 85% Royalty Share</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Standard Store Delivery</li>
+                            <li class="flex items-center gap-2 text-gray-500"><i class="fa-solid fa-xmark"></i> No Pre-Order Customization</li>
+                        </ul>
+                    </div>
+                    <button id="btn-plan-starter" onclick="openCheckoutModal('starter')" class="mt-6 w-full py-2.5 px-4 rounded-xl text-xs font-semibold border border-brand-border text-gray-300 hover:text-white hover:bg-brand-border/40 transition-all">
+                        Select Free Plan
+                    </button>
+                </div>
+
+                <!-- Pro Artist Plan -->
+                <div class="relative bg-brand-dark border-2 border-brand-accent/60 rounded-3xl p-6 flex flex-col justify-between shadow-xl shadow-brand-accent/5">
+                    <div class="absolute -top-3 right-6 px-3 py-0.5 rounded-full text-[10px] font-extrabold bg-brand-accent text-black uppercase tracking-wider">
+                        Most Popular
+                    </div>
+                    <div class="space-y-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Pro Artist Plan</h3>
+                            <p class="text-xs text-gray-400 mt-1">For Solo Artists & Bands</p>
+                        </div>
+                        <div class="py-2">
+                            <span class="text-3xl font-extrabold text-white">$19.99</span>
+                            <span class="text-xs text-gray-400">/ year</span>
+                        </div>
+                        <ul class="space-y-2.5 text-xs text-gray-300">
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> <strong>Unlimited</strong> Music Releases</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> <strong>100%</strong> Royalty Share</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Spotify & Apple Artist Verification</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Priority Store Delivery</li>
+                        </ul>
+                    </div>
+                    <button id="btn-plan-pro" onclick="openCheckoutModal('pro')" class="mt-6 w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-brand-accent text-black hover:brightness-110 transition-all font-bold">
+                        Upgrade to Pro
+                    </button>
+                </div>
+
+                <!-- Label Partner Plan -->
+                <div class="bg-brand-dark/40 border border-brand-border/60 rounded-3xl p-6 flex flex-col justify-between hover:border-gray-700 transition-all">
+                    <div class="space-y-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Label Partner</h3>
+                            <p class="text-xs text-gray-400 mt-1">For Managers & Record Labels</p>
+                        </div>
+                        <div class="py-2">
+                            <span class="text-3xl font-extrabold text-white">$49.99</span>
+                            <span class="text-xs text-gray-400">/ year</span>
+                        </div>
+                        <ul class="space-y-2.5 text-xs text-gray-300">
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Unlimited Releases for Multiple Artists</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> 100% Royalty Retention</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Custom Label Name Setup</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Dedicated Account Manager</li>
+                        </ul>
+                    </div>
+                    <button id="btn-plan-label" onclick="openCheckoutModal('label')" class="mt-6 w-full py-2.5 px-4 rounded-xl text-xs font-semibold border border-brand-border text-gray-300 hover:text-white hover:bg-brand-border/40 transition-all">
+                        Upgrade to Label
+                    </button>
+                </div>
+            </div>
+
+            <!-- Feature Comparison Table -->
+            <div class="bg-brand-dark/60 border border-brand-border/80 rounded-3xl p-6 space-y-4">
+                <h3 class="text-base font-bold text-white">Compare Plan Features</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead>
+                            <tr class="border-b border-brand-border/60 text-gray-400">
+                                <th class="py-3 px-4">Feature</th>
+                                <th class="py-3 px-4">Starter</th>
+                                <th class="py-3 px-4 text-brand-accent">Pro Artist</th>
+                                <th class="py-3 px-4">Label Partner</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-brand-border/30 text-gray-300">
+                            <tr>
+                                <td class="py-3 px-4 font-medium">Releases Included</td>
+                                <td class="py-3 px-4">Limited</td>
+                                <td class="py-3 px-4 font-bold text-white">Unlimited</td>
+                                <td class="py-3 px-4 font-bold text-white">Unlimited</td>
+                            </tr>
+                            <tr>
+                                <td class="py-3 px-4 font-medium">Royalty Split</td>
+                                <td class="py-3 px-4">85% Keep</td>
+                                <td class="py-3 px-4 text-emerald-400 font-bold">100% Keep</td>
+                                <td class="py-3 px-4 text-emerald-400 font-bold">100% Keep</td>
+                            </tr>
+                            <tr>
+                                <td class="py-3 px-4 font-medium">Custom Label Imprint</td>
+                                <td class="py-3 px-4 text-gray-500"><i class="fa-solid fa-minus"></i></td>
+                                <td class="py-3 px-4 text-emerald-400"><i class="fa-solid fa-check"></i></td>
+                                <td class="py-3 px-4 text-emerald-400"><i class="fa-solid fa-check"></i></td>
+                            </tr>
+                            <tr>
+                                <td class="py-3 px-4 font-medium">Catalog Transfers</td>
+                                <td class="py-3 px-4 text-gray-500"><i class="fa-solid fa-minus"></i></td>
+                                <td class="py-3 px-4 text-emerald-400"><i class="fa-solid fa-check"></i></td>
+                                <td class="py-3 px-4 text-emerald-400"><i class="fa-solid fa-check"></i></td>
+                            </tr>
+                            <tr>
+                                <td class="py-3 px-4 font-medium">Support Tier</td>
+                                <td class="py-3 px-4">Standard</td>
+                                <td class="py-3 px-4">Priority</td>
+                                <td class="py-3 px-4 font-bold text-brand-accent">24/7 VIP Direct</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Billing History Table -->
+            <div class="bg-brand-dark/60 border border-brand-border/80 rounded-3xl p-6 space-y-4">
+                <h3 class="text-base font-bold text-white">Billing & Payment History</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead>
+                            <tr class="border-b border-brand-border/60 text-gray-400">
+                                <th class="py-2.5 px-4">Invoice</th>
+                                <th class="py-2.5 px-4">Date</th>
+                                <th class="py-2.5 px-4">Description</th>
+                                <th class="py-2.5 px-4">Gateway</th>
+                                <th class="py-2.5 px-4">Amount</th>
+                                <th class="py-2.5 px-4">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="billing-history-tbody" class="divide-y divide-brand-border/30 text-gray-300">
+                            <tr>
+                                <td colspan="6" class="py-6 text-center text-gray-500">Loading billing records...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Checkout Payment Modal -->
+        <div id="checkoutModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+            <div class="bg-brand-dark border border-brand-border rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative">
+                <button onclick="closeCheckoutModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+
+                <div class="space-y-1">
+                    <h3 class="text-lg font-bold text-white">Complete Plan Upgrade</h3>
+                    <p id="checkout-plan-desc" class="text-xs text-gray-400">Select payment method for your subscription</p>
+                </div>
+
+                <form id="upgrade-payment-form" onsubmit="handleUpgradeSubmit(event)" class="space-y-4">
+                    <input type="hidden" id="selected_plan_id" value="" />
+
+                    <!-- Payment Gateway Option Selector -->
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-2">Payment Gateway</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <label class="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-brand-border/80 bg-brand-dark/50 cursor-pointer hover:border-brand-accent transition-all text-xs">
+                                <input type="radio" name="paymentMethod" value="mpesa" checked onchange="togglePaymentInputs('mpesa')" class="hidden peer">
+                                <i class="fa-solid fa-mobile-screen-button text-emerald-400 text-base"></i>
+                                <span class="peer-checked:font-bold text-gray-300">M-Pesa</span>
+                            </label>
+                            <label class="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-brand-border/80 bg-brand-dark/50 cursor-pointer hover:border-brand-accent transition-all text-xs">
+                                <input type="radio" name="paymentMethod" value="paypal" onchange="togglePaymentInputs('paypal')" class="hidden peer">
+                                <i class="fa-brands fa-paypal text-blue-400 text-base"></i>
+                                <span class="peer-checked:font-bold text-gray-300">PayPal</span>
+                            </label>
+                            <label class="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-brand-border/80 bg-brand-dark/50 cursor-pointer hover:border-brand-accent transition-all text-xs">
+                                <input type="radio" name="paymentMethod" value="pesapal" onchange="togglePaymentInputs('pesapal')" class="hidden peer">
+                                <i class="fa-solid fa-credit-card text-purple-400 text-base"></i>
+                                <span class="peer-checked:font-bold text-gray-300">PesaPal</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- M-Pesa Input -->
+                    <div id="mpesa-field" class="space-y-1">
+                        <label class="text-xs font-semibold text-gray-300">M-Pesa Phone Number</label>
+                        <input type="tel" id="checkout_phone" placeholder="254712345678" class="w-full px-3.5 py-2.5 rounded-xl bg-gray-900 border border-brand-border text-xs text-white focus:outline-none focus:border-brand-accent" />
+                        <p class="text-[10px] text-gray-500">Must start with country code e.g. 2547XXXXXXXX</p>
+                    </div>
+
+                    <div id="checkout-status-msg" class="hidden text-xs p-3 rounded-xl bg-brand-accent/10 border border-brand-accent/20 text-brand-accent"></div>
+
+                    <button type="submit" id="btn-submit-upgrade" class="w-full py-3 rounded-xl bg-brand-accent text-black font-bold text-xs hover:brightness-110 transition-all flex justify-center items-center gap-2">
+                        <span>Process Upgrade</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    `;
+}
+
+window.initUpgradePage = async function() {
+    await window.fetchSubscriptionAndHistory();
+};
+
+window.fetchSubscriptionAndHistory = async function() {
+    const btnCheck = document.getElementById('btn-check-payment-status');
+    const iconCheck = document.getElementById('check-status-icon');
+    const textCheck = document.getElementById('check-status-text');
+
+    // Set Loading State for "Check Payment Status"
+    if (btnCheck) btnCheck.disabled = true;
+    if (iconCheck) iconCheck.className = 'fa-solid fa-spinner fa-spin';
+    if (textCheck) textCheck.innerText = 'Checking payment status...';
+
+    const token = window.currentUser?.getIdToken ? await window.currentUser.getIdToken() : '';
+    const baseUrl = window.WORKER_BASE_URL || '';
+
+    try {
+        const res = await fetch(`${baseUrl}/api/billing-history`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!res.ok) throw new Error('Failed to fetch subscription data');
+
+        const data = await res.json();
+        const sub = data.subscription;
+        const history = data.history || [];
+
+        // STRICT VERIFICATION: Verify if subscription status is truly Active
+        const isVerifiedActive = sub?.status === 'Active';
+        const activePlanId = isVerifiedActive ? (sub?.planId || 'starter') : 'starter';
+
+        // Evaluate transaction statuses
+        const hasPendingInvoice = history.some(item => item.status === 'Pending');
+        const latestTx = history[0];
+        const isLatestFailed = latestTx && (latestTx.status === 'Failed' || latestTx.status === 'Cancelled' || latestTx.status === 'Declined');
+
+        if (latestTx && latestTx.planId) {
+            window.lastAttemptedPlanId = latestTx.planId;
+        }
+
+        // Update Top Active Plan Card
+        const planNameEl = document.getElementById('active-plan-name');
+        const planStatusEl = document.getElementById('active-plan-status');
+        const planBadgeEl = document.getElementById('active-plan-badge');
+
+        if (planNameEl) planNameEl.innerText = sub?.planName || 'Starter Plan';
+        if (planStatusEl) planStatusEl.innerText = `Verified Status: ${sub?.status || 'Active'}`;
+        if (planBadgeEl) {
+            planBadgeEl.innerText = sub?.status || 'Active';
+            planBadgeEl.className = isVerifiedActive
+                ? 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                : 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20';
+        }
+
+        // Handle Pending / Failed Transaction Banner State
+        const pendingBanner = document.getElementById('pending-transaction-banner');
+        const bannerIcon = document.getElementById('pending-banner-icon');
+        const bannerTitle = document.getElementById('pending-banner-title');
+        const bannerDesc = document.getElementById('pending-banner-desc');
+
+        if (pendingBanner) {
+            if (hasPendingInvoice) {
+                pendingBanner.className = 'bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 transition-all';
+                if (bannerIcon) bannerIcon.className = 'fa-solid fa-clock text-amber-400 text-lg';
+                if (bannerTitle) {
+                    bannerTitle.innerText = 'Payment Pending Confirmation';
+                    bannerTitle.className = 'text-xs font-bold text-amber-300';
+                }
+                if (bannerDesc) bannerDesc.innerText = 'An M-Pesa push was sent to your phone. Enter your PIN to activate your tier.';
+                
+                if (iconCheck) iconCheck.className = 'fa-solid fa-rotate-right';
+                if (textCheck) textCheck.innerText = 'Check Payment Status';
+                if (btnCheck) {
+                    btnCheck.onclick = function() { window.fetchSubscriptionAndHistory(); };
+                    btnCheck.className = 'px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5';
+                }
+                pendingBanner.classList.remove('hidden');
+            } else if (isLatestFailed && !isVerifiedActive) {
+                pendingBanner.className = 'bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 transition-all';
+                if (bannerIcon) bannerIcon.className = 'fa-solid fa-circle-xmark text-red-400 text-lg';
+                if (bannerTitle) {
+                    bannerTitle.innerText = 'Payment Failed';
+                    bannerTitle.className = 'text-xs font-bold text-red-300';
+                }
+                if (bannerDesc) bannerDesc.innerText = 'Transaction was cancelled or declined. Please retry to upgrade.';
+                
+                if (iconCheck) iconCheck.className = 'fa-solid fa-rotate-right';
+                if (textCheck) textCheck.innerText = 'Payment Failed - Retry';
+                if (btnCheck) {
+                    btnCheck.onclick = function() { window.openCheckoutModal(window.lastAttemptedPlanId || 'pro'); };
+                    btnCheck.className = 'px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5';
+                }
+                pendingBanner.classList.remove('hidden');
+            } else {
+                pendingBanner.classList.add('hidden');
+            }
+        }
+
+        // Highlight Plan Selection Buttons based ONLY on active verified plan
+        ['starter', 'pro', 'label'].forEach(planKey => {
+            const btn = document.getElementById(`btn-plan-${planKey}`);
+            if (btn) {
+                if (planKey === activePlanId) {
+                    btn.innerText = 'Current Plan';
+                    btn.disabled = true;
+                    btn.className = 'mt-6 w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-gray-800 text-gray-500 cursor-not-allowed';
+                } else {
+                    btn.disabled = false;
+                    btn.innerText = (planKey === 'pro') ? 'Upgrade to Pro' : (planKey === 'label' ? 'Upgrade to Label' : 'Select Free Plan');
+                    btn.className = (planKey === 'pro') 
+                        ? 'mt-6 w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-brand-accent text-black hover:brightness-110 transition-all font-bold'
+                        : 'mt-6 w-full py-2.5 px-4 rounded-xl text-xs font-semibold border border-brand-border text-gray-300 hover:text-white hover:bg-brand-border/40 transition-all';
+                }
+            }
+        });
+
+        // Render Billing History Table
+        const tbody = document.getElementById('billing-history-tbody');
+        if (tbody) {
+            if (history.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-gray-500">No payment records found.</td></tr>`;
+            } else {
+                tbody.innerHTML = history.map(item => `
+                    <tr>
+                        <td class="py-3 px-4 font-mono font-bold text-white">${item.invoiceId || 'N/A'}</td>
+                        <td class="py-3 px-4">${item.date || '-'}</td>
+                        <td class="py-3 px-4 capitalize">${item.description || 'Subscription Upgrade'}</td>
+                        <td class="py-3 px-4 uppercase font-bold text-gray-400">${item.gateway || 'Card'}</td>
+                        <td class="py-3 px-4 font-bold text-white">$${item.amount || '0.00'}</td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${
+                                item.status === 'Paid' 
+                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                                    : (item.status === 'Pending' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20')
+                            }">
+                                ${item.status}
+                            </span>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+    } catch (err) {
+        console.error('Error fetching subscription history:', err);
+    } finally {
+        if (btnCheck) btnCheck.disabled = false;
+    }
+};
+
+window.openCheckoutModal = function(planId) {
+    const modal = document.getElementById('checkoutModal');
+    const planInput = document.getElementById('selected_plan_id');
+    const planDesc = document.getElementById('checkout-plan-desc');
+    const msgEl = document.getElementById('checkout-status-msg');
+
+    if (planInput) planInput.value = planId;
+    if (planDesc) {
+        const names = { starter: 'Starter Plan ($0.00)', pro: 'Pro Artist Plan ($19.99/yr)', label: 'Label Partner Plan ($49.99/yr)' };
+        planDesc.innerText = `Upgrading to ${names[planId] || planId}`;
+    }
+
+    if (msgEl) {
+        msgEl.innerText = '';
+        msgEl.classList.add('hidden');
+    }
+
+    if (modal) modal.classList.remove('hidden');
+};
+
+window.closeCheckoutModal = function() {
+    const modal = document.getElementById('checkoutModal');
+    if (modal) modal.classList.add('hidden');
+};
+
+window.togglePaymentInputs = function(method) {
+    const mpesaField = document.getElementById('mpesa-field');
+    if (mpesaField) {
+        mpesaField.style.display = (method === 'mpesa') ? 'block' : 'none';
+    }
+};
+
+window.handleUpgradeSubmit = async function(e) {
+    e.preventDefault();
+
+    const planId = document.getElementById('selected_plan_id')?.value;
+    const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked')?.value || 'mpesa';
+    const phone = document.getElementById('checkout_phone')?.value?.trim();
+
+    const submitBtn = document.getElementById('btn-submit-upgrade');
+    const msgEl = document.getElementById('checkout-status-msg');
+
+    if (paymentMethod === 'mpesa' && (!phone || phone.length < 10)) {
+        if (msgEl) {
+            msgEl.innerText = 'Please provide a valid M-Pesa phone number (e.g. 2547XXXXXXXX).';
+            msgEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    if (submitBtn) submitBtn.disabled = true;
+    if (msgEl) {
+        msgEl.innerText = 'Subscribing...';
+        msgEl.classList.remove('hidden');
+    }
+
+    try {
+        const token = window.currentUser?.getIdToken ? await window.currentUser.getIdToken() : '';
+        const baseUrl = window.WORKER_BASE_URL || '';
+
+        const res = await fetch(`${baseUrl}/api/subscription/upgrade`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                planId: planId,
+                paymentMethod: paymentMethod,
+                phone: phone,
+                email: window.currentUser?.email || '',
+                displayName: window.currentUser?.displayName || 'Artist'
+            })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            throw new Error(data?.error || 'Upgrade request failed');
+        }
+
+        // Redirects (PayPal/PesaPal)
+        if (data.redirectUrl) {
+            if (msgEl) msgEl.innerText = 'Redirecting to payment portal...';
+            window.location.href = data.redirectUrl;
+            return;
+        }
+
+        // M-Pesa STK Push
+        if (data.requiresManualAction) {
+            if (msgEl) {
+                msgEl.innerText = 'STK Push sent! Please enter your M-Pesa PIN on your phone.';
+            }
+            setTimeout(() => {
+                window.closeCheckoutModal();
+                window.fetchSubscriptionAndHistory();
+            }, 3000);
+            return;
+        }
+
+        // Free Plan or Direct Confirmations
+        if (msgEl) msgEl.innerText = 'Request processed successfully!';
+        setTimeout(() => {
+            window.closeCheckoutModal();
+            window.fetchSubscriptionAndHistory();
+        }, 1500);
+
+    } catch (err) {
+        if (msgEl) {
+            msgEl.innerText = err.message || 'Payment processing failed.';
+        }
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+    }
+};
