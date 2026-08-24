@@ -1,0 +1,414 @@
+function renderTransferView() {
+  return `
+  <div class="space-y-6 max-w-6xl mx-auto pb-12">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+      <div>
+        <h1 class="text-2xl font-bold text-white flex items-center gap-3">
+          <i class="fa-solid fa-file-import text-amber-400"></i> Transfer Catalog
+        </h1>
+        <p class="text-xs text-gray-400 mt-1">Migrate your tracks & releases seamlessly from your previous distributor without losing streams.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="px-3 py-1 rounded-full text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">Zero Downtime Migration</span>
+      </div>
+    </div>
+
+    <!-- Notification Banner (Custom UI Toast) -->
+    <div id="transferAlert" class="hidden p-4 rounded-xl text-xs font-semibold flex items-center justify-between transition-all"></div>
+
+    <!-- Mode Selector Tabs -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <button onclick="setTransferMode('manual')" id="tab_manual" class="p-4 rounded-xl border border-brand-accent bg-brand-dark/80 text-left transition flex items-start gap-3">
+        <i class="fa-solid fa-pen-to-square text-amber-400 text-lg mt-0.5"></i>
+        <div>
+          <h4 class="text-sm font-bold text-white">Manual Release Entry</h4>
+          <p class="text-[11px] text-gray-400">Ideal for single tracks or small catalog transfers.</p>
+        </div>
+      </button>
+
+      <button onclick="setTransferMode('csv')" id="tab_csv" class="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-left transition flex items-start gap-3">
+        <i class="fa-solid fa-file-csv text-emerald-400 text-lg mt-0.5"></i>
+        <div>
+          <h4 class="text-sm font-bold text-white">Bulk Import (CSV / Excel)</h4>
+          <p class="text-[11px] text-gray-400">Upload metadata sheets for 10+ releases.</p>
+        </div>
+      </button>
+
+      <button onclick="setTransferMode('ddex')" id="tab_ddex" class="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-left transition flex items-start gap-3">
+        <i class="fa-solid fa-code text-cyan-400 text-lg mt-0.5"></i>
+        <div>
+          <h4 class="text-sm font-bold text-white">DDEX XML Import</h4>
+          <p class="text-[11px] text-gray-400">Enterprise XML metadata transfer package.</p>
+        </div>
+      </button>
+    </div>
+
+    <!-- TAB 1: MANUAL ENTRY FORM -->
+    <div id="view_manual" class="bg-brand-dark/40 border border-white/10 rounded-2xl p-6 space-y-6">
+      <h3 class="text-base font-bold text-white border-b border-white/10 pb-3">1. Select Previous Distributor</h3>
+      
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+        ${['DistroKid', 'TuneCore', 'CD Baby', 'UnitedMasters', 'Amuse', 'Dapstrem'].map(distro => `
+          <label class="flex flex-col items-center justify-center p-3 rounded-xl border border-white/10 bg-white/5 cursor-pointer hover:border-amber-400/50 transition group">
+            <input type="radio" name="previous_distributor" value="${distro}" class="hidden peer" ${distro === 'DistroKid' ? 'checked' : ''}>
+            <span class="text-xs font-bold text-gray-300 peer-checked:text-amber-400 transition">${distro}</span>
+            <div class="w-2 h-2 rounded-full bg-amber-400 opacity-0 peer-checked:opacity-100 mt-1"></div>
+          </label>
+        `).join('')}
+      </div>
+
+      <h3 class="text-base font-bold text-white border-b border-white/10 pb-3 pt-2">2. Release & Ownership Metadata</h3>
+      
+      <form id="manualTransferForm" onsubmit="submitManualTransfer(event)" class="space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Release Title *</label>
+            <input type="text" name="title" required placeholder="e.g. Midnight Memories" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Release Type *</label>
+            <select name="type" required class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                <option value="Single">Single</option>
+                <option value="EP">EP</option>
+                <option value="Album">Album</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Primary Language *</label>
+            <select name="language" required class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                <option value="English">English</option>
+                <option value="Swahili">Swahili</option>
+                <option value="French">French</option>
+                <option value="Spanish">Spanish</option>
+                <option value="Portuguese">Portuguese</option>
+                <option value="Instrumental">Instrumental (No Lyrics)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Primary Artist Name *</label>
+            <input type="text" name="artist_name" required placeholder="e.g. Bigi Mikkah" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Featured Artists / Remixers</label>
+            <input type="text" name="featured_artists" placeholder="e.g. Drake (Featuring), Wizkid (Remixer)" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Original Release Date *</label>
+            <input type="date" name="release_date" required class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Release Timezone *</label>
+            <select name="timezone" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                <option value="Africa/Nairobi">Africa/Nairobi (EAT)</option>
+                <option value="UTC">UTC</option>
+                <option value="America/New_York">America/New York (EST)</option>
+                <option value="Europe/London">Europe/London (GMT)</option>
+            </select>
+          </div>
+          <div>
+             <label class="block text-xs font-medium text-gray-400 mb-1">UPC Code *</label>
+             <input type="text" name="upc" required placeholder="12-digit UPC" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Primary Genre *</label>
+            <select name="genre" required class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+              <option value="">Select Genre</option>
+              <option value="Afrobeats">Afrobeats</option>
+              <option value="Hip Hop">Hip Hop</option>
+              <option value="Pop">Pop</option>
+              <option value="R&B">R&B</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Subgenre (Optional)</label>
+            <input type="text" name="subgenre" placeholder="e.g. Afropop" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Record Label *</label>
+            <input type="text" name="label" required placeholder="e.g. Audiory Records" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">(C) Line Copyright *</label>
+            <input type="text" name="c_line" required placeholder="© 2026 Audiory" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">(P) Line Phonogram *</label>
+            <input type="text" name="p_line" required placeholder="℗ 2026 Audiory" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+        </div>
+
+        <h3 class="text-base font-bold text-white border-b border-white/10 pb-3 pt-4">3. Track Data & Media Assets</h3>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div class="md:col-span-2">
+            <label class="block text-xs font-medium text-gray-400 mb-1">Track ISRC Code *</label>
+            <input type="text" name="isrc" required placeholder="e.g. US-S1Z-24-00001" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Explicit Status *</label>
+            <select name="explicit" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+                <option value="false">Clean / Non-Explicit</option>
+                <option value="true">Explicit</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">TikTok Start (MM:SS)</label>
+            <input type="text" name="tiktok_start" placeholder="00:30" value="00:30" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Master Audio File (WAV/FLAC) *</label>
+            <input type="file" name="audio_file" accept=".wav,.flac" required class="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-400 file:text-black hover:file:bg-amber-300">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Cover Artwork (3000x3000px JPG/PNG) *</label>
+            <input type="file" name="artwork" accept=".jpg,.jpeg,.png" required class="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-400 file:text-black hover:file:bg-amber-300">
+          </div>
+        </div>
+        
+        <div>
+           <label class="block text-xs font-medium text-gray-400 mb-1">Plain Lyrics (Optional)</label>
+           <textarea name="lyrics" rows="2" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-amber-400 outline-none" placeholder="Paste lyrics here..."></textarea>
+        </div>
+
+        <h3 class="text-base font-bold text-white border-b border-white/10 pb-3 pt-4">4. DSP Store URLs (Optional - Preserves Playlists)</h3>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input type="url" name="dsp_spotify" placeholder="Spotify Track/Album URL" class="bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none">
+          <input type="url" name="dsp_apple" placeholder="Apple Music Album URL" class="bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none">
+        </div>
+
+        <!-- Rights Ownership Confirmation -->
+        <div class="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" id="ownership_confirm" required class="rounded accent-amber-400">
+            <span class="text-xs text-gray-200 font-medium">I confirm I own 100% of the rights to this release and authorize Audiory to transfer delivery from my previous distributor.</span>
+          </label>
+        </div>
+
+        <button type="submit" id="btn_submit_transfer" class="w-full py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs uppercase tracking-wider transition">
+          <i class="fa-solid fa-cloud-arrow-up mr-2"></i> Submit Release Transfer
+        </button>
+      </form>
+    </div>
+
+    <!-- TAB 2: BULK CSV IMPORT -->
+    <div id="view_csv" class="hidden bg-brand-dark/40 border border-white/10 rounded-2xl p-6 space-y-4 text-center">
+      <i class="fa-solid fa-file-csv text-4xl text-emerald-400"></i>
+      <h3 class="text-base font-bold text-white">Bulk Transfer Metadata (CSV / Excel)</h3>
+      <p class="text-xs text-gray-400 max-w-lg mx-auto">Upload your export CSV sheet containing UPCs, ISRCs, Release Titles, and Artist Information.</p>
+      
+      <div class="border-2 border-dashed border-white/20 hover:border-emerald-400/50 rounded-2xl p-8 transition cursor-pointer max-w-xl mx-auto">
+        <input type="file" id="csv_file_input" accept=".csv" class="hidden" onchange="handleCsvSelected(event)">
+        <label for="csv_file_input" class="cursor-pointer space-y-2 block">
+          <i class="fa-solid fa-upload text-2xl text-gray-400"></i>
+          <span class="block text-xs text-gray-300 font-semibold" id="csv_file_label">Click to upload metadata CSV or drag & drop</span>
+        </label>
+      </div>
+
+      <button onclick="submitCsvTransfer()" id="btn_submit_csv" class="px-6 py-3 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-black font-bold text-xs uppercase tracking-wider transition">
+        Process CSV Import
+      </button>
+    </div>
+
+    <!-- TAB 3: DDEX IMPORT -->
+    <div id="view_ddex" class="hidden bg-brand-dark/40 border border-white/10 rounded-2xl p-6 space-y-4 text-center">
+      <i class="fa-solid fa-code text-4xl text-cyan-400"></i>
+      <h3 class="text-base font-bold text-white">DDEX ERN XML Import</h3>
+      <p class="text-xs text-gray-400 max-w-lg mx-auto">Upload an enterprise-standard DDEX XML file to automatically parse release structure and track ISRCs.</p>
+
+      <div class="border-2 border-dashed border-white/20 hover:border-cyan-400/50 rounded-2xl p-8 transition cursor-pointer max-w-xl mx-auto">
+        <input type="file" id="ddex_file_input" accept=".xml" class="hidden" onchange="handleDdexSelected(event)">
+        <label for="ddex_file_input" class="cursor-pointer space-y-2 block">
+          <i class="fa-solid fa-file-code text-2xl text-gray-400"></i>
+          <span class="block text-xs text-gray-300 font-semibold" id="ddex_file_label">Click to upload DDEX .xml file</span>
+        </label>
+      </div>
+
+      <button onclick="submitDdexTransfer()" id="btn_submit_ddex" class="px-6 py-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-bold text-xs uppercase tracking-wider transition">
+        Parse DDEX XML
+      </button>
+    </div>
+  </div>`;
+}
+
+// Global Controller Initialization
+window.initTransferCatalog = function() {
+  window.setTransferMode = function(mode) {
+    ['manual', 'csv', 'ddex'].forEach(m => {
+      document.getElementById(`view_${m}`).classList.toggle('hidden', m !== mode);
+      const tab = document.getElementById(`tab_${m}`);
+      if (m === mode) {
+        tab.className = "p-4 rounded-xl border border-brand-accent bg-brand-dark/80 text-left transition flex items-start gap-3";
+      } else {
+        tab.className = "p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-left transition flex items-start gap-3";
+      }
+    });
+  };
+};
+
+// UI Toast helper (Replaces alerts)
+function showTransferAlert(message, type = 'success') {
+  const alertBox = document.getElementById('transferAlert');
+  if (!alertBox) return;
+
+  alertBox.className = type === 'success' 
+    ? 'p-4 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-between'
+    : 'p-4 rounded-xl text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20 flex items-center justify-between';
+  
+  alertBox.innerHTML = `<span>${message}</span><button onclick="this.parentElement.classList.add('hidden')" class="text-white hover:opacity-75 text-sm ml-4">✕</button>`;
+  alertBox.classList.remove('hidden');
+}
+
+// 1. Manual Form Handler
+window.submitManualTransfer = async function(e) {
+  e.preventDefault();
+  const form = e.target;
+  const submitBtn = document.getElementById('btn_submit_transfer');
+  
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Validating Metadata...`;
+
+  try {
+    const formData = new FormData(form);
+    
+    formData.append('previous_dsp_urls', JSON.stringify({
+      spotify: formData.get('dsp_spotify') || '',
+      apple: formData.get('dsp_apple') || ''
+    }));
+
+    const response = await fetch('/api/catalog/transfer', {
+      method: 'POST',
+      body: formData
+    });
+
+    const result = await response.json();
+
+    if (response.ok && result.success) {
+      showTransferAlert('Catalog release transfer submitted successfully! Status is now PENDING VERIFICATION.', 'success');
+      form.reset();
+    } else {
+      showTransferAlert(result.error || 'Failed to submit transfer.', 'error');
+    }
+  } catch (err) {
+    showTransferAlert('Network error occurred during submission.', 'error');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = `<i class="fa-solid fa-cloud-arrow-up mr-2"></i> Submit Release Transfer`;
+  }
+};
+
+// 2. CSV File Selector & Processing Handler (No Popups)
+window.handleCsvSelected = function(e) {
+  const file = e.target.files[0];
+  if (file) {
+    document.getElementById('csv_file_label').textContent = `Selected File: ${file.name}`;
+  }
+};
+
+window.submitCsvTransfer = async function() {
+  const fileInput = document.getElementById('csv_file_input');
+  if (!fileInput.files.length) {
+    showTransferAlert('Please select a valid CSV file before submitting.', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn_submit_csv');
+  btn.disabled = true;
+  btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Parsing CSV...`;
+
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    try {
+      const text = e.target.result;
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      
+      const rows = lines.slice(1).map(line => {
+        const values = line.split(',');
+        let rowData = {};
+        headers.forEach((h, i) => { rowData[h] = values[i] ? values[i].trim() : ''; });
+        return rowData;
+      });
+
+      const response = await fetch('/api/catalog/transfer/csv', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows })
+      });
+
+      const result = await response.json();
+      if (response.ok && result.success) {
+        showTransferAlert(`Successfully imported ${result.count} releases from CSV!`, 'success');
+        fileInput.value = '';
+        document.getElementById('csv_file_label').textContent = 'Click to upload metadata CSV or drag & drop';
+      } else {
+        showTransferAlert(result.error || 'Failed to parse CSV.', 'error');
+      }
+    } catch (err) {
+      showTransferAlert('Error reading CSV file content.', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `Process CSV Import`;
+    }
+  };
+  reader.readAsText(fileInput.files[0]);
+};
+
+// 3. DDEX File Selector & Ingestion Handler (No Popups)
+window.handleDdexSelected = function(e) {
+  const file = e.target.files[0];
+  if (file) {
+    document.getElementById('ddex_file_label').textContent = `Selected XML: ${file.name}`;
+  }
+};
+
+window.submitDdexTransfer = async function() {
+  const fileInput = document.getElementById('ddex_file_input');
+  if (!fileInput.files.length) {
+    showTransferAlert('Please select a DDEX XML file before submitting.', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn_submit_ddex');
+  btn.disabled = true;
+  btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Ingesting DDEX XML...`;
+
+  try {
+    const xmlContent = await fileInput.files[0].text();
+    const response = await fetch('/api/catalog/transfer/ddex', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/xml' },
+      body: xmlContent
+    });
+
+    const result = await response.json();
+    if (response.ok && result.success) {
+      showTransferAlert(`DDEX Ingestion successful for "${result.parsed.title}" (UPC: ${result.parsed.upc})!`, 'success');
+      fileInput.value = '';
+      document.getElementById('ddex_file_label').textContent = 'Click to upload DDEX .xml file';
+    } else {
+      showTransferAlert(result.error || 'Failed to process DDEX file.', 'error');
+    }
+  } catch (err) {
+    showTransferAlert('Error transmitting DDEX payload.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `Parse DDEX XML`;
+  }
+};
