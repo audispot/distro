@@ -71,6 +71,32 @@
             'Australia', 'Kenya', 'Nigeria', 'South Africa', 'Brazil', 'India'
         ];
 
+// Direct Multipart Upload to Cloudflare Worker R2 Bucket
+        async function uploadFileToR2(file, folder = 'audio') {
+            const token = await window.currentUser.getIdToken();
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('folder', folder);
+
+            const res = await fetch(`${WORKER_BASE_URL}/api/upload`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            });
+
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Worker upload failed with status ${res.status}: ${errText}`);
+            }
+
+            const data = await res.json();
+            if (!data.success || !data.url) {
+                throw new Error(`Upload failed: ${data.error || 'No public URL returned from Worker'}`);
+            }
+
+            return data.url;
+        }
+
 // Render Create Release Form Container
         window.renderCreateReleaseView = function() {
             return `
@@ -1019,5 +1045,459 @@ window.handleFormSubmission = async function(event) {
             submitBtn.style.opacity = '1';
             submitBtn.innerHTML = originalBtnHTML;
         }
+    }
+};
+
+async function loadLiveCatalog() {
+    try {
+        // Retrieve logged-in user ID strictly
+        const currentUid = window.currentUser ? (window.currentUser.uid || window.currentUser.id) : null;
+        
+        if (!currentUid) {
+            window.releasesCatalog = [];
+            renderCatalogContainer();
+            return;
+        }
+
+        let serverReleases = [];
+
+        // 1. Fetch live releases from Worker API
+        try {
+            const token = await window.currentUser.getIdToken();
+            const workerUrl = window.WORKER_BASE_URL || WORKER_BASE_URL;
+            const res = await fetch(`${workerUrl}/api/releases`, {
+                method: 'GET',
+                headers: { 
+                    'Accept': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                const rawList = Array.isArray(data) ? data : (data.data || data.releases || []);
+                
+                // STRICT FILTER: Require item user ID to explicitly match currentUid
+                serverReleases = rawList.filter(item => {
+                    const itemUserId = item.submittedBy || item.userId || item.user_id || item.uid;
+                    return String(itemUserId) === String(currentUid);
+                });
+            }
+        } catch (fetchErr) {
+            console.error("API Gateway fetch error:", fetchErr);
+        }
+
+        // 2. Fetch User-Scoped LocalStorage items (Isolated per UID)
+        const userLocalStorageKey = `audiory_releases_${currentUid}`;
+        const allLocalReleases = JSON.parse(localStorage.getItem(userLocalStorageKey) || localStorage.getItem('audiory_local_releases') || '[]');
+        
+        // STRICT FILTER: Match explicit user ID only
+        const localReleases = allLocalReleases.filter(item => {
+            const itemUserId = item.submittedBy || item.userId || item.user_id;
+            return String(itemUserId) === String(currentUid);
+        });
+
+        // Helper to cleanly map cover artwork from Too Lost or custom schemas
+        const resolveCoverUrl = (item) => {
+            if (!item) return '';
+            if (typeof item.artwork === 'string') return item.artwork;
+            if (item.artwork && typeof item.artwork === 'object') {
+                return item.artwork.url || item.artwork.cover_art || item.artwork.path || '';
+            }
+            return item.coverUrl 
+                || item.compressedArtwork 
+                || item.artworkUrl 
+                || item.cover_url 
+                || item.cover_art 
+                || item.image 
+                || '';
+        };
+
+        // 3. Merge Local + Server
+        const releaseMap = new Map();
+
+        // Process Server Releases First
+        serverReleases.forEach(item => {
+            const key = String(item.id || item.title);
+            const serverCover = resolveCoverUrl(item);
+
+            let cleanStatus = item.status || 'Submitted';
+            if (cleanStatus.toLowerCase() === 'draft' || cleanStatus.toLowerCase().includes('gateway')) {
+                cleanStatus = 'Submitted';
+            }
+
+            releaseMap.set(key, {
+                ...item,
+                submittedBy: currentUid,
+                coverUrl: serverCover,
+                status: cleanStatus
+            });
+        });
+
+        // Overlay Local Storage Updates
+        localReleases.forEach(item => {
+            const key = String(item.id || item.title);
+            const resolvedCover = resolveCoverUrl(item);
+            const existing = releaseMap.get(key);
+
+            let cleanStatus = item.status || 'Submitted';
+            if (cleanStatus.toLowerCase() === 'draft' || cleanStatus.toLowerCase().includes('gateway')) {
+                cleanStatus = 'Submitted';
+            }
+
+            releaseMap.set(key, {
+                ...existing,
+                ...item,
+                submittedBy: currentUid,
+                coverUrl: resolvedCover || (existing ? existing.coverUrl : ''),
+                status: cleanStatus
+            });
+        });
+
+        window.releasesCatalog = Array.from(releaseMap.values());
+
+        // 4. Trigger UI Render
+        renderCatalogContainer();
+
+    } catch (err) {
+        console.error("Error loading live catalog:", err);
+    }
+}
+
+function renderCatalogContainer() {
+    const catalogContainer = document.getElementById('catalog-container') || document.getElementById('main-content');
+    if (catalogContainer && typeof renderCatalogView === 'function') {
+        catalogContainer.innerHTML = renderCatalogView();
+    }
+}
+
+// Exact artist resolver matching renderCatalogView logic
+function resolveArtistName(rel) {
+    if (!rel) return 'Unknown Artist';
+
+    if (Array.isArray(rel.participants) && rel.participants.length > 0) {
+        return rel.participants
+            .map(p => typeof p === 'string' ? p : p.name)
+            .filter(Boolean)
+            .join(', ');
+    } 
+    
+    if (Array.isArray(rel.artists) && rel.artists.length > 0) {
+        return rel.artists
+            .map(a => typeof a === 'string' ? a : (a.name || ''))
+            .filter(Boolean)
+            .join(', ');
+    } 
+    
+    if (rel.artist) {
+        return typeof rel.artist === 'string' ? rel.artist : (rel.artist.name || 'Unknown Artist');
+    }
+
+    return 'Unknown Artist';
+}
+
+// Universal Helper: Matches resolveCoverUrl logic inside loadLiveCatalog
+function resolveCoverUrl(item) {
+    if (!item) return '';
+    if (typeof item.artwork === 'string') return item.artwork;
+    if (item.artwork && typeof item.artwork === 'object') {
+        return item.artwork.url || item.artwork.cover_art || item.artwork.path || '';
+    }
+    return item.coverUrl 
+        || item.compressedArtwork 
+        || item.artworkUrl 
+        || item.cover_url 
+        || item.cover_art 
+        || item.image 
+        || '';
+}
+
+function renderCatalogView() {
+    if (!window.releasesCatalog || window.releasesCatalog.length === 0) {
+        return `
+            <div class="text-center py-24 bg-brand-card rounded-2xl border border-brand-border space-y-4 max-w-xl mx-auto">
+                <div class="w-16 h-16 rounded-full bg-cyan-500/10 text-cyan-400 flex items-center justify-center mx-auto text-2xl">
+                    <i class="fa-solid fa-compact-disc"></i>
+                </div>
+                <h3 class="text-lg font-bold text-white">No Releases Found</h3>
+                <p class="text-xs text-gray-400">Start distributing your music to over 150+ streaming platforms.</p>
+                <button onclick="switchView('create')" class="px-5 py-2.5 rounded-xl bg-brand-accent text-brand-dark font-bold text-xs hover:opacity-90 transition">
+                    + Create New Release
+                </button>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="max-w-7xl mx-auto space-y-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-brand-border pb-5">
+                <div>
+                    <h1 class="text-2xl font-bold text-white tracking-tight">Releases Catalog</h1>
+                    <p class="text-xs text-gray-400">Manage, edit, and track your active music submissions</p>
+                </div>
+                <button onclick="switchView('create')" class="px-4 py-2.5 rounded-xl bg-brand-accent text-brand-dark font-bold text-xs flex items-center justify-center gap-2 hover:opacity-90 transition">
+                    <i class="fa-solid fa-plus"></i> New Release
+                </button>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+                ${window.releasesCatalog.map((rel, idx) => {
+                    const title = rel.title || rel.metadata?.title || 'Untitled Release';
+
+                    // Artists
+                    let artistNames = 'Unknown Artist';
+                    if (Array.isArray(rel.participants) && rel.participants.length > 0) {
+                        artistNames = rel.participants.map(p => typeof p === 'string' ? p : p.name).filter(Boolean).join(', ');
+                    } else if (Array.isArray(rel.artists) && rel.artists.length > 0) {
+                        artistNames = rel.artists.map(a => typeof a === 'string' ? a : (a.name || '')).filter(Boolean).join(', ');
+                    } else if (rel.artist) {
+                        artistNames = typeof rel.artist === 'string' ? rel.artist : rel.artist.name;
+                    }
+
+                    // Raw Cover Resolver
+                    let rawCover = rel.coverUrl || rel.compressedArtwork || rel.artworkUrl || rel.cover_url;
+                    if (!rawCover && rel.artwork) {
+                        rawCover = typeof rel.artwork === 'string' ? rel.artwork : (rel.artwork.url || rel.artwork.cover_art);
+                    }
+
+                    const cover = (typeof rawCover === 'string' && rawCover.trim() !== '')
+                        ? rawCover
+                        : 'https://placehold.co/400x400/1e293b/06b6d4?text=No+Cover';
+                    
+                    const releaseType = rel.type || 'Single';
+                    
+                    // Normalize Status display
+                    let status = rel.status || 'Submitted';
+                    if (status.toLowerCase() === 'draft' || status.toLowerCase().includes('gateway')) {
+                        status = 'Submitted';
+                    }
+
+                    const upc = rel.upc || 'Pending';
+
+                    return `
+                        <div class="group relative bg-brand-card/60 rounded-2xl border border-brand-border p-3 flex flex-col hover:border-cyan-500/50 transition duration-300 shadow-md hover:shadow-cyan-500/5">
+                            
+                            <!-- Cover Artwork -->
+                            <div class="relative w-full aspect-square rounded-xl overflow-hidden bg-brand-dark border border-brand-border/40">
+                                <img src="${cover}" alt="${title}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                                     onerror="this.onerror=null; this.src='https://placehold.co/400x400/1e293b/06b6d4?text=No+Cover';">
+                                
+                                <span class="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[9px] font-bold text-cyan-400 uppercase tracking-wider">
+                                    ${releaseType}
+                                </span>
+
+                                <!-- Quick Actions Overlay -->
+                                <div class="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition duration-200">
+                                    <button type="button" onclick="editReleaseCatalog(${idx})" title="Edit Release" class="p-1.5 rounded-lg bg-black/80 backdrop-blur-md text-gray-300 hover:text-white hover:bg-cyan-500 transition shadow">
+                                        <i class="fa-solid fa-pen-to-square text-xs"></i>
+                                    </button>
+                                    <button type="button" onclick="deleteReleaseCatalog('${rel.id || idx}')" title="Delete Release" class="p-1.5 rounded-lg bg-black/80 backdrop-blur-md text-gray-300 hover:text-red-400 hover:bg-red-500/20 transition shadow">
+                                        <i class="fa-solid fa-trash text-xs"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Release Info -->
+                            <div class="mt-3 flex flex-col justify-between flex-1 space-y-1">
+                                <div>
+                                    <h3 class="font-bold text-white text-xs truncate group-hover:text-cyan-400 transition" title="${title}">${title}</h3>
+                                    <p class="text-[11px] text-gray-400 truncate" title="${artistNames}">${artistNames}</p>
+                                </div>
+                                
+                                <div class="pt-2 flex items-center justify-between text-[10px]">
+                                    <span class="font-mono text-gray-500">UPC: ${upc}</span>
+                                    <span class="inline-flex items-center px-1.5 py-0.5 rounded-full font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 capitalize">
+                                        ${status}
+                                    </span>
+                                </div>
+                            </div>
+
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+        
+// Catalog Actions - Edit Release
+window.editReleaseCatalog = function(index) {
+    const item = window.releasesCatalog[index];
+    if (!item) return;
+
+    // 1. Extract Artists/Participants reliably
+    let extractedArtists = [];
+    if (Array.isArray(item.participants) && item.participants.length > 0) {
+        extractedArtists = item.participants.map(p => ({
+            name: typeof p === 'string' ? p : (p.name || ''),
+            role: Array.isArray(p.role) ? (p.role[0] || 'primary') : (p.role || 'primary')
+        }));
+    } else if (Array.isArray(item.artists) && item.artists.length > 0) {
+        extractedArtists = item.artists.map(a => ({
+            name: typeof a === 'string' ? a : (a.name || ''),
+            role: Array.isArray(a.role) ? (a.role[0] || 'primary') : (a.role || 'primary')
+        }));
+    } else if (item.artist) {
+        extractedArtists = [{
+            name: typeof item.artist === 'string' ? item.artist : (item.artist.name || ''),
+            role: 'primary'
+        }];
+    }
+
+    if (extractedArtists.length === 0) {
+        extractedArtists = [{ name: '', role: 'primary' }];
+    }
+
+    // 2. Extract Label cleanly
+    const labelName = typeof item.label === 'object' 
+        ? (item.label.name || item.label.label || '') 
+        : (item.label || '');
+
+    // 3. Set standard releaseState with editing tracking
+    window.releaseState = {
+        editingId: item.id || null, // Track ID to prevent creating duplicates
+        metadata: {
+            title: item.title || item.metadata?.title || '',
+            type: item.type || item.metadata?.type || 'Single',
+            language: item.language || item.metadata?.language || 'English',
+            explicit: item.explicit || item.metadata?.explicit || false,
+            primaryGenre: item.genre || item.primary_genre || item.metadata?.primaryGenre || item.genre_id || '',
+            secondaryGenre: item.subgenre || item.secondary_genre || item.metadata?.secondaryGenre || ''
+        },
+        artists: extractedArtists,
+        label: {
+            name: labelName,
+            cLine: item.cLine || item.c_line || item.label?.cLine || '',
+            pLine: item.pLine || item.p_line || item.label?.pLine || ''
+        },
+        dates: {
+            releaseDate: item.releaseDate || item.release_date || '',
+            timezone: item.timezone || 'Africa/Nairobi'
+        },
+        dsps: item.dsps || (typeof MASTER_DSP_LIST !== 'undefined' ? MASTER_DSP_LIST.map(d => d.id) : []),
+        artwork: {
+            file: null,
+            url: item.coverUrl || item.cover_url || item.compressedArtwork || item.cover_art || '',
+            inspected: null
+        },
+        tracks: Array.isArray(item.tracks) && item.tracks.length > 0 
+            ? item.tracks.map(t => ({
+                metadata: {
+                    title: t.title || t.metadata?.title || '',
+                    version: t.version || t.metadata?.version || '',
+                    genre: t.genre || t.metadata?.genre || '',
+                    subgenre: t.subgenre || t.metadata?.subgenre || '',
+                    explicit: t.explicit || t.metadata?.explicit || false
+                },
+                discNumber: t.discNumber || t.disc_number || 1,
+                isrc: t.isrc || '',
+                audioUrl: t.audio_url || t.audioUrl || '',
+                tiktokStartTime: t.tiktok_start_time || t.tiktokStartTime || '00:30',
+                lyrics: { plain: t.lyrics?.plain || t.lyrics || '' }
+            }))
+            : [{
+                metadata: { title: item.title || '', explicit: false },
+                discNumber: 1,
+                isrc: '',
+                audioUrl: '',
+                tiktokStartTime: '00:30',
+                lyrics: { plain: '' }
+            }],
+        agreements: { termsAccepted: true, rightsConfirmed: true }
+    };
+
+    // 4. Switch View & Render Step
+    switchView('create');
+
+    if (typeof window.renderStepContent === 'function') {
+        window.renderStepContent(1);
+    }
+
+    // 5. Explicitly populate form fields from releaseState
+    setTimeout(() => {
+        populateFormFromState();
+    }, 50);
+
+    window.showToast('Release loaded for editing', false);
+};
+
+// Helper function to force form inputs to sync with window.releaseState
+function populateFormFromState() {
+    const state = window.releaseState;
+    if (!state) return;
+
+    // Title
+    const titleInput = document.querySelector('input[name="title"]') || document.getElementById('release-title');
+    if (titleInput) titleInput.value = state.metadata.title;
+
+    // Type
+    const typeSelect = document.querySelector('select[name="type"]') || document.getElementById('release-type');
+    if (typeSelect) typeSelect.value = state.metadata.type;
+
+    // Primary Genre
+    const genreSelect = document.querySelector('select[name="primaryGenre"]') || document.getElementById('primary-genre');
+    if (genreSelect && state.metadata.primaryGenre) genreSelect.value = state.metadata.primaryGenre;
+
+    // Label
+    const labelInput = document.querySelector('input[name="label"]') || document.getElementById('record-label');
+    if (labelInput) labelInput.value = state.label.name;
+
+    // Render / Sync Artist Inputs
+    if (typeof window.renderArtistInputs === 'function') {
+        window.renderArtistInputs();
+    } else {
+        const artistContainer = document.getElementById('artists-container') || document.querySelector('.artists-wrapper');
+        if (artistContainer && state.artists.length > 0) {
+            const firstArtistInput = artistContainer.querySelector('input');
+            if (firstArtistInput) firstArtistInput.value = state.artists[0].name;
+        }
+    }
+}
+
+window.deleteReleaseCatalog = async function(releaseId) {
+    try {
+        const token = window.currentUser?.getIdToken ? await window.currentUser.getIdToken() : '';
+        
+        const res = await fetch(`${WORKER_BASE_URL}/api/releases/${releaseId}`, { 
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!res.ok) throw new Error('Failed to delete release on gateway');
+
+        // Remove from memory
+        window.releasesCatalog = (window.releasesCatalog || []).filter(r => String(r.id) !== String(releaseId));
+
+        // Remove from Local Storage
+        let localSavedReleases = JSON.parse(localStorage.getItem('audiory_local_releases') || '[]');
+        localSavedReleases = localSavedReleases.filter(r => String(r.id) !== String(releaseId));
+        localStorage.setItem('audiory_local_releases', JSON.stringify(localSavedReleases));
+
+        window.showToast('Release deleted successfully', false);
+
+        if (typeof window.loadLiveCatalog === 'function') {
+            await window.loadLiveCatalog();
+        } else {
+            const container = document.getElementById('mainViewport');
+            if (container && typeof renderCatalogView === 'function') {
+                container.innerHTML = renderCatalogView();
+            }
+        }
+    } catch (err) {
+        console.error('Delete error:', err);
+
+        // Fallback: Remove locally from storage and state if API route fails
+        window.releasesCatalog = (window.releasesCatalog || []).filter(r => String(r.id) !== String(releaseId));
+        let localSavedReleases = JSON.parse(localStorage.getItem('audiory_local_releases') || '[]');
+        localSavedReleases = localSavedReleases.filter(r => String(r.id) !== String(releaseId));
+        localStorage.setItem('audiory_local_releases', JSON.stringify(localSavedReleases));
+
+        const container = document.getElementById('mainViewport');
+        if (container && typeof renderCatalogView === 'function') {
+            container.innerHTML = renderCatalogView();
+        }
+        window.showToast('Release removed from catalog', false);
     }
 };
