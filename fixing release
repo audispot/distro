@@ -63,6 +63,7 @@ window.releaseState = window.releaseState || {
         previewUrl: '',
         instrumentalFile: null,
         instrumentalUrl: '',
+        instrumentalPreviewUrl: '',
         lyrics: {
             content: '',
             explicit: false,
@@ -335,6 +336,9 @@ window.removeArtistFromState = function(idx) {
 
 // STEP 2 CONTENT
 function renderStep2Content() {
+    if (!window.releaseState.delivery) {
+        window.releaseState.delivery = { beatPort: false, youtube: true, facebook: true };
+    }
     const selectedCount = window.releaseState.dsps ? window.releaseState.dsps.length : MASTER_DSP_LIST.length;
 
     return `
@@ -409,7 +413,7 @@ window.openDspModal = function() {
     }
 
     const modalHtml = `
-        <div id="dspModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+        <div id="dspModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
             <div class="bg-brand-card border border-brand-border rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
                 <div class="p-5 border-b border-brand-border flex items-center justify-between">
                     <h3 class="text-base font-bold text-white">Select Distribution Stores</h3>
@@ -755,26 +759,42 @@ function renderStep4Content() {
                             </div>
                         </div>
 
-                        <!-- INSTRUMENTAL AUDIO -->
-                        <div class="space-y-3 border-t border-brand-border pt-4">
+                        <!-- INSTRUMENTAL AUDIO & PREVIEW -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center border-t border-brand-border pt-4">
                             <div>
                                 <label class="too-lost-form-label">Instrumental / Backing Track (Optional)</label>
-                                <label class="mt-1 flex items-center justify-between px-3 py-2 rounded-xl bg-brand-dark border border-brand-border cursor-pointer hover:border-cyan-500/50 transition">
+                                <label class="mt-1 flex items-center justify-between px-3 py-2.5 rounded-xl bg-brand-dark border border-brand-border cursor-pointer hover:border-cyan-500/50 transition">
                                     <span id="instrumental_file_name_${idx}" class="text-xs text-gray-300 truncate">
-                                        ${track.instrumentalFile ? track.instrumentalFile.name : 'Choose Instrumental WAV/FLAC...'}
+                                        ${track.instrumentalFile ? track.instrumentalFile.name : (track.instrumentalUrl ? 'Instrumental Loaded' : 'Choose Instrumental WAV/FLAC...')}
                                     </span>
-                                    <span class="px-2 py-1 rounded-lg bg-brand-card text-cyan-400 font-bold text-[10px] uppercase">Browse</span>
-                                    <input type="file" accept=".wav,.flac,audio/wav,audio/flac" onchange="handleInstrumentalSelection(${idx}, this)" class="hidden">
+                                    <span class="px-2.5 py-1 rounded-lg bg-brand-card text-cyan-400 font-bold text-[10px] uppercase">Browse</span>
+                                    <input type="file" accept="audio/wav,audio/flac,.wav,.flac" onchange="handleInstrumentalSelection(${idx}, this)" class="hidden">
                                 </label>
-                                <div id="instrumental_preview_container_${idx}" class="mt-2">
-                                    ${track.instrumentalFile || track.instrumentalUrl ? `
-                                        <div class="p-2 rounded-xl bg-brand-dark border border-brand-border flex items-center gap-3">
-                                            <span class="text-[10px] text-emerald-400 font-mono">Instrumental Loaded</span>
-                                            <audio controls class="w-full h-7">
-                                                <source src="${track.instrumentalFile ? URL.createObjectURL(track.instrumentalFile) : track.instrumentalUrl}">
-                                            </audio>
+                            </div>
+                            <div>
+                                <label class="too-lost-form-label">Instrumental Preview</label>
+                                <div id="instrumental_preview_container_${idx}" class="p-3 rounded-xl bg-brand-dark border border-brand-border space-y-2">
+                                    ${track.instrumentalPreviewUrl || track.instrumentalUrl ? `
+                                        <div class="flex items-center gap-3">
+                                            <button type="button" onclick="toggleCustomInstrumentalPlay(${idx})" id="inst_play_btn_${idx}" 
+                                                    class="w-8 h-8 rounded-lg bg-cyan-400 text-brand-dark flex items-center justify-center hover:opacity-90 transition shrink-0">
+                                                <i class="fa-solid fa-play text-xs" id="inst_play_icon_${idx}"></i>
+                                            </button>
+                                            <div class="flex-1 space-y-1">
+                                                <div class="flex justify-between text-[10px] text-gray-400 font-mono">
+                                                    <span id="inst_current_time_${idx}">00:00</span>
+                                                    <span id="inst_duration_${idx}">00:00</span>
+                                                </div>
+                                                <input type="range" id="inst_seekbar_${idx}" value="0" min="0" max="100" step="0.1" 
+                                                       oninput="seekCustomInstrumental(${idx}, this.value)"
+                                                       class="w-full h-1 bg-brand-card rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                                            </div>
                                         </div>
-                                    ` : ''}
+                                        <audio id="native_inst_audio_${idx}" src="${track.instrumentalPreviewUrl || track.instrumentalUrl || ''}" 
+                                               ontimeupdate="updateCustomInstrumentalProgress(${idx})" 
+                                               onloadedmetadata="initCustomInstrumentalMeta(${idx})" 
+                                               onended="resetCustomInstrumental(${idx})" class="hidden"></audio>
+                                    ` : '<span class="text-xs text-gray-500 italic flex items-center h-8">No instrumental audio selected</span>'}
                                 </div>
                             </div>
                         </div>
@@ -795,10 +815,36 @@ function renderStep4Content() {
                             </div>
                         </div>
 
-                        <!-- TRACK CREDITS -->
-                        <div class="border-t border-brand-border pt-4">
-                            <label class="too-lost-form-label">Track Credits / Notes</label>
-                            <textarea oninput="window.releaseState.tracks[${idx}].credits = this.value" class="too-lost-input h-20" placeholder="Producer, engineer, mixing, mastering...">${escapeHtml(track.credits || '')}</textarea>
+                        <!-- TRACK CREDITS / NOTES (WRITER-STYLE ROW BUILDER) -->
+                        <div class="space-y-3 border-t border-brand-border pt-4">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <label class="too-lost-form-label">Track Credits / Notes *</label>
+                                    <p class="text-[10px] text-gray-500">Specify collaborator names and their precise contribution role.</p>
+                                </div>
+                                <button type="button" onclick="addTrackCreditRow(${idx})" class="text-xs text-cyan-400 hover:underline">+ Add Credit</button>
+                            </div>
+
+                            <div class="space-y-2" id="track_credits_rows_${idx}">
+                                ${parseCreditsToRows(track.credits).map((credit, creditIdx) => `
+                                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_200px_auto] gap-2">
+                                        <input type="text" value="${escapeHtml(credit.name || '')}" 
+                                               oninput="updateTrackCreditData(${idx})" 
+                                               class="too-lost-input credit-name-input" placeholder="Contributor Name (e.g. John Doe)">
+                                        <select onchange="updateTrackCreditData(${idx})" class="too-lost-input credit-role-select">
+                                            <option value="Producer" ${credit.role === 'Producer' ? 'selected' : ''}>Producer</option>
+                                            <option value="Mixing Engineer" ${credit.role === 'Mixing Engineer' ? 'selected' : ''}>Mixing Engineer</option>
+                                            <option value="Mastering Engineer" ${credit.role === 'Mastering Engineer' ? 'selected' : ''}>Mastering Engineer</option>
+                                            <option value="Recording Engineer" ${credit.role === 'Recording Engineer' ? 'selected' : ''}>Recording Engineer</option>
+                                            <option value="Studio Personnel" ${credit.role === 'Studio Personnel' ? 'selected' : ''}>Studio Personnel</option>
+                                            <option value="Musician" ${credit.role === 'Musician' ? 'selected' : ''}>Musician</option>
+                                        </select>
+                                        <button type="button" onclick="removeTrackCreditRow(${idx}, ${creditIdx})" class="px-3 text-red-400">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </button>
+                                    </div>
+                                `).join('')}
+                            </div>
                         </div>
                     </div>
                 `).join('')}
@@ -850,6 +896,111 @@ window.initCustomAudioMeta = function(idx) {
 window.resetCustomAudio = function(idx) {
     const playIcon = document.getElementById(`play_icon_${idx}`);
     if (playIcon) playIcon.className = "fa-solid fa-play text-xs";
+};
+
+// Custom Instrumental Player helper functions
+window.toggleCustomInstrumentalPlay = function(idx) {
+    const audio = document.getElementById(`native_inst_audio_${idx}`);
+    const playIcon = document.getElementById(`inst_play_icon_${idx}`);
+    if (!audio) return;
+
+    if (audio.paused) {
+        audio.play();
+        if (playIcon) playIcon.className = "fa-solid fa-pause text-xs";
+    } else {
+        audio.pause();
+        if (playIcon) playIcon.className = "fa-solid fa-play text-xs";
+    }
+};
+
+window.updateCustomInstrumentalProgress = function(idx) {
+    const audio = document.getElementById(`native_inst_audio_${idx}`);
+    const seekbar = document.getElementById(`inst_seekbar_${idx}`);
+    const currentTimeEl = document.getElementById(`inst_current_time_${idx}`);
+    if (!audio || !seekbar) return;
+
+    const progressPercent = (audio.currentTime / audio.duration) * 100;
+    seekbar.value = isNaN(progressPercent) ? 0 : progressPercent;
+    if (currentTimeEl) currentTimeEl.innerText = formatAudioTime(audio.currentTime);
+};
+
+window.seekCustomInstrumental = function(idx, value) {
+    const audio = document.getElementById(`native_inst_audio_${idx}`);
+    if (!audio || !audio.duration) return;
+    audio.currentTime = (value / 100) * audio.duration;
+};
+
+window.initCustomInstrumentalMeta = function(idx) {
+    const audio = document.getElementById(`native_inst_audio_${idx}`);
+    const durationEl = document.getElementById(`inst_duration_${idx}`);
+    if (audio && durationEl) {
+        durationEl.innerText = formatAudioTime(audio.duration);
+    }
+};
+
+window.resetCustomInstrumental = function(idx) {
+    const playIcon = document.getElementById(`inst_play_icon_${idx}`);
+    if (playIcon) playIcon.className = "fa-solid fa-play text-xs";
+};
+
+// Track Credits row builder helpers
+function parseCreditsToRows(creditsStr) {
+    if (!creditsStr || typeof creditsStr !== 'string') {
+        return [{ name: '', role: 'Producer' }];
+    }
+    const parts = creditsStr.split(';').map(p => p.trim()).filter(Boolean);
+    if (parts.length === 0) return [{ name: '', role: 'Producer' }];
+
+    return parts.map(part => {
+        const sub = part.split(':').map(s => s.trim());
+        if (sub.length >= 2) {
+            return { name: sub[0], role: sub[1] };
+        }
+        return { name: part, role: 'Producer' };
+    });
+}
+
+window.updateTrackCreditData = function(trackIndex) {
+    const container = document.getElementById(`track_credits_rows_${trackIndex}`);
+    if (!container) return;
+
+    const rows = container.querySelectorAll('.grid');
+    const creditEntries = [];
+
+    rows.forEach(row => {
+        const nameInput = row.querySelector('.credit-name-input');
+        const roleSelect = row.querySelector('.credit-role-select');
+        if (nameInput && nameInput.value.trim()) {
+            creditEntries.push(`${nameInput.value.trim()}: ${roleSelect ? roleSelect.value : 'Producer'}`);
+        }
+    });
+
+    window.releaseState.tracks[trackIndex].credits = creditEntries.join('; ');
+};
+
+window.addTrackCreditRow = function(trackIndex) {
+    window.updateTrackCreditData(trackIndex);
+    if (!Array.isArray(window.releaseState.tracks[trackIndex].creditRows)) {
+        window.releaseState.tracks[trackIndex].creditRows = parseCreditsToRows(window.releaseState.tracks[trackIndex].credits);
+    }
+    window.releaseState.tracks[trackIndex].creditRows.push({ name: '', role: 'Producer' });
+    
+    // Re-render step 4 container
+    const container = document.getElementById('wizardStepContainer');
+    if (container && window.currentStep === 4) container.innerHTML = renderStep4Content();
+};
+
+window.removeTrackCreditRow = function(trackIndex, creditIndex) {
+    window.updateTrackCreditData(trackIndex);
+    let rows = parseCreditsToRows(window.releaseState.tracks[trackIndex].credits);
+    rows.splice(creditIndex, 1);
+    if (rows.length === 0) rows = [{ name: '', role: 'Producer' }];
+    
+    const creditEntries = rows.map(r => `${r.name}: ${r.role}`);
+    window.releaseState.tracks[trackIndex].credits = creditEntries.join('; ');
+
+    const container = document.getElementById('wizardStepContainer');
+    if (container && window.currentStep === 4) container.innerHTML = renderStep4Content();
 };
 
 function formatAudioTime(seconds) {
@@ -912,12 +1063,25 @@ window.handleInstrumentalSelection = function(trackIndex, input) {
     const container = document.getElementById(`instrumental_preview_container_${trackIndex}`);
     if (container) {
         container.innerHTML = `
-            <div class="p-2 rounded-xl bg-brand-dark border border-brand-border flex items-center gap-3">
-                <span class="text-[10px] text-emerald-400 font-mono">Instrumental Loaded</span>
-                <audio controls class="w-full h-7">
-                    <source src="${url}" type="${file.type}">
-                </audio>
+            <div class="flex items-center gap-3">
+                <button type="button" onclick="toggleCustomInstrumentalPlay(${trackIndex})" id="inst_play_btn_${trackIndex}" 
+                        class="w-8 h-8 rounded-lg bg-cyan-400 text-brand-dark flex items-center justify-center hover:opacity-90 transition shrink-0">
+                    <i class="fa-solid fa-play text-xs" id="inst_play_icon_${trackIndex}"></i>
+                </button>
+                <div class="flex-1 space-y-1">
+                    <div class="flex justify-between text-[10px] text-gray-400 font-mono">
+                        <span id="inst_current_time_${trackIndex}">00:00</span>
+                        <span id="inst_duration_${trackIndex}">00:00</span>
+                    </div>
+                    <input type="range" id="inst_seekbar_${trackIndex}" value="0" min="0" max="100" step="0.1" 
+                           oninput="seekCustomInstrumental(${trackIndex}, this.value)"
+                           class="w-full h-1 bg-brand-card rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                </div>
             </div>
+            <audio id="native_inst_audio_${trackIndex}" src="${url}" 
+                   ontimeupdate="updateCustomInstrumentalProgress(${trackIndex})" 
+                   onloadedmetadata="initCustomInstrumentalMeta(${trackIndex})" 
+                   onended="resetCustomInstrumental(${trackIndex})" class="hidden"></audio>
         `;
     }
 };
@@ -999,7 +1163,7 @@ window.validateDelivery = function() {
     const s = window.releaseState;
     const errors = [];
     if (!s.delivery) {
-        s.delivery = { beatPort: false, youtube: false, facebook: false };
+        s.delivery = { beatPort: false, youtube: true, facebook: true };
     }
     return errors;
 };
@@ -1069,6 +1233,7 @@ window.addTrackToRelease = function() {
         previewUrl: '',
         instrumentalFile: null,
         instrumentalUrl: '',
+        instrumentalPreviewUrl: '',
         lyrics: { content: '', explicit: false, cleanVersion: false },
         artists: [],
         writers: [{ name: '', role: 'instrumentalist' }],
@@ -1119,7 +1284,7 @@ function renderStep5Content() {
 function renderStep6Content() {
     const s = window.releaseState;
     if (!s.delivery) {
-        s.delivery = { beatPort: false, youtube: false, facebook: false };
+        s.delivery = { beatPort: false, youtube: true, facebook: true };
     }
     const validationErrors = window.validateReleaseForSubmission();
     const deliveryErrors = window.validateDelivery();
@@ -1151,10 +1316,11 @@ function renderStep6Content() {
     setTimeout(() => {
         const submitBtn = document.getElementById('submitReleaseBtn');
         if (submitBtn) {
+            submitBtn.classList.remove('hidden');
             submitBtn.disabled = !canSubmit;
             submitBtn.className = canSubmit 
-                ? "hidden px-6 py-2.5 rounded-xl bg-emerald-400 text-black font-bold text-xs hover:bg-emerald-300 transition"
-                : "hidden px-6 py-2.5 rounded-xl bg-emerald-400 text-black font-bold text-xs opacity-40 cursor-not-allowed";
+                ? "px-6 py-2.5 rounded-xl bg-emerald-400 text-black font-bold text-xs hover:bg-emerald-300 transition"
+                : "px-6 py-2.5 rounded-xl bg-emerald-400 text-black font-bold text-xs opacity-40 cursor-not-allowed";
             submitBtn.innerText = canSubmit
                 ? 'Upload & Submit Release'
                 : 'Fix Validation Errors First';
@@ -1541,7 +1707,9 @@ window.handleFormSubmission = async function(event) {
         window.releaseState.editingId = null;
 
         setTimeout(() => {
-            if (typeof window.loadLiveCatalog === 'function') window.loadLiveCatalog();
+            if (typeof window.loadLiveCatalog === 'boolean' || typeof window.loadLiveCatalog === 'function') {
+                try { window.loadLiveCatalog(); } catch (e) {}
+            }
             if (typeof window.renderDashboardHome === 'function') window.renderDashboardHome();
             if (typeof window.switchView === 'function') window.switchView('catalog');
             
