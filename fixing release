@@ -1,3 +1,88 @@
+// Initial Release State with expanded tracks and delivery structure
+window.releaseState = window.releaseState || {
+    editingId: null,
+    metadata: {
+        title: '',
+        type: 'Single',
+        language: 'en',
+        primaryGenre: '',
+        secondaryGenre: '',
+        explicit: false
+    },
+    dates: {
+        releaseDate: '',
+        timezone: 'Africa/Nairobi'
+    },
+    label: {
+        name: '',
+        cLine: '',
+        pLine: ''
+    },
+    artwork: {
+        file: null,
+        url: '',
+        inspected: null
+    },
+    artists: [
+        { name: '', role: 'Primary' }
+    ],
+    dsps: [],
+    delivery: {
+        platforms: [],
+        territories: ['Worldwide'],
+        youtube: true,
+        facebook: true,
+        soundcloud: true,
+        soundExchange: true,
+        beatPort: false,
+        beatPortHasAccount: false,
+        beatPortLink: '',
+        beatPortLabelLogo: '',
+        trackLibs: false,
+        hook: false,
+        lyricfind: false,
+        even: false,
+        video: {
+            appleMusic: false,
+            vevo: false
+        }
+    },
+    tracks: [{
+        metadata: {
+            title: '',
+            version: '',
+            genre: '',
+            subgenre: '',
+            explicit: false
+        },
+        discNumber: 1,
+        isrc: '',
+        tiktokStartTime: '00:30',
+        audioFile: null,
+        audioUrl: '',
+        previewUrl: '',
+        instrumentalFile: null,
+        instrumentalUrl: '',
+        lyrics: {
+            content: '',
+            explicit: false,
+            cleanVersion: false
+        },
+        artists: [],
+        writers: [
+            {
+                name: '',
+                role: 'instrumentalist'
+            }
+        ],
+        credits: ''
+    }],
+    agreements: {
+        termsAccepted: false,
+        rightsConfirmed: false
+    }
+};
+
 // Render Create Release Form Container
 window.renderCreateReleaseView = function() {
     return `
@@ -271,6 +356,28 @@ function renderStep2Content() {
                 </div>
             </div>
 
+            <!-- Delivery Feature Flags / DSP Toggles -->
+            <div class="border-t border-brand-border pt-4 space-y-4">
+                <h3 class="text-sm font-bold text-white">Platform Delivery Enhancements & Special DSPs</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <label class="p-3 rounded-xl bg-brand-dark border border-brand-border flex items-center justify-between cursor-pointer">
+                        <span class="text-xs font-medium text-gray-200">Beatport</span>
+                        <input type="checkbox" ${window.releaseState.delivery?.beatPort ? 'checked' : ''} 
+                               onchange="window.releaseState.delivery.beatPort = this.checked" class="rounded bg-brand-card border-brand-border text-cyan-400 focus:ring-0">
+                    </label>
+                    <label class="p-3 rounded-xl bg-brand-dark border border-brand-border flex items-center justify-between cursor-pointer">
+                        <span class="text-xs font-medium text-gray-200">YouTube Content ID</span>
+                        <input type="checkbox" ${window.releaseState.delivery?.youtube ? 'checked' : ''} 
+                               onchange="window.releaseState.delivery.youtube = this.checked" class="rounded bg-brand-card border-brand-border text-cyan-400 focus:ring-0">
+                    </label>
+                    <label class="p-3 rounded-xl bg-brand-dark border border-brand-border flex items-center justify-between cursor-pointer">
+                        <span class="text-xs font-medium text-gray-200">Facebook / Instagram Audio</span>
+                        <input type="checkbox" ${window.releaseState.delivery?.facebook ? 'checked' : ''} 
+                               onchange="window.releaseState.delivery.facebook = this.checked" class="rounded bg-brand-card border-brand-border text-cyan-400 focus:ring-0">
+                    </label>
+                </div>
+            </div>
+
             <div class="border-t border-brand-border pt-4 space-y-4">
                 <div class="flex items-center justify-between">
                     <div>
@@ -527,23 +634,44 @@ function renderStep4Content() {
                             </div>
                         </div>
 
-                        <!-- Audio Upload & Audio Preview -->
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <!-- Audio Upload & Professional Custom Tailwind Audio Preview Component -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
                             <div>
                                 <label class="too-lost-form-label">Audio File (WAV/FLAC) *</label>
-                                <input type="file" accept="audio/wav,audio/flac" 
-                                       onchange="handleAudioPreview(${idx}, this)" 
-                                       class="too-lost-input text-xs">
+                                <label class="mt-1 flex items-center justify-between px-3 py-2.5 rounded-xl bg-brand-dark border border-brand-border cursor-pointer hover:border-cyan-500/50 transition">
+                                    <span id="audio_file_name_${idx}" class="text-xs text-gray-300 truncate">
+                                        ${track.audioFile ? track.audioFile.name : (track.audioUrl ? 'Master Audio Loaded' : 'Choose WAV / FLAC file...')}
+                                    </span>
+                                    <span class="px-2.5 py-1 rounded-lg bg-brand-card text-cyan-400 font-bold text-[10px] uppercase">Browse</span>
+                                    <input type="file" accept="audio/wav,audio/flac,.wav,.flac" 
+                                           onchange="handleAudioPreview(${idx}, this)" 
+                                           class="hidden">
+                                </label>
                             </div>
                             <div>
                                 <label class="too-lost-form-label">Audio Preview</label>
-                                <div id="audio_preview_container_${idx}" class="flex items-center h-10 px-3 rounded-xl bg-brand-dark border border-brand-border">
+                                <div id="audio_preview_container_${idx}" class="p-3 rounded-xl bg-brand-dark border border-brand-border space-y-2">
                                     ${track.previewUrl || track.audioUrl ? `
-                                        <audio controls class="w-full h-8">
-                                            <source src="${track.previewUrl || track.audioUrl}" type="${track.audioFile?.type || 'audio/wav'}">
-                                            Your browser does not support audio playback.
-                                        </audio>
-                                    ` : '<span class="text-xs text-gray-500">No audio uploaded yet</span>'}
+                                        <div class="flex items-center gap-3">
+                                            <button type="button" onclick="toggleCustomAudioPlay(${idx})" id="play_btn_${idx}" 
+                                                    class="w-8 h-8 rounded-lg bg-cyan-400 text-brand-dark flex items-center justify-center hover:opacity-90 transition shrink-0">
+                                                <i class="fa-solid fa-play text-xs" id="play_icon_${idx}"></i>
+                                            </button>
+                                            <div class="flex-1 space-y-1">
+                                                <div class="flex justify-between text-[10px] text-gray-400 font-mono">
+                                                    <span id="current_time_${idx}">00:00</span>
+                                                    <span id="duration_${idx}">00:00</span>
+                                                </div>
+                                                <input type="range" id="audio_seekbar_${idx}" value="0" min="0" max="100" step="0.1" 
+                                                       oninput="seekCustomAudio(${idx}, this.value)"
+                                                       class="w-full h-1 bg-brand-card rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                                            </div>
+                                        </div>
+                                        <audio id="native_audio_${idx}" src="${track.previewUrl || track.audioUrl || ''}" 
+                                               ontimeupdate="updateCustomAudioProgress(${idx})" 
+                                               onloadedmetadata="initCustomAudioMeta(${idx})" 
+                                               onended="resetCustomAudio(${idx})" class="hidden"></audio>
+                                    ` : '<span class="text-xs text-gray-500 italic flex items-center h-8">No audio selected</span>'}
                                 </div>
                             </div>
                         </div>
@@ -630,15 +758,23 @@ function renderStep4Content() {
                         <!-- INSTRUMENTAL AUDIO -->
                         <div class="space-y-3 border-t border-brand-border pt-4">
                             <div>
-                                <label class="too-lost-form-label">Instrumental / Backing Track</label>
-                                <p class="text-[10px] text-gray-500 mb-2">Optional.</p>
-                                <input type="file" accept=".wav,.flac,audio/wav,audio/flac" onchange="handleInstrumentalSelection(${idx}, this)" class="too-lost-input text-xs">
-                                <div id="instrumental_preview_container_${idx}" class="mt-2 flex items-center h-10 px-3 rounded-xl bg-brand-dark border border-brand-border">
+                                <label class="too-lost-form-label">Instrumental / Backing Track (Optional)</label>
+                                <label class="mt-1 flex items-center justify-between px-3 py-2 rounded-xl bg-brand-dark border border-brand-border cursor-pointer hover:border-cyan-500/50 transition">
+                                    <span id="instrumental_file_name_${idx}" class="text-xs text-gray-300 truncate">
+                                        ${track.instrumentalFile ? track.instrumentalFile.name : 'Choose Instrumental WAV/FLAC...'}
+                                    </span>
+                                    <span class="px-2 py-1 rounded-lg bg-brand-card text-cyan-400 font-bold text-[10px] uppercase">Browse</span>
+                                    <input type="file" accept=".wav,.flac,audio/wav,audio/flac" onchange="handleInstrumentalSelection(${idx}, this)" class="hidden">
+                                </label>
+                                <div id="instrumental_preview_container_${idx}" class="mt-2">
                                     ${track.instrumentalFile || track.instrumentalUrl ? `
-                                        <audio controls class="w-full h-8">
-                                            <source src="${track.instrumentalFile ? URL.createObjectURL(track.instrumentalFile) : track.instrumentalUrl}">
-                                        </audio>
-                                    ` : '<span class="text-xs text-gray-500">No instrumental uploaded</span>'}
+                                        <div class="p-2 rounded-xl bg-brand-dark border border-brand-border flex items-center gap-3">
+                                            <span class="text-[10px] text-emerald-400 font-mono">Instrumental Loaded</span>
+                                            <audio controls class="w-full h-7">
+                                                <source src="${track.instrumentalFile ? URL.createObjectURL(track.instrumentalFile) : track.instrumentalUrl}">
+                                            </audio>
+                                        </div>
+                                    ` : ''}
                                 </div>
                             </div>
                         </div>
@@ -669,6 +805,57 @@ function renderStep4Content() {
             </div>
         </div>
     `;
+}
+
+// Custom Audio Player helper functions for Tailwind UI preview
+window.toggleCustomAudioPlay = function(idx) {
+    const audio = document.getElementById(`native_audio_${idx}`);
+    const playIcon = document.getElementById(`play_icon_${idx}`);
+    if (!audio) return;
+
+    if (audio.paused) {
+        audio.play();
+        if (playIcon) playIcon.className = "fa-solid fa-pause text-xs";
+    } else {
+        audio.pause();
+        if (playIcon) playIcon.className = "fa-solid fa-play text-xs";
+    }
+};
+
+window.updateCustomAudioProgress = function(idx) {
+    const audio = document.getElementById(`native_audio_${idx}`);
+    const seekbar = document.getElementById(`audio_seekbar_${idx}`);
+    const currentTimeEl = document.getElementById(`current_time_${idx}`);
+    if (!audio || !seekbar) return;
+
+    const progressPercent = (audio.currentTime / audio.duration) * 100;
+    seekbar.value = isNaN(progressPercent) ? 0 : progressPercent;
+    if (currentTimeEl) currentTimeEl.innerText = formatAudioTime(audio.currentTime);
+};
+
+window.seekCustomAudio = function(idx, value) {
+    const audio = document.getElementById(`native_audio_${idx}`);
+    if (!audio || !audio.duration) return;
+    audio.currentTime = (value / 100) * audio.duration;
+};
+
+window.initCustomAudioMeta = function(idx) {
+    const audio = document.getElementById(`native_audio_${idx}`);
+    const durationEl = document.getElementById(`duration_${idx}`);
+    if (audio && durationEl) {
+        durationEl.innerText = formatAudioTime(audio.duration);
+    }
+};
+
+window.resetCustomAudio = function(idx) {
+    const playIcon = document.getElementById(`play_icon_${idx}`);
+    if (playIcon) playIcon.className = "fa-solid fa-play text-xs";
+};
+
+function formatAudioTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
 window.addTrackArtist = function(trackIndex) {
@@ -719,12 +906,18 @@ window.handleInstrumentalSelection = function(trackIndex, input) {
     const url = URL.createObjectURL(file);
     window.releaseState.tracks[trackIndex].instrumentalPreviewUrl = url;
 
+    const nameEl = document.getElementById(`instrumental_file_name_${trackIndex}`);
+    if (nameEl) nameEl.innerText = file.name;
+
     const container = document.getElementById(`instrumental_preview_container_${trackIndex}`);
     if (container) {
         container.innerHTML = `
-            <audio controls class="w-full h-8">
-                <source src="${url}" type="${file.type}">
-            </audio>
+            <div class="p-2 rounded-xl bg-brand-dark border border-brand-border flex items-center gap-3">
+                <span class="text-[10px] text-emerald-400 font-mono">Instrumental Loaded</span>
+                <audio controls class="w-full h-7">
+                    <source src="${url}" type="${file.type}">
+                </audio>
+            </div>
         `;
     }
 };
@@ -806,7 +999,7 @@ window.validateDelivery = function() {
     const s = window.releaseState;
     const errors = [];
     if (!s.delivery) {
-        errors.push('Delivery configuration is missing.');
+        s.delivery = { beatPort: false, youtube: false, facebook: false };
     }
     return errors;
 };
@@ -836,13 +1029,31 @@ window.handleAudioPreview = function(trackIndex, inputElement) {
     const previewUrl = URL.createObjectURL(file);
     window.releaseState.tracks[trackIndex].previewUrl = previewUrl;
 
+    const nameEl = document.getElementById(`audio_file_name_${trackIndex}`);
+    if (nameEl) nameEl.innerText = file.name;
+
     const container = document.getElementById(`audio_preview_container_${trackIndex}`);
     if (container) {
         container.innerHTML = `
-            <audio controls class="w-full h-8">
-                <source src="${previewUrl}" type="${file.type}">
-                Your browser does not support audio playback.
-            </audio>
+            <div class="flex items-center gap-3">
+                <button type="button" onclick="toggleCustomAudioPlay(${trackIndex})" id="play_btn_${trackIndex}" 
+                        class="w-8 h-8 rounded-lg bg-cyan-400 text-brand-dark flex items-center justify-center hover:opacity-90 transition shrink-0">
+                    <i class="fa-solid fa-play text-xs" id="play_icon_${trackIndex}"></i>
+                </button>
+                <div class="flex-1 space-y-1">
+                    <div class="flex justify-between text-[10px] text-gray-400 font-mono">
+                        <span id="current_time_${trackIndex}">00:00</span>
+                        <span id="duration_${trackIndex}">00:00</span>
+                    </div>
+                    <input type="range" id="audio_seekbar_${trackIndex}" value="0" min="0" max="100" step="0.1" 
+                           oninput="seekCustomAudio(${trackIndex}, this.value)"
+                           class="w-full h-1 bg-brand-card rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                </div>
+            </div>
+            <audio id="native_audio_${trackIndex}" src="${previewUrl}" 
+                   ontimeupdate="updateCustomAudioProgress(${trackIndex})" 
+                   onloadedmetadata="initCustomAudioMeta(${trackIndex})" 
+                   onended="resetCustomAudio(${trackIndex})" class="hidden"></audio>
         `;
     }
 };
@@ -907,6 +1118,9 @@ function renderStep5Content() {
 // STEP 6 CONTENT
 function renderStep6Content() {
     const s = window.releaseState;
+    if (!s.delivery) {
+        s.delivery = { beatPort: false, youtube: false, facebook: false };
+    }
     const validationErrors = window.validateReleaseForSubmission();
     const deliveryErrors = window.validateDelivery();
     const allErrors = [
@@ -1357,7 +1571,3 @@ window.handleFormSubmission = async function(event) {
         }
     }
 };
-        
-    </script>
-</body>
-</html>
