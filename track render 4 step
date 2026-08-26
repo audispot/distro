@@ -1,0 +1,133 @@
+// STEP 4 CONTENT & TRACK HANDLERS
+        function renderStep4Content() {
+            const isMultiTrack = window.releaseState.metadata.type === 'EP' || window.releaseState.metadata.type === 'Album';
+
+            return `
+                <div class="space-y-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h2 class="text-lg font-bold text-white">Tracks Management</h2>
+                            <p class="text-xs text-gray-400">Total Tracks: ${window.releaseState.tracks.length}</p>
+                        </div>
+                        ${isMultiTrack ? `
+                            <button type="button" onclick="addTrackToRelease()" class="px-3 py-1.5 rounded-lg bg-brand-accent text-brand-dark font-bold text-xs hover:opacity-90 transition">
+                                <i class="fa-solid fa-plus mr-1"></i> Add Another Track
+                            </button>
+                        ` : ''}
+                    </div>
+
+                    <div class="space-y-6">
+                        ${window.releaseState.tracks.map((track, idx) => `
+                            <div class="p-5 rounded-2xl bg-brand-card border border-brand-border space-y-4 relative">
+                                <div class="flex items-center justify-between border-b border-brand-border pb-3">
+                                    <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider">Track ${idx + 1} of ${window.releaseState.tracks.length}</span>
+                                    ${window.releaseState.tracks.length > 1 ? `
+                                        <button type="button" onclick="removeTrackFromRelease(${idx})" class="text-xs text-red-400 hover:text-red-300">
+                                            <i class="fa-solid fa-trash mr-1"></i> Remove
+                                        </button>
+                                    ` : ''}
+                                </div>
+
+                                <!-- Track Title, Version, Disc, ISRC -->
+                                <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                                    <div class="sm:col-span-2">
+                                        <label class="too-lost-form-label">Track Title *</label>
+                                        <input type="text" required value="${track.metadata?.title || ''}" 
+                                               oninput="window.releaseState.tracks[${idx}].metadata.title = this.value" 
+                                               class="too-lost-input" placeholder="Track Title">
+                                    </div>
+                                    <div>
+                                        <label class="too-lost-form-label">Version / Subtitle</label>
+                                        <input type="text" value="${track.metadata?.version || ''}" 
+                                               oninput="window.releaseState.tracks[${idx}].metadata.version = this.value" 
+                                               class="too-lost-input" placeholder="e.g. Extended Mix / Radio Edit">
+                                    </div>
+                                    <div>
+                                        <label class="too-lost-form-label">Disc Number</label>
+                                        <input type="number" min="1" value="${track.discNumber || 1}" 
+                                               onchange="window.releaseState.tracks[${idx}].discNumber = parseInt(this.value)" 
+                                               class="too-lost-input">
+                                    </div>
+                                </div>
+
+                                <!-- Explicit Status, Genres -->
+                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="too-lost-form-label">Explicit Status *</label>
+                                        <select onchange="window.releaseState.tracks[${idx}].metadata.explicit = (this.value === 'true')" class="too-lost-input">
+                                            <option value="false" ${!track.metadata?.explicit ? 'selected' : ''}>Clean / Non-Explicit</option>
+                                            <option value="true" ${track.metadata?.explicit ? 'selected' : ''}>Explicit</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="too-lost-form-label">Track Genre *</label>
+                                        <select onchange="handleTrackGenreChange(${idx}, this.value)" class="too-lost-input">
+                                            <option value="">Select Genre</option>
+                                            ${Object.keys(GENRE_MAP).map(g => `
+                                                <option value="${g}" ${track.metadata?.genre === g ? 'selected' : ''}>${g}</option>
+                                            `).join('')}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="too-lost-form-label">Track Subgenre *</label>
+                                        <select id="track_subgenre_${idx}" onchange="window.releaseState.tracks[${idx}].metadata.subgenre = this.value" 
+                                                class="too-lost-input" ${!track.metadata?.genre ? 'disabled' : ''}>
+                                            <option value="">${track.metadata?.genre ? 'Select Subgenre' : '-- Select Genre First --'}</option>
+                                            ${track.metadata?.genre && GENRE_MAP[track.metadata.genre] 
+                                                ? GENRE_MAP[track.metadata.genre].map(sub => `
+                                                    <option value="${sub}" ${track.metadata?.subgenre === sub ? 'selected' : ''}>${sub}</option>
+                                                  `).join('') 
+                                                : ''}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Audio Upload & Audio Preview -->
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="too-lost-form-label">Audio File (WAV/FLAC) *</label>
+                                        <input type="file" accept="audio/wav,audio/flac" 
+                                               onchange="handleAudioPreview(${idx}, this)" 
+                                               class="too-lost-input text-xs">
+                                    </div>
+                                    <div>
+                                        <label class="too-lost-form-label">Audio Preview</label>
+                                        <div id="audio_preview_container_${idx}" class="flex items-center h-10 px-3 rounded-xl bg-brand-dark border border-brand-border">
+                                            ${track.previewUrl || track.audioUrl ? `
+                                                <audio controls class="w-full h-8">
+                                                    <source src="${track.previewUrl || track.audioUrl}" type="${track.audioFile?.type || 'audio/wav'}">
+                                                    Your browser does not support audio playback.
+                                                </audio>
+                                            ` : '<span class="text-xs text-gray-500">No audio uploaded yet</span>'}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- ISRC & TikTok Start Time -->
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="too-lost-form-label">ISRC (Optional - Leave blank to auto-generate)</label>
+                                        <input type="text" value="${track.isrc || ''}" 
+                                               oninput="window.releaseState.tracks[${idx}].isrc = this.value" 
+                                               class="too-lost-input" placeholder="e.g. USABC1234567">
+                                    </div>
+                                    <div>
+                                        <label class="too-lost-form-label">TikTok Clip Start Time (MM:SS)</label>
+                                        <input type="text" value="${track.tiktokStartTime || '00:30'}" 
+                                               oninput="window.releaseState.tracks[${idx}].tiktokStartTime = this.value" 
+                                               class="too-lost-input" placeholder="00:30">
+                                    </div>
+                                </div>
+
+                                <!-- Lyrics -->
+                                <div>
+                                    <label class="too-lost-form-label">Plain Lyrics</label>
+                                    <textarea oninput="window.releaseState.tracks[${idx}].lyrics = { plain: this.value }" 
+                                              class="too-lost-input h-20" placeholder="Type plain text lyrics here...">${track.lyrics?.plain || ''}</textarea>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
