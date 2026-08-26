@@ -1,0 +1,804 @@
+// =============================================================
+// RELEASE API ROUTES
+// Too Lost integration
+// =============================================================
+
+const isReleasePath = url.pathname === "/api/releases" ||
+                      url.pathname.startsWith("/api/releases/");
+
+if (isReleasePath) {
+
+  if (!userId) {
+    return new Response(
+      JSON.stringify({
+        error: "Unauthorized: Invalid or missing authentication token."
+      }),
+      {
+        status: 401,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  const baseUrl = (
+    env.TOO_LOST_BASE_URL ||
+    "https://api-sandbox.toolost.com/v1"
+  ).replace(/\/$/, "");
+
+  // -------------------------------------------------------------
+  // Get Too Lost access token
+  // -------------------------------------------------------------
+
+  let accessToken;
+
+  try {
+    accessToken = await getAccessToken(env);
+  } catch (authError) {
+
+    console.error(
+      "Too Lost Authentication Error:",
+      authError
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: "Too Lost Authentication Failed",
+        details: authError?.message || "Unable to authenticate with Too Lost."
+      }),
+      {
+        status: 401,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  // =============================================================
+  // ROUTE 1: CREATE RELEASE DRAFT
+  //
+  // POST /api/releases
+  //
+  // Too Lost:
+  // POST /releases
+  // =============================================================
+
+  if (
+    url.pathname === "/api/releases" &&
+    request.method === "POST"
+  ) {
+
+    const payloadText = await request.text();
+
+    let payloadObj = {};
+
+    try {
+      payloadObj = JSON.parse(payloadText || "{}");
+    } catch (e) {
+      return new Response(
+        JSON.stringify({
+          error: "Invalid JSON request body."
+        }),
+        {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+
+    const response = await fetch(
+      `${baseUrl}/releases`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        },
+        body: payloadText
+      }
+    );
+
+
+    const responseText = await response.text();
+
+    let serverData = {};
+
+    try {
+      serverData = JSON.parse(responseText);
+    } catch (e) {}
+
+
+    // -------------------------------------------------------------
+    // Cache newly-created release
+    // -------------------------------------------------------------
+
+    if (
+      env.AUDIORY_KV &&
+      response.ok
+    ) {
+
+      const release =
+        serverData?.data ||
+        serverData ||
+        {};
+
+      const releaseId =
+        release.id ||
+        `local_${Date.now()}`;
+
+      const resolvedCover =
+        payloadObj.coverUrl ||
+        payloadObj.cover_url ||
+        payloadObj.cover_art ||
+        payloadObj.compressedArtwork ||
+        (
+          payloadObj.artwork &&
+          payloadObj.artwork.url
+            ? payloadObj.artwork.url
+            : ""
+        ) ||
+        "";
+
+
+      const cacheItem = {
+
+        id: releaseId,
+
+        title:
+          release.title ||
+          payloadObj.title ||
+          "Untitled",
+
+        type:
+          release.type ||
+          payloadObj.type ||
+          "Single",
+
+        status:
+          release.status ||
+          "draft",
+
+        label:
+          typeof release.label === "string"
+            ? release.label
+            : (
+                typeof payloadObj.label === "string"
+                  ? payloadObj.label
+                  : "Audiory"
+              ),
+
+        coverUrl:
+          release.coverUrl ||
+          resolvedCover,
+
+        compressedArtwork:
+          release.compressedArtwork ||
+          resolvedCover,
+
+        artworkUrl:
+          release.coverUrl ||
+          resolvedCover,
+
+        participants:
+          release.participants ||
+          payloadObj.participants ||
+          [],
+
+        upc:
+          release.upc ||
+          payloadObj.upc ||
+          "Pending",
+
+        submittedBy:
+          userId,
+
+        createdAt:
+          release.createdAt ||
+          payloadObj.createdAt ||
+          new Date().toISOString()
+      };
+
+
+      const userKvKey =
+        `RELEASES_USER_${userId}`;
+
+      let existingCached = [];
+
+      try {
+        existingCached =
+          JSON.parse(
+            await env.AUDIORY_KV.get(userKvKey) || "[]"
+          );
+      } catch (e) {
+        existingCached = [];
+      }
+
+
+      const existingIdx =
+        existingCached.findIndex(
+          item =>
+            String(item.id) === String(releaseId)
+        );
+
+
+      if (existingIdx !== -1) {
+
+        existingCached[existingIdx] = {
+          ...existingCached[existingIdx],
+          ...cacheItem
+        };
+
+      } else {
+
+        existingCached.unshift(cacheItem);
+
+      }
+
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(existingCached)
+      );
+    }
+
+
+    return new Response(
+      responseText,
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+
+  // =============================================================
+  // ROUTE 2: SUBMIT RELEASE
+  //
+  // POST /api/releases/:id/submit
+  //
+  // IMPORTANT:
+  // This must NOT be treated as POST /releases/:id
+  // =============================================================
+
+  const submitMatch =
+    url.pathname.match(
+      /^\/api\/releases\/([^/]+)\/submit$/
+    );
+
+
+  if (
+    submitMatch &&
+    request.method === "POST"
+  ) {
+
+    const releaseId =
+      submitMatch[1];
+
+
+    const payloadText =
+      await request.text();
+
+
+    // -------------------------------------------------------------
+    // Too Lost submit endpoint
+    //
+    // Verify the exact path in Too Lost's API reference.
+    // -------------------------------------------------------------
+
+    const TOO_LOST_SUBMIT_PATH =
+      `/releases/${releaseId}/submit`;
+
+
+    const response =
+      await fetch(
+        `${baseUrl}${TOO_LOST_SUBMIT_PATH}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          },
+          body: payloadText || "{}"
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    let serverData = {};
+
+    try {
+      serverData =
+        JSON.parse(responseText);
+    } catch (e) {}
+
+
+    // -------------------------------------------------------------
+    // Update local release cache after successful submission
+    // -------------------------------------------------------------
+
+    if (
+      env.AUDIORY_KV &&
+      response.ok
+    ) {
+
+      const userKvKey =
+        `RELEASES_USER_${userId}`;
+
+
+      let existingCached = [];
+
+      try {
+        existingCached =
+          JSON.parse(
+            await env.AUDIORY_KV.get(userKvKey) || "[]"
+          );
+      } catch (e) {
+        existingCached = [];
+      }
+
+
+      const idx =
+        existingCached.findIndex(
+          item =>
+            String(item.id) === String(releaseId)
+        );
+
+
+      if (idx !== -1) {
+
+        existingCached[idx] = {
+          ...existingCached[idx],
+
+          status:
+            serverData?.data?.status ||
+            "submitted",
+
+          submittedAt:
+            serverData?.data?.submittedAt ||
+            new Date().toISOString()
+        };
+
+
+        await env.AUDIORY_KV.put(
+          userKvKey,
+          JSON.stringify(existingCached)
+        );
+      }
+    }
+
+
+    return new Response(
+      responseText,
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+
+  // =============================================================
+  // ROUTE 3: DELETE RELEASE DRAFT
+  //
+  // DELETE /api/releases/:id
+  // =============================================================
+
+  const deleteMatch =
+    url.pathname.match(
+      /^\/api\/releases\/([^/]+)$/
+    );
+
+
+  if (
+    deleteMatch &&
+    request.method === "DELETE"
+  ) {
+
+    const releaseId =
+      deleteMatch[1];
+
+
+    const response =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          }
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    // -------------------------------------------------------------
+    // Only remove local cache if Too Lost successfully deleted it.
+    // -------------------------------------------------------------
+
+    if (
+      response.ok &&
+      env.AUDIORY_KV
+    ) {
+
+      const userKvKey =
+        `RELEASES_USER_${userId}`;
+
+
+      let existingCached = [];
+
+      try {
+        existingCached =
+          JSON.parse(
+            await env.AUDIORY_KV.get(userKvKey) || "[]"
+          );
+      } catch (e) {
+        existingCached = [];
+      }
+
+
+      const filteredKV =
+        existingCached.filter(
+          item =>
+            String(item.id) !== String(releaseId)
+        );
+
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(filteredKV)
+      );
+    }
+
+
+    return new Response(
+      responseText || JSON.stringify({
+        message:
+          response.ok
+            ? "Release deleted successfully"
+            : "Unable to delete release"
+      }),
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+
+  // =============================================================
+  // ROUTE 4: RELEASE INFORMATION
+  //
+  // PUT /api/releases/:id
+  //
+  // Too Lost:
+  // PUT /releases/:id
+  // =============================================================
+
+  const releaseInfoMatch =
+    url.pathname.match(
+      /^\/api\/releases\/([^/]+)$/
+    );
+
+
+  if (
+    releaseInfoMatch &&
+    (
+      request.method === "PUT" ||
+      request.method === "PATCH"
+    )
+  ) {
+
+    const releaseId =
+      releaseInfoMatch[1];
+
+
+    const payloadText =
+      await request.text();
+
+
+    const response =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          },
+          body: payloadText
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    return new Response(
+      responseText,
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+
+  // =============================================================
+  // ROUTE 5: RELEASE DELIVERY
+  //
+  // PUT /api/releases/:id/delivery
+  //
+  // IMPORTANT:
+  // The exact Too Lost delivery path should be confirmed from
+  // the endpoint URL shown in their API documentation.
+  // =============================================================
+
+  const deliveryMatch =
+    url.pathname.match(
+      /^\/api\/releases\/([^/]+)\/delivery$/
+    );
+
+
+  if (
+    deliveryMatch &&
+    (
+      request.method === "PUT" ||
+      request.method === "PATCH"
+    )
+  ) {
+
+    const releaseId =
+      deliveryMatch[1];
+
+
+    const payloadText =
+      await request.text();
+
+
+    const response =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}/delivery`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          },
+          body: payloadText
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    return new Response(
+      responseText,
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+
+  // =============================================================
+  // ROUTE 6: FETCH USER CATALOGUE
+  //
+  // GET /api/releases
+  // =============================================================
+
+  if (
+    url.pathname === "/api/releases" &&
+    request.method === "GET"
+  ) {
+
+    let apiReleases = [];
+
+
+    try {
+
+      const response =
+        await fetch(
+          `${baseUrl}/releases${url.search}`,
+          {
+            method: "GET",
+            headers: {
+              "Accept": "application/json",
+              "Authorization": `Bearer ${accessToken}`
+            }
+          }
+        );
+
+
+      if (response.ok) {
+
+        const resJson =
+          await response.json();
+
+
+        const rawList =
+          Array.isArray(resJson)
+            ? resJson
+            : (
+                resJson.data ||
+                resJson.releases ||
+                []
+              );
+
+
+        // ---------------------------------------------------------
+        // Only retain releases belonging to the authenticated user
+        // ---------------------------------------------------------
+
+        apiReleases =
+          rawList.filter(
+            item =>
+              !item.submittedBy ||
+              item.submittedBy === userId
+          );
+      }
+
+    } catch (e) {
+
+      console.error(
+        "Too Lost Fetch Error:",
+        e
+      );
+    }
+
+
+    // -------------------------------------------------------------
+    // Get Audiory local cache
+    // -------------------------------------------------------------
+
+    let userCachedReleases = [];
+
+
+    if (env.AUDIORY_KV) {
+
+      const userKvKey =
+        `RELEASES_USER_${userId}`;
+
+
+      try {
+
+        userCachedReleases =
+          JSON.parse(
+            await env.AUDIORY_KV.get(userKvKey) || "[]"
+          );
+
+      } catch (e) {
+
+        userCachedReleases = [];
+
+      }
+    }
+
+
+    // -------------------------------------------------------------
+    // Merge Too Lost + Audiory KV
+    // -------------------------------------------------------------
+
+    const combinedMap =
+      new Map();
+
+
+    userCachedReleases.forEach(
+      item =>
+        combinedMap.set(
+          String(item.id),
+          item
+        )
+    );
+
+
+    apiReleases.forEach(
+      item => {
+
+        const existing =
+          combinedMap.get(
+            String(item.id)
+          );
+
+
+        if (existing) {
+
+          combinedMap.set(
+            String(item.id),
+            {
+              ...item,
+              ...existing
+            }
+          );
+
+        } else {
+
+          combinedMap.set(
+            String(item.id),
+            item
+          );
+        }
+      }
+    );
+
+
+    const finalCatalog =
+      Array.from(
+        combinedMap.values()
+      );
+
+
+    return new Response(
+      JSON.stringify(finalCatalog),
+      {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  // -------------------------------------------------------------
+  // Unknown release route
+  // -------------------------------------------------------------
+
+  return new Response(
+    JSON.stringify({
+      error: "Unknown release API route."
+    }),
+    {
+      status: 404,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
