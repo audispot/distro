@@ -727,49 +727,44 @@ if (isReleasePath) {
       new Map();
 
 
-    userCachedReleases.forEach(
-      item =>
-        combinedMap.set(
-          String(item.id),
-          item
-        )
-    );
+    userCachedReleases.forEach(item => {
+        if (!item?.id) return;
+
+        combinedMap.set(String(item.id), {
+            ...item
+        });
+    });
 
 
-    apiReleases.forEach(
-      item => {
+    apiReleases.forEach(item => {
+        if (!item?.id) return;
 
-        const existing =
-          combinedMap.get(
-            String(item.id)
-          );
-
+        const key = String(item.id);
+        const existing = combinedMap.get(key);
 
         if (existing) {
+            combinedMap.set(key, {
+                ...existing,
+                ...item,
 
-          combinedMap.set(
-            String(item.id),
-            {
-              ...item,
-              ...existing
-            }
-          );
+                // Explicitly guarantee Too Lost status wins
+                status: item.status ?? existing.status,
 
+                // Keep useful local ownership information
+                submittedBy:
+                    item.submittedBy ||
+                    existing.submittedBy ||
+                    userId
+            });
         } else {
-
-          combinedMap.set(
-            String(item.id),
-            item
-          );
+            combinedMap.set(key, {
+                ...item,
+                submittedBy: item.submittedBy || userId
+            });
         }
-      }
-    );
+    });
 
-
-    const finalCatalog =
-      Array.from(
-        combinedMap.values()
-      );
+    const finalCatalog = Array.from(combinedMap.values());
 
 
     return new Response(
