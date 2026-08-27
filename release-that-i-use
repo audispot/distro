@@ -51,8 +51,8 @@ window.releaseState = window.releaseState || {
         metadata: {
             title: '',
             version: '',
-            genre: '',
-            subgenre: '',
+            primaryGenre: '',
+            secondaryGenre: '',
             explicit: false
         },
         discNumber: 1,
@@ -979,28 +979,67 @@ window.updateTrackCreditData = function(trackIndex) {
 };
 
 window.addTrackCreditRow = function(trackIndex) {
+    const container = document.getElementById(`track_credits_rows_${trackIndex}`);
+    if (!container) return;
+
+    // Save whatever is currently typed before adding the new row
     window.updateTrackCreditData(trackIndex);
-    if (!Array.isArray(window.releaseState.tracks[trackIndex].creditRows)) {
-        window.releaseState.tracks[trackIndex].creditRows = parseCreditsToRows(window.releaseState.tracks[trackIndex].credits);
+
+    const track = window.releaseState.tracks[trackIndex];
+    const rows = parseCreditsToRows(track.credits);
+
+    // Add empty row
+    rows.push({
+        name: '',
+        role: 'Producer'
+    });
+
+    // Save back to credits
+    track.credits = rows
+        .map(r => `${r.name}: ${r.role}`)
+        .join('; ');
+
+    // Re-render
+    const wizardContainer = document.getElementById('wizardStepContainer');
+
+    if (wizardContainer && window.currentStep === 4) {
+        wizardContainer.innerHTML = renderStep4Content();
     }
-    window.releaseState.tracks[trackIndex].creditRows.push({ name: '', role: 'Producer' });
-    
-    // Re-render step 4 container
-    const container = document.getElementById('wizardStepContainer');
-    if (container && window.currentStep === 4) container.innerHTML = renderStep4Content();
 };
 
-window.removeTrackCreditRow = function(trackIndex, creditIndex) {
-    window.updateTrackCreditData(trackIndex);
-    let rows = parseCreditsToRows(window.releaseState.tracks[trackIndex].credits);
-    rows.splice(creditIndex, 1);
-    if (rows.length === 0) rows = [{ name: '', role: 'Producer' }];
-    
-    const creditEntries = rows.map(r => `${r.name}: ${r.role}`);
-    window.releaseState.tracks[trackIndex].credits = creditEntries.join('; ');
 
-    const container = document.getElementById('wizardStepContainer');
-    if (container && window.currentStep === 4) container.innerHTML = renderStep4Content();
+window.removeTrackCreditRow = function(trackIndex, creditIndex) {
+    const container = document.getElementById(`track_credits_rows_${trackIndex}`);
+    if (!container) return;
+
+    // Save current input/select values first
+    window.updateTrackCreditData(trackIndex);
+
+    const track = window.releaseState.tracks[trackIndex];
+    let rows = parseCreditsToRows(track.credits);
+
+    // Remove selected row
+    rows.splice(creditIndex, 1);
+
+    // Always leave one empty row
+    if (rows.length === 0) {
+        rows.push({
+            name: '',
+            role: 'Producer'
+        });
+    }
+
+    // Save back to credits
+    track.credits = rows
+        .map(r => `${r.name}: ${r.role}`)
+        .join('; ');
+
+    // Re-render
+    const wizardContainer = document.getElementById('wizardStepContainer');
+
+    if (wizardContainer && window.currentStep === 4) {
+        wizardContainer.innerHTML = renderStep4Content();
+    }
 };
 
 function formatAudioTime(seconds) {
@@ -1605,6 +1644,9 @@ window.handleFormSubmission = async function(event) {
             title: window.releaseState.metadata.title,
             type: window.releaseState.metadata.type,
             language: window.releaseState.metadata.language,
+
+            primaryGenre: primaryGenre,
+            secondaryGenre: secondaryGenre || null,
             
             // Too Lost Primary Genre Required Spec
             primary_genre: primaryGenre,
