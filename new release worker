@@ -578,11 +578,9 @@ if (isReleasePath) {
 
   if (
     deliveryMatch &&
-    (
-      request.method === "PUT" ||
-      request.method === "PATCH"
-    )
-  ) {
+    request.method === "PATCH"
+  )
+   {
 
     const releaseId =
       deliveryMatch[1];
@@ -596,7 +594,7 @@ if (isReleasePath) {
       await fetch(
         `${baseUrl}/releases/${releaseId}/delivery`,
         {
-          method: "PUT",
+          method: "PATCH",
           headers: {
             "Content-Type": "application/json",
             "Accept": "application/json",
