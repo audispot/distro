@@ -1,0 +1,347 @@
+window.handleFormSubmission = async function(event) {
+    if (event) event.preventDefault();
+
+    const validationErrors = window.validateReleaseForSubmission();
+    const deliveryErrors = window.validateDelivery();
+    const allErrors = [...validationErrors, ...deliveryErrors];
+
+    if (allErrors.length > 0) {
+        return window.showToast(`Cannot submit: ${allErrors[0]}`);
+    }
+
+    if (!window.releaseState.agreements?.termsAccepted) {
+        return window.showToast('Please confirm that you are authorized to distribute this release.');
+    }
+
+    if (!window.releaseState.agreements?.rightsConfirmed) {
+        return window.showToast('Please confirm that all samples, interpolations and performances are cleared.');
+    }
+
+    const hasArtworkFile = Boolean(window.releaseState.artwork?.file);
+    const existingArtworkUrl = window.releaseState.artwork?.url || '';
+    
+    if (!hasArtworkFile && !existingArtworkUrl) {
+        return window.showToast('Please upload cover artwork before submitting.');
+    }
+
+    const submitBtn = document.getElementById('submitReleaseBtn');
+    const progressCard = document.getElementById('submission-progress-card');
+    const statusText = document.getElementById('progress-status-text');
+    const percentageText = document.getElementById('progress-percentage');
+    const progressFill = document.getElementById('progress-bar-fill');
+
+    const updateProgress = (percent, message) => {
+        if (progressFill) progressFill.style.width = `${percent}%`;
+        if (percentageText) percentageText.innerText = `${Math.round(percent)}%`;
+        if (statusText) statusText.innerText = message;
+    };
+
+    let originalBtnHTML = '';
+    if (submitBtn) {
+        originalBtnHTML = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.style.cursor = 'not-allowed';
+        submitBtn.style.opacity = '0.7';
+        submitBtn.innerHTML = `
+            <span style="display: inline-flex; align-items: center; gap: 8px;">
+                <svg style="animation: spin 1s linear infinite; width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"></circle>
+                </svg>
+                Submitting...
+            </span>
+        `;
+    }
+
+    if (progressCard) progressCard.style.display = 'block';
+    updateProgress(5, 'Initializing submission pipeline...');
+
+    try {
+        const totalTracks = window.releaseState.tracks?.length || 0;
+        const instrumentalCount = window.releaseState.tracks.filter(t => Boolean(t.instrumentalFile)).length;
+        const totalUploadSteps = (hasArtworkFile ? 1 : 0) + totalTracks + instrumentalCount;
+        let completedSteps = 0;
+
+        let finalCoverUrl = existingArtworkUrl;
+        if (hasArtworkFile) {
+            updateProgress(10, 'Uploading Cover Artwork...');
+            const uploadRes = await uploadFileToR2(window.releaseState.artwork.file, 'artwork');
+            finalCoverUrl = typeof uploadRes === 'string' ? uploadRes : (uploadRes?.url || uploadRes?.location || uploadRes?.path || '');
+
+            if (!finalCoverUrl) throw new Error('Artwork upload succeeded but returned an invalid URL.');
+
+            window.releaseState.artwork.url = finalCoverUrl;
+            completedSteps++;
+            const stepPercent = 10 + Math.floor((completedSteps / (totalUploadSteps || 1)) * 60);
+            updateProgress(stepPercent, 'Cover Artwork uploaded successfully!');
+        } else {
+            updateProgress(20, 'Using existing artwork...');
+        }
+
+        for (let i = 0; i < totalTracks; i++) {
+            const track = window.releaseState.tracks[i];
+            if (track.audioFile) {
+                updateProgress(
+                    20 + Math.floor((completedSteps / (totalUploadSteps || 1)) * 60), 
+                    `Uploading Track ${i + 1} of ${totalTracks}: "${track.metadata?.title || 'Master Audio'}"...`
+                );
+                const trackRes = await uploadFileToR2(track.audioFile, 'audio');
+                const trackUrl = typeof trackRes === 'string' ? trackRes : (trackRes?.url || trackRes?.location || '');
+                window.releaseState.tracks[i].audioUrl = trackUrl;
+            }
+
+            if (track.instrumentalFile) {
+                updateProgress(40, `Uploading Track ${i + 1} Instrumental...`);
+                const instrumentalRes = await uploadFileToR2(track.instrumentalFile, 'instrumental');
+                const instrumentalUrl = typeof instrumentalRes === 'string' ? instrumentalRes : (instrumentalRes?.url || instrumentalRes?.location || instrumentalRes?.path || '');
+
+                if (!instrumentalUrl) throw new Error(`Track ${i + 1} instrumental upload returned no URL.`);
+                window.releaseState.tracks[i].instrumentalUrl = instrumentalUrl;
+            }
+            completedSteps++;
+        }
+
+        updateProgress(80, 'Formatting release metadata & participant roles...');
+
+        const labelNameInput = typeof window.releaseState.label === 'object' 
+            ? (window.releaseState.label.name || window.releaseState.label.label) 
+            : window.releaseState.label;
+
+        const labelString = (labelNameInput && labelNameInput.trim()) ? labelNameInput.trim() : 'Independent';
+        const ALLOWED_ROLES = ['primary', 'featuring', 'remixer'];
+
+        const mappedParticipants = (window.releaseState.artists || [])
+            .map(artist => {
+                let rawRoles = Array.isArray(artist.role) ? artist.role : [artist.role || 'primary'];
+                const cleanedRoles = rawRoles.map(r => {
+                    const norm = String(r).toLowerCase().trim();
+                    if (norm.includes('feat')) return 'featuring';
+                    if (norm.includes('remix')) return 'remixer';
+                    if (ALLOWED_ROLES.includes(norm)) return norm;
+                    return 'primary';
+                });
+
+                const artistName = typeof artist === 'string' ? artist : (artist.name || artist.artist_name || '');
+                return {
+                    name: artistName.trim(),
+                    role: Array.from(new Set(cleanedRoles)),
+                    spotify_id: artist.spotify_id || '',
+                    apple_id: artist.apple_id || ''
+                };
+            })
+            .filter(p => p.name !== '');
+
+        if (mappedParticipants.length === 0) throw new Error('Please specify at least one Primary Artist name.');
+
+        const editingId = window.releaseState.editingId;
+        const isEditing = Boolean(editingId);
+
+        const payload = {
+            title: window.releaseState.metadata.title,
+            type: window.releaseState.metadata.type,
+            language: window.releaseState.metadata.language,
+            genre: window.releaseState.metadata.primaryGenre,
+            subgenre: window.releaseState.metadata.secondaryGenre,
+            label: labelString,
+            participants: mappedParticipants,
+            artists: mappedParticipants,
+            releaseDate: window.releaseState.dates.releaseDate,
+            timezone: window.releaseState.dates.timezone,
+            dsps: window.releaseState.dsps,
+            delivery: window.releaseState.delivery,
+            coverUrl: finalCoverUrl,
+            cover_url: finalCoverUrl,
+            cover_art: finalCoverUrl,
+            artwork: finalCoverUrl,
+            tracks: window.releaseState.tracks.map(t => ({
+                title: t.metadata?.title?.trim() || '',
+                version: t.metadata?.version?.trim() || null,
+                explicit: Boolean(t.metadata?.explicit),
+                isrc: t.isrc?.trim() || null,
+                audioUrl: t.audioUrl || null,
+                instrumentalUrl: t.instrumentalUrl || null,
+                tiktokStartTime: t.tiktokStartTime?.trim() || null,
+                lyrics: {
+                    content: t.lyrics?.content || null,
+                    explicit: Boolean(t.lyrics?.explicit),
+                    cleanVersion: Boolean(t.lyrics?.cleanVersion)
+                },
+                artists: (t.artists || []).filter(a => a.name?.trim()).map(a => ({
+                    name: a.name.trim(),
+                    role: a.role || 'primary'
+                })),
+                writers: (t.writers || []).filter(w => w.name?.trim()).map(w => ({
+                    name: w.name.trim(),
+                    role: w.role === 'lyricist' ? 'lyricist' : 'instrumentalist'
+                })),
+                credits: t.credits?.trim() || null
+            })),
+            submittedBy: window.currentUser ? window.currentUser.uid : 'anonymous',
+            createdAt: new Date().toISOString()
+        };
+
+        updateProgress(90, 'Dispatching metadata to Gateway...');
+
+const token = window.currentUser?.getIdToken
+    ? await window.currentUser.getIdToken()
+    : '';
+
+let releaseId = editingId || null;
+let submitResponseData = null;
+
+// =========================================================
+// CREATE OR UPDATE RELEASE
+// =========================================================
+
+const releaseEndpoint = releaseId
+    ? `${WORKER_BASE_URL}/api/releases/${releaseId}`
+    : `${WORKER_BASE_URL}/api/releases`;
+
+const res = await fetch(releaseEndpoint, {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+});
+
+const serverResponse = await res.json().catch(() => null);
+
+if (!res.ok) {
+    throw new Error(extractApiError(serverResponse));
+}
+
+// Server-generated ID for new releases
+releaseId =
+    serverResponse?.id ||
+    serverResponse?.data?.id ||
+    releaseId;
+
+if (!releaseId) {
+    throw new Error(
+        'Release was created but the server did not return a release ID.'
+    );
+}
+
+// =========================================================
+// SUBMIT RELEASE TO TOO LOST
+// =========================================================
+
+updateProgress(
+    95,
+    'Submitting release package to Too Lost...'
+);
+
+const submitEndpoint =
+    `${WORKER_BASE_URL}/api/releases/${releaseId}/submit`;
+
+const submitRes = await fetch(submitEndpoint, {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+    }
+});
+
+submitResponseData =
+    await submitRes.json().catch(() => null);
+
+if (!submitRes.ok) {
+    throw new Error(
+        extractApiError(submitResponseData)
+    );
+}
+
+
+        updateProgress(100, `Release successfully ${isEditing ? 'updated' : 'submitted'}! Redirecting...`);
+        const currentUid = window.currentUser ? window.currentUser.uid : 'anonymous';
+        const returnedStatus =
+            submitResponseData?.status ??
+            submitResponseData?.data?.status ??
+            serverResponse?.status ??
+            serverResponse?.data?.status ??
+            'Unknown';
+
+        const validStatus =
+            formatReleaseStatus(returnedStatus);
+
+        const finalId = isEditing ? editingId : (releaseId || Date.now());
+        const newReleaseItem = {
+            id: finalId,
+            title: payload.title,
+            type: payload.type,
+            status: validStatus,
+            coverUrl: finalCoverUrl,
+            compressedArtwork: finalCoverUrl,
+            participants: mappedParticipants,
+            upc:
+                submitResponseData?.upc ??
+                submitResponseData?.data?.upc ??
+                serverResponse?.upc ??
+                serverResponse?.data?.upc ??
+                'Pending',
+            submittedBy: currentUid
+        };
+        await loadLiveCatalog();
+
+        const userLocalStorageKey = `audiory_releases_${currentUid}`;
+        let localSavedReleases = JSON.parse(localStorage.getItem(userLocalStorageKey) || localStorage.getItem('audiory_local_releases') || '[]');
+
+        if (isEditing) {
+            const index = localSavedReleases.findIndex(item => String(item.id) === String(editingId));
+            if (index !== -1) localSavedReleases[index] = { ...localSavedReleases[index], ...newReleaseItem };
+            else localSavedReleases.unshift(newReleaseItem);
+        } else {
+            localSavedReleases.unshift(newReleaseItem);
+        }
+
+        localStorage.setItem(userLocalStorageKey, JSON.stringify(localSavedReleases));
+        
+        if (!Array.isArray(window.releasesCatalog)) window.releasesCatalog = [];
+        if (isEditing) {
+            const catIndex = window.releasesCatalog.findIndex(item => String(item.id) === String(editingId));
+            if (catIndex !== -1) window.releasesCatalog[catIndex] = { ...window.releasesCatalog[catIndex], ...newReleaseItem };
+            else window.releasesCatalog.unshift(newReleaseItem);
+        } else {
+            window.releasesCatalog.unshift(newReleaseItem);
+        }
+
+        window.releaseState.editingId = null;
+
+        setTimeout(() => {
+            if (typeof window.loadLiveCatalog === 'boolean' || typeof window.loadLiveCatalog === 'function') {
+                try { window.loadLiveCatalog(); } catch (e) {}
+            }
+            if (typeof window.renderDashboardHome === 'function') window.renderDashboardHome();
+            if (typeof window.switchView === 'function') window.switchView('catalog');
+            
+            if (progressCard) progressCard.style.display = 'none';
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.style.cursor = 'pointer';
+                submitBtn.style.opacity = '1';
+                submitBtn.innerHTML = originalBtnHTML;
+            }
+        }, 1200);
+
+    } catch (err) {
+        console.error('Submission Error:', err);
+        if (typeof window.showToast === 'function') {
+            window.showToast(`Submission failed: ${err.message}`);
+        } else {
+            alert(`Submission failed: ${err.message}`);
+        }
+        
+        if (progressCard) progressCard.style.display = 'none';
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.style.cursor = 'pointer';
+            submitBtn.style.opacity = '1';
+            submitBtn.innerHTML = originalBtnHTML;
+        }
+    }
+};
+        
+    </script>
+</body>
+</html>
