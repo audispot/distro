@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Buyer Dashboard | Audiory</title>
+
+  <link rel="stylesheet" href="/css/global.css">
+  <link rel="stylesheet" href="/css/cart.css">
+  <link rel="stylesheet" href="/css/mobile-fix.css">
+
+  <style>
+    /* =========================================================
+       NEW AUDIORY BRAND VISUAL IDENTITY (FLAT WHITE & PURPLE)
+       ========================================================= */
+    body {
+      background-color: #ffffff !important;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      color: #334155;
+      line-height: 1.6;
+      box-sizing: border-box;
+    }
+
+    /* --- UPDATED TOPBAR CSS BLOCK --- */
+    .topbar {
+      width: 100%;
+      background: linear-gradient(135deg, #3b2fad 0%, #1d1b84 100%);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      position: sticky;
+      top: 0;
+      z-index: 10000;
+      box-sizing: border-box;
+    }
+
+    .topbar-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 24px; /* Reduced vertical padding for a slimmer header profile */
+      box-sizing: border-box;
+      gap: 16px; /* Ensures items never smash into each other */
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: #ffffff;
+      font-weight: 900;
+      font-size: 22px;
+      letter-spacing: -0.5px;
+      flex-shrink: 0; /* Prevents logo text clipping */
+    }
+
+    .desktop-nav{
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+
+    .desktop-nav a{
+      color:#fff;
+      text-decoration:none;
+      font-size:14px;
+      font-weight:600;
+      padding:10px 12px;
+      border-radius:8px;
+      white-space:nowrap;
+    }
+    .desktop-nav a:hover {
+      opacity: 1;
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .desktop-nav a.cta {
+      background: #ffffff;
+      color: #3b2fad !important;
+      opacity: 1;
+    }
+    .desktop-nav a.cta:hover {
+      background: #f1f5f9;
+    }
+
+    /* Fixes the action buttons container width and prevents truncation */
+    .top-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0; /* Ensures buttons maintain structure format */
+    }
+
+    /* Compact style modifier explicitly for buttons embedded in the header */
+    .top-actions .btn {
+      padding: 6px 12px !important;
+      font-size: 13px !important;
+      border-radius: 10px !important;
+      height: auto !important;
+      line-height: 1.4 !important;
+    }
+    /* Container Spacing & Grid Structures */
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+      box-sizing: border-box;
+    }
+
+    .page {
+      padding: 18px 0 44px;
+    }
+
+    .head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin: 18px 0 14px;
+    }
+
+    /* Upgraded from dark backdrop to modern light tint hero container */
+    .classic-head {
+      padding: 24px;
+      border-radius: 22px;
+      border: 1px solid #e2e8f0;
+      background: 
+        radial-gradient(circle at 15% 15%, rgba(59, 47, 173, 0.04), transparent 35%),
+        linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.02);
+    }
+
+    /* Kicker badge style match */
+    .eyebrow {
+      display: inline-block;
+      margin-bottom: 10px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #3b2fad;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+
+    .title {
+      font-size: 32px;
+      font-weight: 950;
+      letter-spacing: -.03em;
+      color: #0f172a;
+      margin: 0;
+    }
+
+    .sub {
+      color: #475569;
+      margin-top: 6px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .right-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid #e2e8f0;
+      background: #f8fafc;
+      color: #0f172a;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    /* Standard Button Grid Systems */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #475569;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+    .btn:hover {
+      background: #f8fafc;
+      color: #0f172a;
+    }
+
+    /* Premium Purple Core Accent Action */
+    .btn.primary {
+      background: #3b2fad;
+      border-color: #3b2fad;
+      color: #ffffff;
+    }
+    .btn.primary:hover {
+      background: #1d1b84;
+      border-color: #1d1b84;
+    }
+
+    .btn.danger {
+      background: #dc2626;
+      border-color: #dc2626;
+      color: #ffffff;
+    }
+    .btn.danger:hover {
+      background: #b91c1c;
+      border-color: #b91c1c;
+    }
+
+    .ghost-btn {
+      background: transparent;
+      border-color: #cbd5e1;
+      color: #475569;
+    }
+    .ghost-btn:hover {
+      border-color: #94a3b8;
+    }
+
+    .subtle-danger {
+      background: rgba(220, 38, 38, 0.05);
+      border-color: rgba(220, 38, 38, 0.2);
+      color: #dc2626;
+    }
+    .subtle-danger:hover {
+      background: rgba(220, 38, 38, 0.1);
+    }
+
+    .btn:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+      background: #f1f5f9;
+      border-color: #e2e8f0;
+      color: #94a3b8;
+    }
+
+    /* Interactive Light Mode Tab Layout */
+    .tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin: 18px 0;
+      padding: 6px;
+      border-radius: 16px;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+    }
+
+    .tab {
+      padding: 10px 16px;
+      border-radius: 12px;
+      border: none;
+      background: transparent;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      color: #64748b;
+      transition: all 0.2s ease;
+    }
+    .tab:hover {
+      color: #0f172a;
+    }
+
+    .tab.active {
+      background: #ffffff;
+      color: #3b2fad;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0,1fr));
+      gap: 20px;
+      margin: 18px 0;
+    }
+
+    /* Flat Light Data Cards */
+    .stat {
+      padding: 20px;
+      border-radius: 20px;
+      border: 1px solid #e2e8f0;
+      background: #ffffff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.01);
+    }
+
+    .k {
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .v {
+      margin-top: 6px;
+      font-size: 32px;
+      font-weight: 950;
+      line-height: 1;
+      color: #0f172a;
+    }
+
+    .mini {
+      margin-top: 8px;
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    /* Main Dashboard Panel */
+    .panel {
+      padding: 24px;
+      border-radius: 22px;
+      border: 1px solid #e2e8f0;
+      background: #ffffff;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.01);
+      margin-top: 16px;
+    }
+
+    .tools {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 12px 0 16px;
+    }
+
+    /* Light UI Input styling matching login reference fields */
+    .tools input {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: #0f172a;
+      padding: 12px 16px;
+      border-radius: 14px;
+      outline: none;
+      font-size: 15px;
+      width: min(420px, 100%);
+      transition: border-color 0.2s;
+    }
+
+    .tools input:focus {
+      border-color: #3b2fad;
+      box-shadow: 0 0 0 4px rgba(59, 47, 173, 0.08);
+    }
+
+    .loading-box {
+      margin: 14px 0;
+      padding: 16px;
+      border-radius: 14px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #475569;
+      font-size: 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Structured White Mode Tables */
+    .table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0 10px;
+    }
+
+    .table th {
+      text-align: left;
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 0 14px;
+    }
+
+    .rowcard {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+    }
+
+    .table td {
+      padding: 16px 14px;
+      vertical-align: middle;
+      font-size: 14px;
+      color: #334155;
+      border-top: 1px solid #e2e8f0;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .table tr.rowcard td:first-child {
+      border-left: 1px solid #e2e8f0;
+      border-top-left-radius: 16px;
+      border-bottom-left-radius: 16px;
+    }
+
+    .table tr.rowcard td:last-child {
+      border-right: 1px solid #e2e8f0;
+      border-top-right-radius: 16px;
+      border-bottom-right-radius: 16px;
+    }
+
+    /* Component Status Badges */
+    .pill {
+      display: inline-flex;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid #cbd5e1;
+      background: #f1f5f9;
+      color: #475569;
+      font-weight: 700;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .pill.ok {
+      border-color: rgba(22, 163, 74, 0.2);
+      background: rgba(22, 163, 74, 0.08);
+      color: #16a34a;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .help-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .help-copy {
+      max-width: 700px;
+    }
+
+    /* PREMIUM FOOTER BRAND MATCH */
+    .footer {
+      width: 100%;
+      padding: 32px 20px; 
+      text-align: center;
+      border-top: 1px solid #f1f5f9; 
+      background-color: #ffffff;
+      box-sizing: border-box;
+      margin-top: auto;
+    }
+
+    .footer-row {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px; 
+      color: #94a3b8;
+      font-size: 13px;
+    }
+
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .footer-links a {
+      color: #64748b;
+      text-decoration: none;
+      font-weight: 500;
+      transition: color 0.2s ease;
+    }
+
+    .footer-links a:hover { 
+      color: #3b2fad; 
+    }
+
+    .social {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 14px;
+      margin-top: 4px;
+    }
+
+    .social a { 
+      color: #64748b !important;
+      background: #f8fafc !important; 
+      border: 1px solid #e2e8f0 !important; 
+      border-radius: 50% !important; 
+      width: 38px !important; 
+      height: 38px !important;
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+    }
+
+    .social svg {
+      width: 18px !important;
+      height: 18px !important;
+      fill: currentColor !important;
+    }
+
+    .social a:hover { 
+      color: #ffffff !important; 
+      background: #3b2fad !important; 
+      border-color: #3b2fad !important;
+      transform: translateY(-3px); 
+      box-shadow: 0 4px 12px rgba(59, 47, 173, 0.2); 
+    }
+    /* Screen Breakpoint Adjustments */
+    @media (max-width:980px){
+      .grid{grid-template-columns:repeat(2, minmax(0,1fr))}
+    }
+
+    @media (max-width:520px){
+      .grid{grid-template-columns:1fr}
+    }
+
+    @media (max-width:700px) {
+      .classic-head {
+        padding: 18px;
+      }
+
+      .title {
+        font-size: 26px;
+      }
+
+      .right-actions {
+        width: 100%;
+      }
+
+      .right-actions .btn {
+        flex: 1 1 160px;
+      }
+
+      .top-actions {
+        width: 100%;
+      }
+
+      .top-actions .btn {
+        flex: 1 1 140px;
+      }
+
+      .actions {
+        justify-content: flex-start;
+      }
+
+      .table,
+      .table thead,
+      .table tbody,
+      .table tr,
+      .table th,
+      .table td {
+        display: block;
+        width: 100%;
+      }
+
+      .table thead {
+        display: none;
+      }
+
+      .rowcard {
+        display: block;
+        padding: 8px 0;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        margin-bottom: 12px;
+      }
+
+      .table td {
+        border: none !important;
+        border-radius: 0 !important;
+        padding: 8px 16px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<header class="topbar">
+  <div class="container topbar-inner">
+    <div class="brand">
+      <button class="icon-btn" id="hamburgerBtn" aria-label="Menu">☰</button>
+      <div class="logo">Audiory</div>
+    </div>
+
+    <nav class="desktop-nav" aria-label="Main">
+      <a href="/">Feed</a>
+      <a href="/marketplace/">Tracks</a>
+      <a href="/freebeats/">Free Beats</a>
+      <a href="/soundkits/">Sound Kits</a>
+      <a href="/producers/">Producers</a>
+      <a href="/pricing/">Pricing</a>
+      <a href="/premieres/">Premieres</a>
+      <a href="/collabs/">Collabs</a>
+      <a href="https://blog.audiory.site">Blog</a>
+
+      <!-- Logged OUT -->
+      <a class="cta" href="/register/" id="navStartSelling">Start Selling</a>
+      <a class="ghost" href="/login/" id="navSignIn">Sign in</a>
+
+      <!-- Logged IN -->
+      <a class="ghost hidden" href="/buyer-dashboard/" id="navBuyerDashboard">Dashboard</a>
+    </nav>
+
+    <div class="top-actions">
+      <button class="btn ghost-btn" id="refreshBtn" type="button">Refresh</button>
+      <a class="btn ghost-btn" href="https://help-desk.audiory.site" id="helpTopBtn">Help</a>
+      <button class="btn danger subtle-danger" id="signOutBtn" type="button">Sign out</button>
+    </div>
+  </div>
+</header>
+
+<div class="menu-backdrop" id="menuBackdrop"></div>
+<nav class="mobile-menu" id="mobileMenu" aria-label="Mobile Menu">
+  <div class="menu-head">
+    <div class="menu-title">Menu</div>
+    <button class="icon-btn" id="menuCloseBtn" aria-label="Close">✕</button>
+  </div>
+
+  <a href="/">Feed</a>
+  <a href="/marketplace/">Tracks</a>
+  <a href="/freebeats/">Free Beats</a>
+  <a href="/soundkits/">Sound Kits</a>
+  <a href="/producers/">Producers</a>
+  <a href="/pricing/">Pricing</a>
+  <a href="/premieres/">Premieres</a>
+  <a href="/collabs/">Collabs</a>
+  <a href="https://blog.audiory.site">Blog</a>
+
+  <!-- Logged OUT -->
+  <a href="/register/" class="cta" id="mNavStartSelling">Start Selling</a>
+  <a href="/login/" id="mNavSignIn">Sign in</a>
+
+  <!-- Logged IN -->
+  <a href="/buyer-dashboard/" class="hidden" id="mNavBuyerDashboard">Dashboard</a>
+  <a href="https://help-desk.audiory.site" class="hidden" id="mHelpBtn">Help</a>
+  <button class="btn hidden" id="mSignOutBtn" type="button" style="margin-top:10px;">Sign out</button>
+</nav>
+
+<main class="container page">
+
+  <section class="head classic-head">
+    <div>
+      <div class="eyebrow">Audiory Account</div>
+      <h1 class="title">Buyer Dashboard</h1>
+      <div class="sub">Manage your purchased beats, downloads, and account in one place.</div>
+    </div>
+
+    <div class="right-actions">
+      <a class="btn ghost-btn" href="/marketplace/">Browse Tracks</a>
+      <a class="btn primary" href="/soundkits/">Browse Kits</a>
+    </div>
+  </section>
+
+  <section class="tabs">
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="orders">Orders</button>
+    <button class="tab" data-tab="downloads">Downloads</button>
+    <button class="tab" data-tab="profile">Profile</button>
+  </section>
+
+  <div id="status" class="loading-box">Loading…</div>
+
+  <!-- OVERVIEW -->
+  <section id="view-overview">
+    <div class="grid">
+      <div class="card stat">
+        <div class="k">Purchased Beats</div>
+        <div class="v" id="statOrders">0</div>
+        <div class="mini" id="statOrdersMini">Only successful purchases</div>
+      </div>
+
+      <div class="card stat">
+        <div class="k">Unlocked Items</div>
+        <div class="v" id="statPaid">0</div>
+        <div class="mini" id="statPaidMini">Ready inside your account</div>
+      </div>
+
+      <div class="card stat">
+        <div class="k">Downloads Ready</div>
+        <div class="v" id="statDownloads">0</div>
+        <div class="mini" id="statDownloadsMini">Files available now</div>
+      </div>
+    </div>
+
+    <div class="card panel">
+      <div style="font-weight:950; font-size:14px;">Quick Tip</div>
+      <div class="sub" style="margin-top:6px;">
+        Only completed payments and unlocked beats appear here. If a payment failed or was not completed, it will not show inside your dashboard.
+      </div>
+    </div>
+
+    <div class="card panel">
+      <div class="help-card">
+        <div class="help-copy">
+          <div style="font-weight:950; font-size:14px;">Need help with your order?</div>
+          <div class="sub" style="margin-top:6px;">
+            If you paid and something looks wrong, or you need support from Audiory, contact the help team.
+          </div>
+        </div>
+        <a class="btn primary" href="https://help-desk.audiory.site">Contact Audiory Help</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ORDERS -->
+  <section id="view-orders" class="hidden">
+    <div class="tools">
+      <input id="ordersSearch" placeholder="Search purchased beats..." />
+    </div>
+
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th style="text-align:right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="ordersTbody"></tbody>
+    </table>
+  </section>
+
+  <!-- DOWNLOADS -->
+  <section id="view-downloads" class="hidden">
+    <div class="tools">
+      <input id="downloadsSearch" placeholder="Search your downloads..." />
+    </div>
+
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Type</th>
+          <th style="text-align:right;">Download</th>
+        </tr>
+      </thead>
+      <tbody id="downloadsTbody"></tbody>
+    </table>
+  </section>
+
+  <!-- PROFILE -->
+  <section id="view-profile" class="hidden">
+    <div class="card panel">
+      <div style="font-weight:950; font-size:14px;">Account</div>
+      <div class="sub" style="margin-top:8px;" id="profileInfo">—</div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+        <a class="btn" href="/login/" id="switchAccountBtn">Switch account</a>
+        <a class="btn primary" href="/marketplace/">Go shopping</a>
+        <a class="btn ghost-btn" href="https://help-desk.audiory.site">Help</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="container footer-row">
+    <div>© 2026 Audiory</div>
+
+    <div class="footer-links">
+      <a href="/privacy/">Privacy Policy</a>
+      <a href="/terms/">Terms</a>
+      <a href="/cookies/">Cookies</a>
+      <a href="/cookie-settings/">Cookie Settings</a>
+      <a href="/refunds/">Refund Policy</a>
+      <a href="/dmca/">DMCA</a>
+      <a href="/creator-agreement/">Creator Agreement</a>
+    </div>
+
+    <div class="social">
+      <a href="https://www.instagram.com/audiorybeatstore" target="_blank" aria-label="Instagram">
+        <svg viewBox="0 0 24 24"><path d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5zm10 2H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3zm-5 4a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm5.5-2.2a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2z"/></svg>
+      </a>
+      <a href="https://www.tiktok.com/@audiorybeatstore" target="_blank" aria-label="TikTok">
+        <svg viewBox="0 0 24 24"><path d="M9 3v12.5a3.5 3.5 0 1 1-3-3.465V9.5A6.5 6.5 0 1 0 12.5 16V8.5a8.5 8.5 0 0 0 5.5 2V7.5a5.5 5.5 0 0 1-5.5-5.5H9z"/></svg>
+      </a>
+      <a href="https://x.com/audiorybeats" target="_blank" aria-label="X">
+        <svg viewBox="0 0 24 24"><path d="M18.9 2H22l-6.8 7.8L23 22h-6.3l-4.9-6.4L6.3 22H2l7.3-8.4L1 2h6.5l4.4 5.8L18.9 2zm-1.1 18h1.7L7.6 3.9H5.8L17.8 20z"/></svg>
+      </a>
+      <a href="https://www.facebook.com/audiorybeatstore" target="_blank" aria-label="Facebook">
+        <svg viewBox="0 0 24 24"><path d="M13 22v-9h3l1-4h-4V6.5c0-1.2.3-2 2-2h2V1.1S16.3 1 14.6 1C11 1 9 3 9 6.2V9H6v4h3v9h4z"/></svg>
+      </a>
+      <a href="https://youtube.com/@audiorybeatstore" target="_blank" aria-label="YouTube">
+        <svg viewBox="0 0 24 24"><path d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.7 4.6 12 4.6 12 4.6s-5.7 0-7.5.5A3 3 0 0 0 2.4 7.2 31 31 0 0 0 2 12a31 31 0 0 0 .4 4.8 3 3 0 0 0 2.1 2.1c1.8.5 7.5.5 7.5.5s5.7 0 7.5-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 22 12a31 31 0 0 0-.4-4.8zM10 15.5v-7l6 3.5-6 3.5z"/></svg>
+      </a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  window.API_BASE = "https://prodbybigi-api.onrender.com";
+</script>
+
+<script type="module" src="/js/firebase.js"></script>
+<script src="/js/menu.js"></script>
+
+<script type="module">
+  import { collection, getDocs, query, where, limit } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+  const $ = (id)=>document.getElementById(id);
+
+  let ALL_ITEMS = [];
+
+  const DOWNLOAD_FN_URL = "https://storage.audiory.site/api/secureDownload";
+  const LICENSE_FN_URL = "https://licensedownload-f65rhsquva-uc.a.run.app";
+
+  function setStatus(text){
+    $("status").textContent = text || "";
+    $("status").classList.remove("hidden");
+  }
+
+  function hideStatus(){
+    $("status").classList.add("hidden");
+  }
+
+  function fmtDate(ts){
+    if (!ts) return "—";
+
+    if (typeof ts === "object" && typeof ts.toMillis === "function"){
+      return new Date(ts.toMillis()).toLocaleString();
+    }
+
+    const n = Number(ts || 0);
+    if (!n) return "—";
+
+    const d = new Date(n);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleString();
+  }
+
+  async function getIdTokenOrThrow(){
+    const u = window.FB?.auth?.currentUser;
+    if (!u) throw new Error("Not signed in");
+    return await u.getIdToken(true);
+  }
+
+  function setTab(tab){
+    document.querySelectorAll(".tab").forEach(b=>{
+      b.classList.toggle("active", b.dataset.tab === tab);
+    });
+
+    ["overview","orders","downloads","profile"].forEach(name=>{
+      const v = $("view-" + name);
+      if (!v) return;
+      v.classList.toggle("hidden", name !== tab);
+    });
+  }
+
+  function updateNavAuthUI(user){
+    const isIn = !!user;
+
+    const navSignIn = document.getElementById("navSignIn");
+    const navStart = document.getElementById("navStartSelling");
+    const navBuyerDashboard = document.getElementById("navBuyerDashboard");
+
+    const mSignIn = document.getElementById("mNavSignIn");
+    const mStart = document.getElementById("mNavStartSelling");
+    const mBuyerDashboard = document.getElementById("mNavBuyerDashboard");
+    const mSignOutBtn = document.getElementById("mSignOutBtn");
+    const mHelpBtn = document.getElementById("mHelpBtn");
+
+    if (navSignIn) navSignIn.style.display = isIn ? "none" : "";
+    if (navStart) navStart.style.display = isIn ? "none" : "";
+
+    if (mSignIn) mSignIn.style.display = isIn ? "none" : "";
+    if (mStart) mStart.style.display = isIn ? "none" : "";
+
+    if (navBuyerDashboard) navBuyerDashboard.classList.toggle("hidden", !isIn);
+    if (mBuyerDashboard) mBuyerDashboard.classList.toggle("hidden", !isIn);
+    if (mSignOutBtn) mSignOutBtn.classList.toggle("hidden", !isIn);
+    if (mHelpBtn) mHelpBtn.classList.toggle("hidden", !isIn);
+
+    const sw = document.getElementById("switchAccountBtn");
+    if (sw) sw.textContent = isIn ? "Switch account" : "Sign in";
+  }
+
+  function isSuccessfulStatus(status){
+    const s = String(status || "").toLowerCase().trim();
+
+    return (
+      s === "paid" ||
+      s === "completed" ||
+      s === "complete" ||
+      s === "captured" ||
+      s === "success" ||
+      s === "successful" ||
+      s === "unlocked" ||
+      s === "ok"
+    );
+  }
+
+  function normalizeOrder(x){
+    const beatId = x.beatId || x.beatID || x.itemId || x.itemID || "";
+    const status = (x.status || x.state || "").toString().toLowerCase().trim();
+
+    return {
+      id: String(x.id),
+      source: "order",
+      beatId: String(beatId || ""),
+      itemTitle: String(x.itemTitle || x.title || x.beatTitle || "Beat"),
+      itemType: (x.itemType || x.type || "beat").toString().toLowerCase(),
+      status,
+      createdAt: x.createdAt || x.timestamp || null,
+      isUnlocked: isSuccessfulStatus(status),
+      licenseKey: String(x.licenseKey || x.license || "basic"),
+      downloadUrl: x.downloadUrl || x.url || null,
+      orderId: String(x.id || "")
+    };
+  }
+
+  function normalizeUnlock(x){
+    const status = (x.status || "unlocked").toString().toLowerCase().trim();
+
+    return {
+      id: String(x.id),
+      source: "unlock",
+      beatId: String(x.beatId || ""),
+      itemTitle: String(x.beatTitle || x.title || "Beat"),
+      itemType: (x.type || "beat").toString().toLowerCase(),
+      status,
+      createdAt: x.createdAt || null,
+      isUnlocked: isSuccessfulStatus(status),
+      licenseKey: String(x.licenseKey || "basic"),
+      downloadPath: x.downloadPath || null,
+      audioUrl: x.audioUrl || null,
+      orderId: x.orderId || null
+    };
+  }
+
+  function filterPurchasedItems(items){
+    return (items || []).filter(item => {
+      if (!item) return false;
+      if (!item.beatId) return false;
+      if (!item.isUnlocked) return false;
+      return true;
+    });
+  }
+
+  function dedupePurchasedItems(items){
+    const map = new Map();
+
+    (items || []).forEach(item => {
+      const key = `${item.beatId}__${item.licenseKey || "basic"}`;
+      const existing = map.get(key);
+
+      const currentTime =
+        item.createdAt?.toMillis ? item.createdAt.toMillis() : Number(item.createdAt || 0);
+
+      const existingTime =
+        existing?.createdAt?.toMillis ? existing.createdAt.toMillis() : Number(existing?.createdAt || 0);
+
+      if (!existing || currentTime > existingTime) {
+        map.set(key, item);
+      }
+    });
+
+    return Array.from(map.values()).sort((a,b)=>{
+      const am = a.createdAt?.toMillis ? a.createdAt.toMillis() : Number(a.createdAt || 0);
+      const bm = b.createdAt?.toMillis ? b.createdAt.toMillis() : Number(b.createdAt || 0);
+      return bm - am;
+    });
+  }
+
+  function renderOverview(){
+    $("statOrders").textContent = String(ALL_ITEMS.length);
+    $("statPaid").textContent = String(ALL_ITEMS.length);
+    $("statDownloads").textContent = String(ALL_ITEMS.filter(o => o.beatId).length);
+
+    $("statOrdersMini").textContent = "Only successful purchases";
+    $("statPaidMini").textContent = "Completed and unlocked";
+    $("statDownloadsMini").textContent = "Ready for download";
+  }
+
+  function renderOrders(){
+    const qtxt = ($("ordersSearch").value || "").trim().toLowerCase();
+
+    const list = ALL_ITEMS.filter(o=>{
+      const hay = `${o.itemTitle} ${o.id} ${o.status} ${o.beatId}`.toLowerCase();
+      return !qtxt || hay.includes(qtxt);
+    });
+
+    const tb = $("ordersTbody");
+    tb.innerHTML = "";
+
+    list.forEach(o=>{
+      const tr = document.createElement("tr");
+      tr.className = "rowcard";
+
+      tr.innerHTML = `
+        <td>
+          <div style="font-weight:950;">${o.itemTitle}</div>
+          <div class="sub">${o.beatId ? `Beat ID: ${o.beatId}` : "Purchased item"}</div>
+        </td>
+        <td>
+          <span class="pill ok">${o.status || "unlocked"}</span>
+        </td>
+        <td>${fmtDate(o.createdAt)}</td>
+        <td>
+          <div class="actions">
+            <button class="btn" type="button" data-action="open" data-id="${o.id}">Open</button>
+            <button class="btn primary" type="button" data-action="download" data-id="${o.id}">Download</button>
+            <button class="btn" type="button" data-action="license" data-id="${o.id}">License PDF</button>
+          </div>
+        </td>
+      `;
+
+      tb.appendChild(tr);
+    });
+
+    if (!list.length){
+      tb.innerHTML = "";
+      setStatus("No purchased beats found yet.");
+    } else {
+      hideStatus();
+    }
+  }
+
+  function renderDownloads(){
+    const qtxt = ($("downloadsSearch").value || "").trim().toLowerCase();
+
+    const list = ALL_ITEMS.filter(o=>{
+      const hay = `${o.itemTitle} ${o.itemType} ${o.beatId}`.toLowerCase();
+      return !qtxt || hay.includes(qtxt);
+    });
+
+    const tb = $("downloadsTbody");
+    tb.innerHTML = "";
+
+    list.forEach(o=>{
+      const tr = document.createElement("tr");
+      tr.className = "rowcard";
+
+      tr.innerHTML = `
+        <td>
+          <div style="font-weight:950;">${o.itemTitle}</div>
+          <div class="sub">Beat ID: ${o.beatId}</div>
+        </td>
+        <td><span class="pill">${o.itemType}</span></td>
+        <td style="text-align:right;">
+          <div class="actions" style="justify-content:flex-end;">
+            <button class="btn primary" type="button" data-action="download" data-id="${o.id}">Download</button>
+            <button class="btn" type="button" data-action="license" data-id="${o.id}">License PDF</button>
+          </div>
+        </td>
+      `;
+
+      tb.appendChild(tr);
+    });
+
+    if (!list.length){
+      setStatus("No downloads yet.\n\nOnly successful purchases appear here.");
+    } else {
+      hideStatus();
+    }
+  }
+
+  function refreshVisible(){
+    const active = document.querySelector(".tab.active")?.dataset?.tab || "overview";
+
+    if (active === "overview") renderOverview();
+    if (active === "orders") renderOrders();
+    if (active === "downloads") renderDownloads();
+  }
+
+  function getItemById(id){
+    return ALL_ITEMS.find(o => o.id === id) || null;
+  }
+
+  async function loadAll(){
+    setStatus("Loading your purchased beats…");
+
+    const u = window.FB?.auth?.currentUser || window.FB?.user || null;
+    updateNavAuthUI(u);
+
+    if (!u){
+      setStatus("You must sign in.\n\nRedirecting to login…");
+      setTimeout(()=>location.href="/login/", 800);
+      return;
+    }
+
+    $("profileInfo").textContent = `Signed in as: ${u.email || "—"}\nUID: ${u.uid}`;
+
+    const merged = [];
+
+    try{
+      let snap = null;
+
+      try{
+        snap = await getDocs(query(
+          collection(window.FB.db, "orders"),
+          where("buyerId", "==", u.uid),
+          limit(300)
+        ));
+      }catch(e1){
+        snap = await getDocs(query(
+          collection(window.FB.db, "orders"),
+          where("uid", "==", u.uid),
+          limit(300)
+        ));
+      }
+
+      snap.forEach(d => merged.push(normalizeOrder({ id:d.id, ...d.data() })));
+    }catch(err){
+      console.warn("orders load failed:", err);
+    }
+
+    try{
+      const usnap = await getDocs(query(
+        collection(window.FB.db, "unlocks"),
+        where("buyerId", "==", u.uid),
+        limit(500)
+      ));
+
+      usnap.forEach(d => merged.push(normalizeUnlock({ id:d.id, ...d.data() })));
+    }catch(err){
+      console.warn("unlocks load failed:", err);
+    }
+
+    const purchasedOnly = dedupePurchasedItems(filterPurchasedItems(merged));
+    ALL_ITEMS = purchasedOnly;
+
+    if (!ALL_ITEMS.length){
+      setStatus("No purchased beats found yet.\n\nOnly completed payments and unlocked beats appear here.");
+    } else {
+      hideStatus();
+    }
+
+    renderOverview();
+    refreshVisible();
+  }
+
+  document.addEventListener("click", async (e)=>{
+    const tabBtn = e.target.closest(".tab");
+    if (tabBtn){
+      setTab(tabBtn.dataset.tab);
+      refreshVisible();
+      return;
+    }
+
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+
+    const action = btn.getAttribute("data-action");
+    const id = btn.getAttribute("data-id");
+    const item = getItemById(id);
+    if (!item) return;
+
+    if (action === "open"){
+      if (!item.beatId) return alert("No beat found for this purchase.");
+      location.href = "/beat/?id=" + encodeURIComponent(item.beatId);
+      return;
+    }
+
+    if (action === "download"){
+  try {
+
+    btn.disabled = true;
+    btn.textContent = "Preparing…";
+
+    // --------------------------------------------------
+    // GET CURRENT FIREBASE USER
+    // --------------------------------------------------
+
+    const user =
+      window.FB?.auth?.currentUser;
+
+    if (!user) {
+      throw new Error(
+        "Please sign in again."
+      );
+    }
+
+
+    // --------------------------------------------------
+    // GET FRESH FIREBASE ID TOKEN
+    // --------------------------------------------------
+
+    const token =
+      await user.getIdToken(true);
+
+
+    // --------------------------------------------------
+    // CALL CLOUDFLARE WORKER
+    // --------------------------------------------------
+
+    const r =
+      await fetch(
+        DOWNLOAD_FN_URL,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            "Authorization":
+              "Bearer " + token
+          },
+
+          body:
+            JSON.stringify({
+
+              // Existing unlock ID when
+              // this item came from unlocks.
+              unlockId:
+                item.source === "unlock"
+                  ? item.id
+                  : null,
+
+              // Always send beatId.
+              // Worker can authorize using
+              // buyerId + beatId.
+              beatId:
+                item.beatId,
+
+              // Keep this for future license
+              // handling / compatibility.
+              licenseKey:
+                item.licenseKey ||
+                "basic",
+
+              orderId:
+                item.source === "order"
+                  ? item.id
+                  : (item.orderId || null)
+
+            })
+        }
+      );
+
+
+    // --------------------------------------------------
+    // ERROR RESPONSE
+    // --------------------------------------------------
+
+    if (!r.ok) {
+
+      const errorData =
+        await r.json()
+          .catch(() => ({}));
+
+      throw new Error(
+        errorData?.error ||
+        `Download failed (${r.status})`
+      );
+
+    }
+
+
+    // --------------------------------------------------
+    // WORKER RETURNS THE ACTUAL R2 FILE
+    // --------------------------------------------------
+
+    const blob =
+      await r.blob();
+
+
+    if (!blob || blob.size === 0) {
+      throw new Error(
+        "Downloaded file is empty."
+      );
+    }
+
+
+    // --------------------------------------------------
+    // CREATE TEMPORARY BROWSER URL
+    // --------------------------------------------------
+
+    const blobUrl =
+      URL.createObjectURL(blob);
+
+
+    // --------------------------------------------------
+    // START DOWNLOAD
+    // --------------------------------------------------
+
+    const link =
+      document.createElement("a");
+
+    link.href =
+      blobUrl;
+
+    link.download =
+      `${item.itemTitle || "Audiory Beat"}.wav`;
+
+    document.body.appendChild(link);
+
+    link.click();
+
+    link.remove();
+
+
+    // --------------------------------------------------
+    // CLEAN UP
+    // --------------------------------------------------
+
+    setTimeout(() => {
+      URL.revokeObjectURL(blobUrl);
+    }, 60000);
+
+
+  } catch(err) {
+
+    console.error(
+      "Secure download error:",
+      err
+    );
+
+    alert(
+      err?.message ||
+      String(err)
+    );
+
+  } finally {
+
+    btn.disabled = false;
+    btn.textContent = "Download";
+
+  }
+
+  return;
+}
+    if (action === "license"){
+      try{
+        btn.disabled = true;
+        btn.textContent = "Generating…";
+
+        const token = await getIdTokenOrThrow();
+
+        const r = await fetch(LICENSE_FN_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token
+          },
+          body: JSON.stringify({
+            orderId: item.source === "order" ? item.id : (item.orderId || null),
+            unlockId: item.source === "unlock" ? item.id : null,
+            beatId: item.beatId,
+            licenseKey: item.licenseKey || "basic"
+          })
+        });
+
+        const data = await r.json().catch(()=> ({}));
+
+        if (!r.ok) throw new Error(data?.error || `License failed (${r.status})`);
+        if (!data?.url) throw new Error("No license URL returned.");
+
+        window.location.href = data.url;
+      }catch(err){
+        alert(err?.message || String(err));
+      }finally{
+        btn.disabled = false;
+        btn.textContent = "License PDF";
+      }
+      return;
+    }
+  });
+
+  $("refreshBtn")?.addEventListener("click", loadAll);
+  $("ordersSearch")?.addEventListener("input", renderOrders);
+  $("downloadsSearch")?.addEventListener("input", renderDownloads);
+
+  $("signOutBtn")?.addEventListener("click", async ()=>{
+    try{
+      await signOut(window.FB.auth);
+      updateNavAuthUI(null);
+      location.href = "/login/";
+    }catch(e){
+      alert("Sign out failed: " + (e?.message || e));
+    }
+  });
+
+  $("mSignOutBtn")?.addEventListener("click", async ()=>{
+    try{
+      await signOut(window.FB.auth);
+      updateNavAuthUI(null);
+      location.href = "/login/";
+    }catch(e){
+      alert("Sign out failed: " + (e?.message || e));
+    }
+  });
+
+  window.addEventListener("firebase-ready", ()=>{
+    const u = window.FB?.auth?.currentUser || window.FB?.user || null;
+    updateNavAuthUI(u);
+
+    if (window.FB?.auth?.onAuthStateChanged) {
+      window.FB.auth.onAuthStateChanged((user) => {
+        updateNavAuthUI(user);
+
+        if (!user) {
+          setStatus("You must sign in to use Buyer Dashboard.\n\nRedirecting to login…");
+          setTimeout(()=>location.href="/login/", 800);
+          return;
+        }
+
+        loadAll();
+      });
+      return;
+    }
+
+    if (!u){
+      setStatus("You must sign in to use Buyer Dashboard.\n\nRedirecting to login…");
+      setTimeout(()=>location.href="/login/", 800);
+      return;
+    }
+
+    loadAll();
+  });
+</script>
+
+</body>
+</html>
