@@ -24,6 +24,31 @@ window.handleFormSubmission = async function(event) {
         return window.showToast('Please upload cover artwork before submitting.');
     }
 
+    // Extract & Validate Primary Genre (Too Lost requires primary_genre)
+    const primaryGenre = String(
+        window.releaseState.metadata?.primaryGenre ??
+        window.releaseState.metadata?.primary_genre ??
+        window.releaseState.metadata?.genre ??
+        window.releaseState.primaryGenre ??
+        window.releaseState.primary_genre ??
+        window.releaseState.genre ??
+        ''
+    ).trim();
+
+    const secondaryGenre = String(
+        window.releaseState.metadata?.secondaryGenre ??
+        window.releaseState.metadata?.secondary_genre ??
+        window.releaseState.metadata?.subgenre ??
+        window.releaseState.secondaryGenre ??
+        window.releaseState.secondary_genre ??
+        window.releaseState.subgenre ??
+        ''
+    ).trim();
+
+    if (!primaryGenre) {
+        return window.showToast('Please select a Primary Genre for this release.');
+    }
+
     const submitBtn = document.getElementById('submitReleaseBtn');
     const progressCard = document.getElementById('submission-progress-card');
     const statusText = document.getElementById('progress-status-text');
@@ -135,35 +160,80 @@ window.handleFormSubmission = async function(event) {
         const editingId = window.releaseState.editingId;
         const isEditing = Boolean(editingId);
 
+        const currentYear = new Date().getFullYear().toString();
+        const labelObject =
+            window.releaseState.label &&
+            typeof window.releaseState.label === 'object'
+                ? window.releaseState.label
+                : {};
+
+        const rawCLine =
+            labelObject.cLine ||
+            window.releaseState.cLine ||
+            '';
+
+        const rawPLine =
+            labelObject.pLine ||
+            window.releaseState.pLine ||
+            '';
+
+        const cYearMatch = rawCLine.match(/\b(19|20)\d{2}\b/);
+        const pYearMatch = rawPLine.match(/\b(19|20)\d{2}\b/);
+
+        const extractedCYear = cYearMatch ? cYearMatch[0] : (window.releaseState.label.cYear || currentYear);
+        const extractedPYear = pYearMatch ? pYearMatch[0] : (window.releaseState.label.pYear || currentYear);
+
+        // Standardized Payload with both Too Lost snake_case and camelCase keys
         const payload = {
             title: window.releaseState.metadata.title,
             type: window.releaseState.metadata.type,
             language: window.releaseState.metadata.language,
-            genre: window.releaseState.metadata.primaryGenre,
-            subgenre: window.releaseState.metadata.secondaryGenre,
+
+            primaryGenre: primaryGenre,
+            secondaryGenre: secondaryGenre || null,
+
             label: labelString,
+            cLine: rawCLine,
+            cYear: extractedCYear,
+            pLine: rawPLine,
+            pYear: extractedPYear,
+            
             participants: mappedParticipants,
             artists: mappedParticipants,
-            releaseDate: window.releaseState.dates.releaseDate,
-            timezone: window.releaseState.dates.timezone,
+            
+            releaseDate:
+                window.releaseState.dates?.releaseDate || null,
+
+            releaseTime:
+                window.releaseState.dates?.timezone
+                    ? {
+                          time: null,
+                          timeZone: window.releaseState.dates.timezone
+                    }
+                    : null,
+            
             dsps: window.releaseState.dsps,
             delivery: window.releaseState.delivery,
-            coverUrl: finalCoverUrl,
+            
             cover_url: finalCoverUrl,
+            coverUrl: finalCoverUrl,
             cover_art: finalCoverUrl,
             artwork: finalCoverUrl,
+            
             tracks: window.releaseState.tracks.map(t => ({
                 title: t.metadata?.title?.trim() || '',
                 version: t.metadata?.version?.trim() || null,
                 explicit: Boolean(t.metadata?.explicit),
                 isrc: t.isrc?.trim() || null,
+                audio_url: t.audioUrl || null,
                 audioUrl: t.audioUrl || null,
+                instrumental_url: t.instrumentalUrl || null,
                 instrumentalUrl: t.instrumentalUrl || null,
-                tiktokStartTime: t.tiktokStartTime?.trim() || null,
+                tiktok_start_time: t.tiktokStartTime?.trim() || null,
                 lyrics: {
                     content: t.lyrics?.content || null,
                     explicit: Boolean(t.lyrics?.explicit),
-                    cleanVersion: Boolean(t.lyrics?.cleanVersion)
+                    clean_version: Boolean(t.lyrics?.cleanVersion)
                 },
                 artists: (t.artists || []).filter(a => a.name?.trim()).map(a => ({
                     name: a.name.trim(),
@@ -181,77 +251,178 @@ window.handleFormSubmission = async function(event) {
 
         updateProgress(90, 'Dispatching metadata to Gateway...');
 
-const token = window.currentUser?.getIdToken
-    ? await window.currentUser.getIdToken()
-    : '';
+        const token = window.currentUser?.getIdToken
+            ? await window.currentUser.getIdToken()
+            : '';
 
-let releaseId = editingId || null;
-let submitResponseData = null;
+        let releaseId = editingId || null;
+        let submitResponseData = null;
 
-// =========================================================
-// CREATE OR UPDATE RELEASE
-// =========================================================
+        // =========================================================
+        // CREATE OR UPDATE RELEASE DRAFT
+        // =========================================================
+        const releaseEndpoint = releaseId
+            ? `${WORKER_BASE_URL}/api/releases/${releaseId}`
+            : `${WORKER_BASE_URL}/api/releases`;
 
-const releaseEndpoint = releaseId
-    ? `${WORKER_BASE_URL}/api/releases/${releaseId}`
-    : `${WORKER_BASE_URL}/api/releases`;
+        const res = await fetch(releaseEndpoint, {
+            method: isEditing ? 'PUT' : 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(payload)
+        });
 
-const res = await fetch(releaseEndpoint, {
-    method: 'POST',
-    headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify(payload)
-});
+        const serverResponse = await res.json().catch(() => null);
 
-const serverResponse = await res.json().catch(() => null);
+        if (!res.ok) {
+            throw new Error(extractApiError(serverResponse));
+        }
 
-if (!res.ok) {
-    throw new Error(extractApiError(serverResponse));
-}
+        releaseId = serverResponse?.id || serverResponse?.data?.id || releaseId;
 
-// Server-generated ID for new releases
-releaseId =
-    serverResponse?.id ||
-    serverResponse?.data?.id ||
-    releaseId;
+        if (!releaseId) {
+            throw new Error('Release was created but the server did not return a release ID.');
+        }
 
-if (!releaseId) {
-    throw new Error(
-        'Release was created but the server did not return a release ID.'
-    );
-}
-
-// =========================================================
+        // =========================================================
 // SUBMIT RELEASE TO TOO LOST
 // =========================================================
 
-updateProgress(
-    95,
-    'Submitting release package to Too Lost...'
-);
+updateProgress(95, 'Submitting release package to Too Lost...');
 
 const submitEndpoint =
     `${WORKER_BASE_URL}/api/releases/${releaseId}/submit`;
 
-const submitRes = await fetch(submitEndpoint, {
-    method: 'POST',
-    headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-    }
-});
+// ---------------------------------------------------------
+// IMPORTANT DEBUGGING
+// ---------------------------------------------------------
+// Show exactly what Audiory is sending/storing for the genre.
+// ---------------------------------------------------------
 
-submitResponseData =
-    await submitRes.json().catch(() => null);
+console.log('========== AUDIORY SUBMISSION DEBUG ==========');
+
+console.log('Release ID:', releaseId);
+
+console.log('Primary Genre:', primaryGenre);
+
+console.log('Secondary Genre:', secondaryGenre);
+
+console.log('Full release payload:', payload);
+
+console.log('Terms accepted:',
+    window.releaseState.agreements?.termsAccepted
+);
+
+console.log('Rights confirmed:',
+    window.releaseState.agreements?.rightsConfirmed
+);
+
+console.log('YouTube rights confirmed:',
+    window.releaseState.agreements?.youtubeRightsConfirmed
+);
+
+console.log('==============================================');
+
+
+// ---------------------------------------------------------
+// Too Lost SubmitReleaseRequest
+// Based on the schema you provided.
+// ---------------------------------------------------------
+
+const submitPayload = {
+    acceptTerms:
+        window.releaseState.agreements?.termsAccepted
+            ? "true"
+            : "false",
+
+    confirmRights:
+        window.releaseState.agreements?.rightsConfirmed
+            ? "true"
+            : "false",
+
+    confirmYoutubeRights:
+        Boolean(
+            window.releaseState.agreements?.youtubeRightsConfirmed
+        ),
+
+    idempotencyKey:
+        `${releaseId}-${Date.now()}`
+};
+
+console.log(
+    'Too Lost submit body:',
+    submitPayload
+);
+
+
+// ---------------------------------------------------------
+// Send submit request
+// ---------------------------------------------------------
+
+const submitRes = await fetch(
+    submitEndpoint,
+    {
+        method: 'POST',
+
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+
+        body: JSON.stringify(submitPayload)
+    }
+);
+
+
+// ---------------------------------------------------------
+// Read response safely
+// ---------------------------------------------------------
+
+const submitResponseText =
+    await submitRes.text();
+
+try {
+    submitResponseData =
+        JSON.parse(submitResponseText);
+} catch (e) {
+    submitResponseData = {
+        raw: submitResponseText
+    };
+}
+
+console.log(
+    'Too Lost submit response:',
+    submitResponseData
+);
+
+
+// ---------------------------------------------------------
+// Handle Too Lost error
+// ---------------------------------------------------------
 
 if (!submitRes.ok) {
+
+    const apiMessage =
+        submitResponseData?.message ||
+        submitResponseData?.error ||
+        submitResponseData?.detail ||
+        submitResponseData?.data?.message ||
+        submitResponseText ||
+        `HTTP ${submitRes.status}`;
+
     throw new Error(
-        extractApiError(submitResponseData)
+        `Too Lost submit failed (${submitRes.status}): ${apiMessage}`
     );
 }
 
+        submitResponseData = await submitRes.json().catch(() => null);
+
+        if (!submitRes.ok) {
+            throw new Error(extractApiError(submitResponseData));
+        }
 
         updateProgress(100, `Release successfully ${isEditing ? 'updated' : 'submitted'}! Redirecting...`);
         const currentUid = window.currentUser ? window.currentUser.uid : 'anonymous';
@@ -262,8 +433,7 @@ if (!submitRes.ok) {
             serverResponse?.data?.status ??
             'Unknown';
 
-        const validStatus =
-            formatReleaseStatus(returnedStatus);
+        const validStatus = formatReleaseStatus(returnedStatus);
 
         const finalId = isEditing ? editingId : (releaseId || Date.now());
         const newReleaseItem = {
@@ -341,7 +511,3 @@ if (!submitRes.ok) {
         }
     }
 };
-        
-    </script>
-</body>
-</html>
