@@ -1,0 +1,1697 @@
+const TOO_LOST_BASE_URL = "https://api-sandbox.toolost.com/v1";
+
+      // Helper for Too Lost API Requests
+      async function fetchTooLostAPI(endpoint, method = "GET", body = null, apiKey) {
+        const options = {
+          method,
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          }
+        };
+        if (body) {
+          options.body = JSON.stringify(body);
+        }
+        return await fetch(`${TOO_LOST_BASE_URL}${endpoint}`, options);
+      }
+
+      // 1. GET Artist Preferences (/api/preferences/artist)
+      if (url.pathname === "/api/preferences/artist" && request.method === "GET") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const prefKey = `PREFERENCES_ARTIST_${userId}`;
+        let artistData = null;
+
+        // Try fetching directly from Too Lost API upstream first
+        try {
+          const upstreamRes = await fetchTooLostAPI("/preferences/artist", "GET", null, env.TOO_LOST_API_KEY);
+          if (upstreamRes.ok) {
+            const upstreamJson = await upstreamRes.json();
+            artistData = upstreamJson.data?.artist || upstreamJson.data || null;
+      
+            // Update KV cache with fresh upstream data
+            if (artistData) {
+              await env.AUDIORY_KV.put(prefKey, JSON.stringify(artistData));
+            }
+          }
+        } catch (err) {
+          console.error("Too Lost API upstream fetch failed, reading from KV cache:", err);
+        }
+
+        // Fallback to KV storage if upstream is unreachable or empty
+        if (!artistData) {
+          const rawData = await env.AUDIORY_KV.get(prefKey);
+          artistData = rawData ? JSON.parse(rawData) : null;
+        }
+
+        // Dynamic empty schema if no data has been saved yet
+        if (!artistData) {
+          artistData = {
+            artistName: "",
+            primaryGenre: "",
+            secondaryGenre: "",
+            language: "",
+            about: "",
+            profileImg: null,
+            social: { facebook: "", instagram: "", twitter: "", youtube: "" },
+            platforms: { spotify: "", soundcloud: "", appleMusic: "", vevo: "", website: "" },
+            deliveries: { delivery_youtube: false, delivery_soundexchange: false, delivery_facebook: false },
+            releaseTime: "",
+            timeZone: "",
+            label: "",
+            cLine: "",
+            pLine: ""
+          };
+        }
+
+        return new Response(
+          JSON.stringify({
+            data: { artist: artistData },
+            message: "Artist preferences retrieved successfully"
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 2. POST Submit Artist Preferences (/api/preferences/artist/submit)
+      if (url.pathname === "/api/preferences/artist/submit" && request.method === "POST") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const body = await request.json();
+        const prefKey = `PREFERENCES_ARTIST_${userId}`;
+
+        // Fetch existing values to maintain structure during partial updates
+        const existingRaw = await env.AUDIORY_KV.get(prefKey);
+        const existingData = existingRaw ? JSON.parse(existingRaw) : {};
+
+        const updatedData = {
+          ...existingData,
+          ...body,
+          updatedAt: new Date().toISOString()
+        };
+
+        // 1. Forward to Too Lost API Upstream
+        let upstreamSuccess = false;
+        try {
+          const upstreamRes = await fetchTooLostAPI("/preferences/artist", "POST", updatedData, env.TOO_LOST_API_KEY);
+          if (upstreamRes.ok) {
+            upstreamSuccess = true;
+          } else {
+            console.warn("Too Lost API sync responded with error code:", upstreamRes.status);
+          }
+        } catch (err) {
+          console.error("Failed to forward preferences to Too Lost API:", err);
+        }
+
+        // 2. Save state locally in KV storage
+        await env.AUDIORY_KV.put(prefKey, JSON.stringify(updatedData));
+
+        return new Response(
+          JSON.stringify({ 
+            message: "Preferences updated successfully", 
+            data: updatedData,
+            syncedWithTooLost: upstreamSuccess
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 3. GET Label Preferences (/api/preferences/label)
+      if (url.pathname === "/api/preferences/label" && request.method === "GET") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const labelKey = `PREFERENCES_LABEL_${userId}`;
+        let labelData = null;
+
+        // Attempt live upstream call to Too Lost API
+        try {
+          const upstreamRes = await fetchTooLostAPI("/preferences/label", "GET", null, env.TOO_LOST_API_KEY);
+          if (upstreamRes.ok) {
+            const upstreamJson = await upstreamRes.json();
+            labelData = upstreamJson.data || null;
+
+            if (labelData) {
+              await env.AUDIORY_KV.put(labelKey, JSON.stringify(labelData));
+            }
+          }
+        } catch (err) {
+          console.error("Too Lost API label preferences fetch failed, using KV:", err);
+        }
+
+        // Fallback to KV storage
+        if (!labelData) {
+          const rawData = await env.AUDIORY_KV.get(labelKey);
+          labelData = rawData ? JSON.parse(rawData) : null;
+        }
+
+        // Dynamic empty schema if no data has been saved yet
+        if (!labelData) {
+          labelData = {
+            label: {
+              name: "",
+              about: "",
+              profileImg: null,
+              social: { facebook: "", instagram: "", twitter: "", youtube: "" },
+              platforms: { website: "" }
+            },
+            artists: []
+          };
+        }
+
+        return new Response(
+          JSON.stringify({ data: labelData, message: "Label preferences retrieved successfully" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // =============================================================
+// RELEASE API ROUTES
+// Too Lost integration
+// =============================================================
+
+const isReleasePath = url.pathname === "/api/releases" ||
+                      url.pathname.startsWith("/api/releases/");
+
+if (isReleasePath) {
+
+  if (!userId) {
+    return new Response(
+      JSON.stringify({
+        error: "Unauthorized: Invalid or missing authentication token."
+      }),
+      {
+        status: 401,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  const baseUrl = (
+    env.TOO_LOST_BASE_URL ||
+    "https://api-sandbox.toolost.com/v1"
+  ).replace(/\/$/, "");
+
+  // -------------------------------------------------------------
+  // Get Too Lost access token
+  // -------------------------------------------------------------
+
+  let accessToken;
+
+  try {
+    accessToken = await getAccessToken(env);
+  } catch (authError) {
+
+    console.error(
+      "Too Lost Authentication Error:",
+      authError
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: "Too Lost Authentication Failed",
+        details: authError?.message || "Unable to authenticate with Too Lost."
+      }),
+      {
+        status: 401,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  // =============================================================
+// ROUTE 1: CREATE RELEASE DRAFT
+//
+// POST /api/releases
+//
+// Audiory -> Too Lost
+// POST /releases
+// =============================================================
+
+if (
+  url.pathname === "/api/releases" &&
+  request.method === "POST"
+) {
+  const payloadText = await request.text();
+
+  let payloadObj = {};
+
+  try {
+    payloadObj = JSON.parse(payloadText || "{}");
+  } catch (e) {
+    return new Response(
+      JSON.stringify({
+        error: "Invalid JSON request body."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // ===========================================================
+// NORMALIZE RELEASE DATA FOR TOO LOST
+// ===========================================================
+
+const normalizedPayload = {
+
+    // ---------------------------------------------------------
+    // BASIC RELEASE INFORMATION
+    // ---------------------------------------------------------
+
+    title:
+        String(
+            payloadObj.title ||
+            payloadObj.releaseTitle ||
+            ""
+        ).trim(),
+
+    type:
+        payloadObj.type ||
+        payloadObj.releaseType ||
+        "Single",
+
+    language:
+        payloadObj.language ||
+        payloadObj.primaryLanguage ||
+        null,
+
+
+    // ---------------------------------------------------------
+    // GENRE
+    // ---------------------------------------------------------
+
+    primaryGenre:
+        String(
+            payloadObj.primaryGenre ||
+            payloadObj.primary_genre ||
+            payloadObj.genre ||
+            ""
+        ).trim(),
+
+    secondaryGenre:
+        payloadObj.secondaryGenre ||
+        payloadObj.secondary_genre ||
+        payloadObj.subgenre ||
+        null,
+
+
+    // ---------------------------------------------------------
+    // LABEL
+    // ---------------------------------------------------------
+
+    label:
+        payloadObj.label ||
+        "Independent",
+
+
+    // ---------------------------------------------------------
+    // COPYRIGHT
+    // ---------------------------------------------------------
+
+    cLine:
+        payloadObj.cLine ||
+        payloadObj.c_line ||
+        null,
+
+    cYear:
+        payloadObj.cYear ||
+        payloadObj.c_year ||
+        null,
+
+    pLine:
+        payloadObj.pLine ||
+        payloadObj.p_line ||
+        null,
+
+    pYear:
+        payloadObj.pYear ||
+        payloadObj.p_year ||
+        null,
+
+
+    // ---------------------------------------------------------
+    // RELEASE DATE
+    // ---------------------------------------------------------
+
+    releaseDate:
+        payloadObj.releaseDate ||
+        payloadObj.release_date ||
+        null,
+
+
+    // ---------------------------------------------------------
+    // ARTWORK
+    // ---------------------------------------------------------
+
+    coverUrl:
+        payloadObj.coverUrl ||
+        payloadObj.cover_url ||
+        payloadObj.cover_art ||
+        null,
+
+    compressedArtwork:
+        payloadObj.compressedArtwork ||
+        payloadObj.compressed_artwork ||
+        payloadObj.coverUrl ||
+        payloadObj.cover_url ||
+        null,
+
+
+    // ---------------------------------------------------------
+    // PARTICIPANTS
+    // ---------------------------------------------------------
+
+    participants:
+        payloadObj.participants ||
+        payloadObj.artists ||
+        [],
+
+
+    // ---------------------------------------------------------
+    // DELIVERY
+    // ---------------------------------------------------------
+
+    delivery:
+        payloadObj.delivery ||
+        {},
+
+
+    // ---------------------------------------------------------
+    // PLATFORMS
+    // ---------------------------------------------------------
+
+    platforms:
+        payloadObj.platforms ||
+        payloadObj.dsps ||
+        [],
+
+
+    // ---------------------------------------------------------
+    // TERRITORIES
+    // ---------------------------------------------------------
+
+    territories:
+        payloadObj.territories ||
+        [],
+
+
+    // ---------------------------------------------------------
+    // TRACKS
+    // ---------------------------------------------------------
+
+    tracks:
+        Array.isArray(payloadObj.tracks)
+            ? payloadObj.tracks
+            : []
+};
+
+  // ===========================================================
+  // VALIDATE PRIMARY GENRE BEFORE TOO LOST
+  // ===========================================================
+
+  normalizedPayload.primaryGenre =
+    String(normalizedPayload.primaryGenre || "").trim();
+
+  if (!normalizedPayload.primaryGenre) {
+    return new Response(
+      JSON.stringify({
+        error: "Primary Genre is required.",
+        field: "primaryGenre",
+        message: "Missing Primary Genre."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // ===========================================================
+  // NORMALIZE SECONDARY GENRE
+  // ===========================================================
+
+  if (normalizedPayload.secondaryGenre) {
+    normalizedPayload.secondaryGenre =
+      String(normalizedPayload.secondaryGenre).trim();
+  } else {
+    normalizedPayload.secondaryGenre = null;
+  }
+
+  // ===========================================================
+  // DEBUG LOG
+  //
+  // DO NOT log the entire payload.
+  // Only log the important fields.
+  // ===========================================================
+
+  console.log("Audiory -> Too Lost CREATE RELEASE", {
+    title: normalizedPayload.title,
+    type: normalizedPayload.type,
+    primaryGenre: normalizedPayload.primaryGenre,
+    secondaryGenre: normalizedPayload.secondaryGenre,
+    language: normalizedPayload.language,
+    releaseDate: normalizedPayload.releaseDate,
+    hasCoverUrl: Boolean(normalizedPayload.coverUrl),
+    trackCount: normalizedPayload.tracks.length
+  });
+
+  // ===========================================================
+  // CREATE RELEASE IN TOO LOST
+  // ===========================================================
+
+  const response = await fetch(
+    `${baseUrl}/releases`,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${accessToken}`
+      },
+
+      body: JSON.stringify(normalizedPayload)
+    }
+  );
+
+  const responseText =
+    await response.text();
+
+  let serverData = {};
+
+  try {
+    serverData =
+      JSON.parse(responseText);
+  } catch (e) {
+    serverData = {};
+  }
+
+  // ===========================================================
+  // IMPORTANT:
+  // If Too Lost rejected the CREATE request, don't cache it.
+  // ===========================================================
+
+  if (!response.ok) {
+    console.error(
+      "Too Lost CREATE RELEASE ERROR:",
+      response.status,
+      responseText
+    );
+
+    return new Response(
+      responseText || JSON.stringify({
+        error: "Too Lost rejected release creation."
+      }),
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // ===========================================================
+  // GET CREATED RELEASE
+  // ===========================================================
+
+  const release =
+    serverData?.data ||
+    serverData ||
+    {};
+
+  const releaseId =
+    release.id ||
+    null;
+
+  if (!releaseId) {
+    console.error(
+      "Too Lost CREATE succeeded but no release ID returned:",
+      responseText
+    );
+
+    return new Response(
+      JSON.stringify({
+        error:
+          "Too Lost created the release but did not return a release ID.",
+        response: serverData
+      }),
+      {
+        status: 502,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // ===========================================================
+  // CHECK WHETHER TOO LOST ACTUALLY STORED PRIMARY GENRE
+  // ===========================================================
+
+  const returnedPrimaryGenre =
+    release.primaryGenre ||
+    release.primary_genre ||
+    null;
+
+  console.log(
+    "Too Lost created release:",
+    releaseId,
+    "primaryGenre:",
+    returnedPrimaryGenre
+  );
+
+  // ===========================================================
+  // CACHE RELEASE
+  // ===========================================================
+
+  if (env.AUDIORY_KV) {
+
+    const resolvedCover =
+      normalizedPayload.coverUrl ||
+      normalizedPayload.compressedArtwork ||
+      "";
+
+    const cacheItem = {
+
+      id: releaseId,
+
+      title:
+        release.title ||
+        normalizedPayload.title ||
+        "Untitled",
+
+      type:
+        release.type ||
+        normalizedPayload.type ||
+        "Single",
+
+      status:
+        release.status ||
+        "draft",
+
+      label:
+        typeof release.label === "string"
+          ? release.label
+          : normalizedPayload.label,
+
+      primaryGenre:
+        returnedPrimaryGenre ||
+        normalizedPayload.primaryGenre,
+
+      secondaryGenre:
+        release.secondaryGenre ||
+        normalizedPayload.secondaryGenre,
+
+      coverUrl:
+        release.coverUrl ||
+        resolvedCover,
+
+      compressedArtwork:
+        release.compressedArtwork ||
+        resolvedCover,
+
+      participants:
+        release.participants ||
+        normalizedPayload.participants ||
+        [],
+
+      upc:
+        release.upc ||
+        normalizedPayload.upc ||
+        "Pending",
+
+      submittedBy:
+        userId,
+
+      createdAt:
+        release.createdAt ||
+        new Date().toISOString()
+    };
+
+    const userKvKey =
+      `RELEASES_USER_${userId}`;
+
+    let existingCached = [];
+
+    try {
+      existingCached =
+        JSON.parse(
+          await env.AUDIORY_KV.get(userKvKey) || "[]"
+        );
+    } catch (e) {
+      existingCached = [];
+    }
+
+    const existingIdx =
+      existingCached.findIndex(
+        item =>
+          String(item.id) === String(releaseId)
+      );
+
+    if (existingIdx !== -1) {
+
+      existingCached[existingIdx] = {
+        ...existingCached[existingIdx],
+        ...cacheItem
+      };
+
+    } else {
+
+      existingCached.unshift(cacheItem);
+
+    }
+
+    await env.AUDIORY_KV.put(
+      userKvKey,
+      JSON.stringify(existingCached)
+    );
+  }
+
+  // ===========================================================
+  // RETURN TOO LOST RESPONSE
+  // ===========================================================
+
+  return new Response(
+    responseText,
+    {
+      status: response.status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+
+
+  // =============================================================
+// ROUTE 2: SUBMIT RELEASE
+//
+// POST /api/releases/:id/submit
+//
+// IMPORTANT:
+// Too Lost validates the SAVED release.
+// Therefore we verify the release first.
+// =============================================================
+
+const submitMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)\/submit$/
+  );
+
+if (
+  submitMatch &&
+  request.method === "POST"
+) {
+
+  const releaseId =
+    submitMatch[1];
+
+  const payloadText =
+    await request.text();
+
+  let submitPayload = {};
+
+  try {
+    submitPayload =
+      JSON.parse(payloadText || "{}");
+  } catch (e) {
+    submitPayload = {};
+  }
+
+  // ===========================================================
+  // FETCH ACTUAL TOO LOST RELEASE
+  // ===========================================================
+
+  const releaseCheckResponse =
+    await fetch(
+      `${baseUrl}/releases/${releaseId}`,
+      {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        }
+      }
+    );
+
+  const releaseCheckText =
+    await releaseCheckResponse.text();
+
+  let releaseCheckData = {};
+
+  try {
+    releaseCheckData =
+      JSON.parse(releaseCheckText);
+  } catch (e) {
+    releaseCheckData = {};
+  }
+
+  if (!releaseCheckResponse.ok) {
+
+    console.error(
+      "Too Lost RELEASE CHECK FAILED:",
+      releaseCheckResponse.status,
+      releaseCheckText
+    );
+
+    return new Response(
+      releaseCheckText,
+      {
+        status: releaseCheckResponse.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  const release =
+    releaseCheckData?.data ||
+    releaseCheckData ||
+    {};
+
+  // ===========================================================
+  // CHECK PRIMARY GENRE
+  // ===========================================================
+
+  const storedPrimaryGenre =
+    String(
+      release.primaryGenre ||
+      release.primary_genre ||
+      ""
+    ).trim();
+
+  console.log(
+    "TOO LOST SUBMIT CHECK",
+    {
+      releaseId,
+      title: release.title,
+      primaryGenre: storedPrimaryGenre,
+      secondaryGenre: release.secondaryGenre,
+      status: release.status
+    }
+  );
+
+  // ===========================================================
+  // DO NOT CALL SUBMIT IF TOO LOST DID NOT SAVE GENRE
+  // ===========================================================
+
+  if (!storedPrimaryGenre) {
+
+    return new Response(
+      JSON.stringify({
+        error: "Too Lost draft is missing Primary Genre.",
+        code: "MISSING_PRIMARY_GENRE_ON_DRAFT",
+        releaseId: releaseId,
+        tooLostRelease: {
+          id: release.id,
+          title: release.title,
+          primaryGenre: release.primaryGenre ?? null,
+          secondaryGenre: release.secondaryGenre ?? null,
+          status: release.status ?? null
+        }
+      }),
+      {
+        status: 422,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // ===========================================================
+  // SUBMIT TO TOO LOST
+  // ===========================================================
+
+  const submitResponse =
+    await fetch(
+      `${baseUrl}/releases/${releaseId}/submit`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        },
+
+        body: JSON.stringify({
+          acceptTerms:
+            String(
+              submitPayload.acceptTerms ?? "true"
+            ),
+
+          confirmRights:
+            String(
+              submitPayload.confirmRights ?? "true"
+            ),
+
+          confirmYoutubeRights:
+            submitPayload.confirmYoutubeRights ??
+            null,
+
+          idempotencyKey:
+            submitPayload.idempotencyKey ||
+            crypto.randomUUID()
+        })
+      }
+    );
+
+  const responseText =
+    await submitResponse.text();
+
+  // ===========================================================
+  // CACHE STATUS AFTER SUCCESS
+  // ===========================================================
+
+  if (
+    env.AUDIORY_KV &&
+    submitResponse.ok
+  ) {
+
+    const serverData =
+      (() => {
+        try {
+          return JSON.parse(responseText);
+        } catch (e) {
+          return {};
+        }
+      })();
+
+    const submittedRelease =
+      serverData?.data ||
+      serverData ||
+      {};
+
+    const userKvKey =
+      `RELEASES_USER_${userId}`;
+
+    let existingCached = [];
+
+    try {
+      existingCached =
+        JSON.parse(
+          await env.AUDIORY_KV.get(userKvKey) || "[]"
+        );
+    } catch (e) {
+      existingCached = [];
+    }
+
+    const idx =
+      existingCached.findIndex(
+        item =>
+          String(item.id) === String(releaseId)
+      );
+
+    if (idx !== -1) {
+
+      existingCached[idx] = {
+        ...existingCached[idx],
+
+        status:
+          submittedRelease.status ||
+          "in_review",
+
+        submittedAt:
+          submittedRelease.submittedAt ||
+          new Date().toISOString()
+      };
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(existingCached)
+      );
+    }
+  }
+
+  // ===========================================================
+  // RETURN TOO LOST RESPONSE
+  // ===========================================================
+
+  return new Response(
+    responseText,
+    {
+      status: submitResponse.status,
+
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+  // =============================================================
+  // ROUTE 3: DELETE RELEASE DRAFT
+  //
+  // DELETE /api/releases/:id
+  // =============================================================
+
+  const deleteMatch =
+    url.pathname.match(
+      /^\/api\/releases\/([^/]+)$/
+    );
+
+
+  if (
+    deleteMatch &&
+    request.method === "DELETE"
+  ) {
+
+    const releaseId =
+      deleteMatch[1];
+
+
+    const response =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          }
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    // -------------------------------------------------------------
+    // Only remove local cache if Too Lost successfully deleted it.
+    // -------------------------------------------------------------
+
+    if (
+      response.ok &&
+      env.AUDIORY_KV
+    ) {
+
+      const userKvKey =
+        `RELEASES_USER_${userId}`;
+
+
+      let existingCached = [];
+
+      try {
+        existingCached =
+          JSON.parse(
+            await env.AUDIORY_KV.get(userKvKey) || "[]"
+          );
+      } catch (e) {
+        existingCached = [];
+      }
+
+
+      const filteredKV =
+        existingCached.filter(
+          item =>
+            String(item.id) !== String(releaseId)
+        );
+
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(filteredKV)
+      );
+    }
+
+
+    return new Response(
+      responseText || JSON.stringify({
+        message:
+          response.ok
+            ? "Release deleted successfully"
+            : "Unable to delete release"
+      }),
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+
+  // =============================================================
+// ROUTE 4: RELEASE INFORMATION / UPDATE DRAFT
+//
+// PUT /api/releases/:id
+// PATCH /api/releases/:id
+//
+// Audiory -> Too Lost
+// PUT /releases/:id
+// =============================================================
+
+const releaseInfoMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)$/
+  );
+
+
+if (
+  releaseInfoMatch &&
+  (
+    request.method === "PUT" ||
+    request.method === "PATCH"
+  )
+) {
+
+  const releaseId =
+    releaseInfoMatch[1];
+
+
+  const payloadText =
+    await request.text();
+
+
+  let payloadObj = {};
+
+  try {
+
+    payloadObj =
+      JSON.parse(
+        payloadText || "{}"
+      );
+
+  } catch (e) {
+
+    return new Response(
+      JSON.stringify({
+        error: "Invalid JSON request body."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  // ===========================================================
+  // NORMALIZE UPDATE
+  // ===========================================================
+
+  const updatePayload = {
+
+    ...payloadObj,
+
+    title:
+      payloadObj.title ||
+      payloadObj.releaseTitle ||
+      "",
+
+    type:
+      payloadObj.type ||
+      payloadObj.releaseType ||
+      "Single",
+
+    language:
+      payloadObj.language ||
+      payloadObj.primaryLanguage ||
+      null,
+
+    primaryGenre:
+      payloadObj.primaryGenre ||
+      payloadObj.primary_genre ||
+      payloadObj.genre ||
+      "",
+
+    secondaryGenre:
+      payloadObj.secondaryGenre ||
+      payloadObj.secondary_genre ||
+      payloadObj.subgenre ||
+      null,
+
+    label:
+      payloadObj.label ||
+      "Independent",
+
+    releaseDate:
+      payloadObj.releaseDate ||
+      payloadObj.release_date ||
+      null,
+
+    coverUrl:
+      payloadObj.coverUrl ||
+      payloadObj.cover_url ||
+      payloadObj.cover_art ||
+      null,
+
+    compressedArtwork:
+      payloadObj.compressedArtwork ||
+      payloadObj.compressed_artwork ||
+      payloadObj.coverUrl ||
+      payloadObj.cover_url ||
+      null,
+
+    participants:
+      payloadObj.participants ||
+      payloadObj.artists ||
+      [],
+
+    delivery:
+      payloadObj.delivery ||
+      {},
+
+    platforms:
+      payloadObj.platforms ||
+      payloadObj.dsps ||
+      [],
+
+    territories:
+      payloadObj.territories ||
+      [],
+
+    tracks:
+      Array.isArray(payloadObj.tracks)
+        ? payloadObj.tracks
+        : []
+  };
+
+
+  // ===========================================================
+  // DO NOT UPDATE WITHOUT GENRE
+  // ===========================================================
+
+  if (
+    !String(
+      updatePayload.primaryGenre || ""
+    ).trim()
+  ) {
+
+    return new Response(
+      JSON.stringify({
+        error: "Primary Genre is required.",
+        field: "primaryGenre",
+        message: "Missing Primary Genre."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  updatePayload.primaryGenre =
+    String(
+      updatePayload.primaryGenre
+).trim();
+
+
+  if (
+    updatePayload.secondaryGenre
+  ) {
+
+    updatePayload.secondaryGenre =
+      String(
+        updatePayload.secondaryGenre
+      ).trim();
+
+  } else {
+
+    updatePayload.secondaryGenre =
+      null;
+  }
+
+
+  console.log(
+    "Audiory -> Too Lost UPDATE:",
+    JSON.stringify({
+      releaseId,
+      title: updatePayload.title,
+      primaryGenre: updatePayload.primaryGenre,
+      secondaryGenre: updatePayload.secondaryGenre
+    })
+  );
+
+
+  const response =
+    await fetch(
+      `${baseUrl}/releases/${releaseId}`,
+      {
+        method: "PUT",
+
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization":
+            `Bearer ${accessToken}`
+        },
+
+        body:
+          JSON.stringify(
+            updatePayload
+          )
+      }
+    );
+
+
+  const responseText =
+    await response.text();
+
+
+  return new Response(
+    responseText,
+    {
+      status: response.status,
+
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+  // =============================================================
+  // ROUTE 5: RELEASE DELIVERY
+  //
+  // PUT /api/releases/:id/delivery
+  //
+  // IMPORTANT:
+  // The exact Too Lost delivery path should be confirmed from
+  // the endpoint URL shown in their API documentation.
+  // =============================================================
+
+  const deliveryMatch =
+    url.pathname.match(
+      /^\/api\/releases\/([^/]+)\/delivery$/
+    );
+
+
+  if (
+    deliveryMatch &&
+    request.method === "PATCH"
+  )
+   {
+
+    const releaseId =
+      deliveryMatch[1];
+
+
+    const payloadText =
+      await request.text();
+
+
+    const response =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}/delivery`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          },
+          body: payloadText
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    return new Response(
+      responseText,
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+
+  // =============================================================
+// ROUTE 6: FETCH USER CATALOGUE
+//
+// GET /api/releases
+//
+// IMPORTANT:
+// Audiory KV is the ownership source.
+// Too Lost provides the latest release data.
+// Only Too Lost releases already owned by this Audiory user
+// in KV are allowed into the final catalogue.
+// =============================================================
+
+if (
+  url.pathname === "/api/releases" &&
+  request.method === "GET"
+) {
+
+  // -------------------------------------------------------------
+  // Get Audiory local cache FIRST
+  // -------------------------------------------------------------
+
+  let userCachedReleases = [];
+
+  if (env.AUDIORY_KV) {
+
+    const userKvKey =
+      `RELEASES_USER_${userId}`;
+
+    try {
+
+      const cachedValue =
+        await env.AUDIORY_KV.get(userKvKey);
+
+      if (cachedValue) {
+
+        const parsed =
+          JSON.parse(cachedValue);
+
+        if (Array.isArray(parsed)) {
+          userCachedReleases = parsed;
+        }
+
+      }
+
+    } catch (e) {
+
+      console.error(
+        "Audiory KV Release Cache Error:",
+        e
+      );
+
+      userCachedReleases = [];
+    }
+  }
+
+
+  // -------------------------------------------------------------
+  // Build ownership list from Audiory KV
+  //
+  // This is the security boundary.
+  // A Too Lost release is only accepted if its ID is already
+  // associated with this Audiory user.
+  // -------------------------------------------------------------
+
+  const ownedReleaseIds =
+    new Set(
+      userCachedReleases
+        .filter(item => item?.id)
+        .map(item => String(item.id))
+    );
+
+
+  // -------------------------------------------------------------
+  // Fetch releases from Too Lost
+  // -------------------------------------------------------------
+
+  let apiReleases = [];
+
+  let tooLostError = null;
+
+  try {
+
+    const response =
+      await fetch(
+        `${baseUrl}/releases${url.search}`,
+        {
+          method: "GET",
+
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          }
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    // -----------------------------------------------------------
+    // Handle Too Lost errors explicitly
+    // -----------------------------------------------------------
+
+    if (!response.ok) {
+
+      console.error(
+        "Too Lost Fetch Error:",
+        response.status,
+        responseText
+      );
+
+      tooLostError = {
+        status: response.status,
+        body: responseText
+      };
+
+    } else {
+
+      let resJson = {};
+
+      try {
+
+        resJson =
+          JSON.parse(responseText);
+
+      } catch (e) {
+
+        console.error(
+          "Too Lost returned invalid JSON:",
+          responseText
+        );
+
+        tooLostError = {
+          status: 502,
+          body: "Too Lost returned invalid JSON."
+        };
+      }
+
+
+      // ---------------------------------------------------------
+      // Normalize Too Lost response
+      // ---------------------------------------------------------
+
+      if (!tooLostError) {
+
+        const rawList =
+          Array.isArray(resJson)
+            ? resJson
+            : (
+                Array.isArray(resJson?.data)
+                  ? resJson.data
+                  : (
+                      Array.isArray(resJson?.releases)
+                        ? resJson.releases
+                        : []
+                    )
+              );
+
+
+        // -------------------------------------------------------
+        // SECURITY FILTER
+        //
+        // NEVER use:
+        //
+        // !item.submittedBy
+        //
+        // because submittedBy is Audiory's local ownership field,
+        // not a reliable Too Lost ownership identifier.
+        // -------------------------------------------------------
+
+        apiReleases =
+          rawList.filter(item => {
+
+            if (!item?.id) {
+              return false;
+            }
+
+            return ownedReleaseIds.has(
+              String(item.id)
+            );
+          });
+      }
+    }
+
+  } catch (e) {
+
+    console.error(
+      "Too Lost Fetch Error:",
+      e
+    );
+
+    tooLostError = {
+      status: 502,
+      body: e?.message ||
+        "Unable to contact Too Lost."
+    };
+  }
+
+
+  // -------------------------------------------------------------
+  // Merge Too Lost data with Audiory's local data
+  //
+  // Start with the user's KV releases so locally-created drafts
+  // remain visible even if Too Lost is temporarily unavailable.
+  // -------------------------------------------------------------
+
+  const combinedMap =
+    new Map();
+
+
+  userCachedReleases.forEach(item => {
+
+    if (!item?.id) {
+      return;
+    }
+
+    combinedMap.set(
+      String(item.id),
+      {
+        ...item
+      }
+    );
+
+  });
+
+
+  // -------------------------------------------------------------
+  // Overlay the latest Too Lost data
+  // -------------------------------------------------------------
+
+  apiReleases.forEach(item => {
+
+    if (!item?.id) {
+      return;
+    }
+
+    const key =
+      String(item.id);
+
+    const existing =
+      combinedMap.get(key);
+
+
+    if (existing) {
+
+      combinedMap.set(
+        key,
+        {
+          ...existing,
+          ...item,
+
+          // Too Lost is authoritative for current status.
+          status:
+            item.status ??
+            existing.status,
+
+          // Audiory remains authoritative for ownership.
+          submittedBy:
+            existing.submittedBy ||
+            userId
+        }
+      );
+
+    }
+
+  });
+
+
+  // -------------------------------------------------------------
+  // Final catalogue
+  //
+  // Only releases already belonging to this Audiory user
+  // are present here.
+  // -------------------------------------------------------------
+
+  const finalCatalog =
+    Array.from(
+      combinedMap.values()
+    );
+
+
+  // -------------------------------------------------------------
+  // Return catalogue
+  // -------------------------------------------------------------
+
+  return new Response(
+    JSON.stringify(
+      finalCatalog
+    ),
+    {
+      status: 200,
+
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+
+// -------------------------------------------------------------
+// Unknown release route
+// -------------------------------------------------------------
+
+return new Response(
+  JSON.stringify({
+    error: "Unknown release API route."
+  }),
+  {
+    status: 404,
+
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json"
+    }
+  }
+);
+}
