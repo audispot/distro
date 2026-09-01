@@ -1,0 +1,4192 @@
+1. FRONTED
+
+async function uploadFileToR2(file, folder = 'audio') {
+            const token = await window.currentUser.getIdToken();
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('folder', folder);
+
+            const res = await fetch(`${WORKER_BASE_URL}/api/upload`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            });
+
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Worker upload failed with status ${res.status}: ${errText}`);
+            }
+
+            const data = await res.json();
+            if (!data.success || !data.url) {
+                throw new Error(`Upload failed: ${data.error || 'No public URL returned from Worker'}`);
+            }
+
+            return data.url;
+        }
+
+// Initial Release State with expanded tracks and delivery structure
+window.releaseState = window.releaseState || {
+    editingId: null,
+    metadata: {
+        title: '',
+        type: 'Single',
+        language: 'en',
+        primaryGenre: '',
+        secondaryGenre: '',
+        explicit: false
+    },
+    dates: {
+        releaseDate: '',
+        timezone: 'Africa/Nairobi'
+    },
+    label: {
+        name: '',
+        cLine: '',
+        pLine: '',
+        cYear: new Date().getFullYear().toString(),
+        pYear: new Date().getFullYear().toString()
+    },
+    artwork: {
+        file: null,
+        url: '',
+        inspected: null
+    },
+    artists: [
+        { name: '', role: 'Primary' }
+    ],
+    dsps: [],
+    delivery: {
+        platforms: [],
+        territories: ['Worldwide'],
+        youtube: true,
+        facebook: true,
+        soundcloud: true,
+        soundExchange: true,
+        beatPort: false,
+        beatPortHasAccount: false,
+        beatPortLink: '',
+        beatPortLabelLogo: '',
+        trackLibs: false,
+        hook: false,
+        lyricfind: false,
+        even: false,
+        video: {
+            appleMusic: false,
+            vevo: false
+        }
+    },
+    tracks: [{
+        metadata: {
+            title: '',
+            version: '',
+            primaryGenre: '',
+            secondaryGenre: '',
+            explicit: false
+        },
+        discNumber: 1,
+        isrc: '',
+        tiktokStartTime: '00:30',
+        audioFile: null,
+        audioUrl: '',
+        previewUrl: '',
+        instrumentalFile: null,
+        instrumentalUrl: '',
+        instrumentalPreviewUrl: '',
+        lyrics: {
+            content: '',
+            explicit: false,
+            cleanVersion: false
+        },
+        artists: [],
+        writers: [
+            {
+                name: '',
+                role: 'instrumentalist'
+            }
+        ],
+        credits: ''
+    }],
+    agreements: {
+        termsAccepted: false,
+        rightsConfirmed: false
+    }
+};
+
+// Render Create Release Form Container
+window.renderCreateReleaseView = function() {
+    return `
+        <div class="max-w-5xl mx-auto space-y-6">
+            <div class="flex items-center justify-between">
+                <h1 class="text-2xl font-bold text-white">Create New Release</h1>
+                <span class="text-xs text-cyan-400 font-mono">Step <span id="stepCounter">1</span> of 6</span>
+            </div>
+
+            <!-- Wizard Steps Navigation Tabs -->
+            <div class="grid grid-cols-6 gap-2 text-center text-xs font-semibold">
+                <div id="step_tab_1" class="p-2 rounded-lg bg-brand-accent text-brand-dark font-bold cursor-pointer" onclick="navigateDirectStep(1)">1. Metadata</div>
+                <div id="step_tab_2" class="p-2 rounded-lg bg-brand-card text-gray-400 border border-brand-border cursor-pointer" onclick="navigateDirectStep(2)">2. Dates & DSPs</div>
+                <div id="step_tab_3" class="p-2 rounded-lg bg-brand-card text-gray-400 border border-brand-border cursor-pointer" onclick="navigateDirectStep(3)">3. Artwork</div>
+                <div id="step_tab_4" class="p-2 rounded-lg bg-brand-card text-gray-400 border border-brand-border cursor-pointer" onclick="navigateDirectStep(4)">4. Tracks</div>
+                <div id="step_tab_5" class="p-2 rounded-lg bg-brand-card text-gray-400 border border-brand-border cursor-pointer" onclick="navigateDirectStep(5)">5. Rights</div>
+                <div id="step_tab_6" class="p-2 rounded-lg bg-brand-card text-gray-400 border border-brand-border cursor-pointer" onclick="navigateDirectStep(6)">6. Delivery</div>
+            </div>
+
+            <form onsubmit="handleFormSubmission(event)" class="space-y-6">
+                <div id="wizardStepContainer"></div>
+
+                <!-- Step Navigation Controls -->
+                <div class="flex justify-between items-center pt-4 border-t border-brand-border">
+                    <button type="button" id="prevStepBtn" disabled onclick="navigateStep(-1)" class="px-4 py-2 rounded-xl bg-brand-card text-gray-300 text-xs font-bold disabled:opacity-50">Back</button>
+                    <button type="button" id="nextStepBtn" onclick="navigateStep(1)" class="px-5 py-2.5 rounded-xl bg-brand-accent text-brand-dark text-xs font-bold">Next Step</button>
+                    <button type="submit" id="submitReleaseBtn" class="hidden px-6 py-2.5 rounded-xl bg-emerald-400 text-black font-bold text-xs hover:bg-emerald-300 transition">Upload & Submit Release</button>
+                </div>
+            </form>
+        </div>
+    `;
+};
+
+// Render functions for wizard steps
+window.renderStepContent = function(step) {
+    window.currentStep = step;
+    const container = document.getElementById('wizardStepContainer');
+    const counter = document.getElementById('stepCounter');
+    if (counter) counter.innerText = step;
+
+    // Update Tab Highlights
+    for (let i = 1; i <= 6; i++) {
+        const tab = document.getElementById(`step_tab_${i}`);
+        if (tab) {
+            if (i === step) {
+                tab.className = "p-2 rounded-lg bg-brand-accent text-brand-dark font-bold cursor-pointer";
+            } else {
+                tab.className = "p-2 rounded-lg bg-brand-card text-gray-400 border border-brand-border cursor-pointer";
+            }
+        }
+    }
+
+    // Update Controls
+    const prevBtn = document.getElementById('prevStepBtn');
+    const nextBtn = document.getElementById('nextStepBtn');
+    const submitBtn = document.getElementById('submitReleaseBtn');
+
+    if (prevBtn) prevBtn.disabled = (step === 1);
+    if (nextBtn) nextBtn.classList.toggle('hidden', step === 6);
+    if (submitBtn) submitBtn.classList.toggle('hidden', step !== 6);
+
+    if (!container) return;
+
+    if (step === 1) container.innerHTML = renderStep1Content();
+    if (step === 2) container.innerHTML = renderStep2Content();
+    if (step === 3) container.innerHTML = renderStep3Content();
+    if (step === 4) container.innerHTML = renderStep4Content();
+    if (step === 5) container.innerHTML = renderStep5Content();
+    if (step === 6) container.innerHTML = renderStep6Content();
+
+    if (step === 1) window.renderArtistInputs();
+};
+
+window.navigateStep = function(direction) {
+    const newStep = window.currentStep + direction;
+    if (newStep >= 1 && newStep <= 6) {
+        window.renderStepContent(newStep);
+    }
+};
+
+// Step validation helper function
+window.validateReleaseStep = function(step) {
+    const s = window.releaseState;
+    if (step === 1) {
+        if (!s.metadata?.title?.trim() || !s.metadata?.primaryGenre || !s.label?.name?.trim()) {
+            if (typeof window.showToast === 'function') window.showToast('Please complete required fields in Step 1 (Title, Genre, Label).');
+            return false;
+        }
+    } else if (step === 2) {
+        if (!s.dates?.releaseDate) {
+            if (typeof window.showToast === 'function') window.showToast('Please select a digital release date.');
+            return false;
+        }
+    } else if (step === 3) {
+        if (!s.artwork?.file && !s.artwork?.url) {
+            if (typeof window.showToast === 'function') window.showToast('Please upload cover artwork.');
+            return false;
+        }
+    } else if (step === 4) {
+        if (!s.tracks || s.tracks.length === 0 || !s.tracks[0].metadata?.title?.trim()) {
+            if (typeof window.showToast === 'function') window.showToast('Please complete track details.');
+            return false;
+        }
+    } else if (step === 5) {
+        if (!s.agreements?.termsAccepted || !s.agreements?.rightsConfirmed) {
+            if (typeof window.showToast === 'function') window.showToast('Please accept terms and rights confirmations.');
+            return false;
+        }
+    }
+    return true;
+};
+
+window.navigateDirectStep = function(step) {
+    if (step > window.currentStep) {
+        for (let i = window.currentStep; i < step; i++) {
+            if (!validateReleaseStep(i)) return;
+        }
+    }
+    window.renderStepContent(step);
+};
+
+// STEP 1 CONTENT - Standardized for Too Lost API Schema
+function renderStep1Content() {
+    return `
+        <div class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                    <label class="too-lost-form-label">Release Title *</label>
+                    <input type="text" required value="${window.releaseState.metadata.title || ''}" oninput="window.releaseState.metadata.title = this.value" class="too-lost-input" placeholder="Title">
+                </div>
+                <div>
+                    <label class="too-lost-form-label">Release Type *</label>
+                    <select onchange="window.releaseState.metadata.type = this.value; window.adjustTracksForReleaseType();" class="too-lost-input">
+                        <option value="Single" ${window.releaseState.metadata.type === 'Single' ? 'selected' : ''}>Single</option>
+                        <option value="EP" ${window.releaseState.metadata.type === 'EP' ? 'selected' : ''}>EP</option>
+                        <option value="Album" ${window.releaseState.metadata.type === 'Album' ? 'selected' : ''}>Album</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="too-lost-form-label">Primary Language *</label>
+                    <select onchange="window.releaseState.metadata.language = this.value" class="too-lost-input">
+                        <option value="en" ${window.releaseState.metadata.language === 'en' ? 'selected' : ''}>English</option>
+                        <option value="sw" ${window.releaseState.metadata.language === 'sw' ? 'selected' : ''}>Swahili</option>
+                        <option value="fr" ${window.releaseState.metadata.language === 'fr' ? 'selected' : ''}>French</option>
+                        <option value="es" ${window.releaseState.metadata.language === 'es' ? 'selected' : ''}>Spanish</option>
+                        <option value="pt" ${window.releaseState.metadata.language === 'pt' ? 'selected' : ''}>Portuguese</option>
+                        <option value="zxx">Instrumental (No Lyrics)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Genre & Subgenre Selection -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="too-lost-form-label">Primary Genre *</label>
+                    <select id="primaryGenreSelect" onchange="handlePrimaryGenreChange(this.value)" class="too-lost-input" required>
+                        <option value="">Select Primary Genre</option>
+                        ${Object.keys(GENRE_MAP).map(g => `<option value="${g}" ${window.releaseState.metadata.primaryGenre === g ? 'selected' : ''}>${g}</option>`).join('')}
+                    </select>
+                </div>
+                <div>
+                    <label class="too-lost-form-label">Subgenre / Secondary Genre</label>
+                    <select id="secondaryGenreSelect" onchange="window.releaseState.metadata.secondaryGenre = this.value" class="too-lost-input" ${!window.releaseState.metadata.primaryGenre ? 'disabled' : ''}>
+                        <option value="">${window.releaseState.metadata.primaryGenre ? 'Select Subgenre (Optional)' : '-- Select Primary Genre First --'}</option>
+                        ${window.releaseState.metadata.primaryGenre && GENRE_MAP[window.releaseState.metadata.primaryGenre] 
+                            ? GENRE_MAP[window.releaseState.metadata.primaryGenre].map(sub => `<option value="${sub}" ${window.releaseState.metadata.secondaryGenre === sub ? 'selected' : ''}>${sub}</option>`).join('')
+                            : ''}
+                    </select>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <label class="too-lost-form-label">Primary & Associated Artists *</label>
+                    <button type="button" onclick="addArtistToState()" class="text-xs text-brand-accent hover:underline">+ Add Another Artist</button>
+                </div>
+                <div id="step_1_artists_container" class="space-y-3"></div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-brand-border">
+                <div>
+                    <label class="too-lost-form-label">Record Label *</label>
+                    <input type="text" required value="${window.releaseState.label.name || ''}" oninput="window.releaseState.label.name = this.value" class="too-lost-input" placeholder="Label Name">
+                </div>
+                <div>
+                    <label class="too-lost-form-label">(C) Line Copyright *</label>
+                    <input type="text" required placeholder="e.g. 2026 Record Label" value="${window.releaseState.label.cLine || ''}" oninput="handleCLineInput(this.value)" class="too-lost-input">
+                </div>
+                <div>
+                    <label class="too-lost-form-label">(P) Line Phonogram *</label>
+                    <input type="text" required placeholder="e.g. 2026 Record Label" value="${window.releaseState.label.pLine || ''}" oninput="handlePLineInput(this.value)" class="too-lost-input">
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Handler functions to keep window.releaseState consistently synchronized
+window.handlePrimaryGenreChange = function(genre) {
+    window.releaseState.metadata.primaryGenre = genre || null;
+    window.releaseState.metadata.secondaryGenre = null;
+    
+    const subSelect = document.getElementById('secondaryGenreSelect');
+    if (!subSelect) return;
+
+    if (genre && GENRE_MAP[genre]) {
+        subSelect.disabled = false;
+        subSelect.innerHTML = `<option value="">Select Subgenre (Optional)</option>` + 
+            GENRE_MAP[genre].map(sub => `<option value="${sub}">${sub}</option>`).join('');
+    } else {
+        subSelect.disabled = true;
+        subSelect.innerHTML = `<option value="">-- Select Primary Genre First --</option>`;
+    }
+};
+
+window.handleCLineInput = function(val) {
+    window.releaseState.label.cLine = val;
+    const yearMatch = val.match(/\b(19|20)\d{2}\b/);
+    window.releaseState.label.cYear = yearMatch ? yearMatch[0] : new Date().getFullYear().toString();
+};
+
+window.handlePLineInput = function(val) {
+    window.releaseState.label.pLine = val;
+    const yearMatch = val.match(/\b(19|20)\d{2}\b/);
+    window.releaseState.label.pYear = yearMatch ? yearMatch[0] : new Date().getFullYear().toString();
+};
+
+window.renderArtistInputs = function() {
+    const container = document.getElementById('step_1_artists_container');
+    if (!container) return;
+
+    container.innerHTML = window.releaseState.artists.map((artist, idx) => `
+        <div class="p-3 bg-brand-dark rounded-xl border border-brand-border flex flex-col sm:flex-row gap-3 items-center">
+            <div class="flex-1 w-full">
+                <input type="text" placeholder="Artist Name *" value="${artist.name || ''}" 
+                       oninput="window.releaseState.artists[${idx}].name = this.value" class="too-lost-input" required>
+            </div>
+            <div class="w-full sm:w-40">
+                <select onchange="window.releaseState.artists[${idx}].role = this.value" class="too-lost-input">
+                    <option value="primary" ${artist.role === 'primary' ? 'selected' : ''}>Primary Artist</option>
+                    <option value="featured" ${artist.role === 'featured' ? 'selected' : ''}>Featured Artist</option>
+                    <option value="remixer" ${artist.role === 'remixer' ? 'selected' : ''}>Remixer</option>
+                </select>
+            </div>
+            ${window.releaseState.artists.length > 1 ? `
+                <button type="button" onclick="removeArtistFromState(${idx})" class="text-red-400 text-xs px-2 hover:text-red-300">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            ` : ''}
+        </div>
+    `).join('');
+};
+
+window.addArtistToState = function() {
+    window.releaseState.artists.push({ name: '', role: 'primary' });
+    window.renderArtistInputs();
+};
+
+window.removeArtistFromState = function(idx) {
+    window.releaseState.artists.splice(idx, 1);
+    window.renderArtistInputs();
+};
+        
+// STEP 2 CONTENT
+function renderStep2Content() {
+    if (!window.releaseState.delivery) {
+        window.releaseState.delivery = { beatPort: false, youtube: true, facebook: true };
+    }
+    const selectedCount = window.releaseState.dsps ? window.releaseState.dsps.length : MASTER_DSP_LIST.length;
+
+    return `
+        <div class="space-y-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="too-lost-form-label">Digital Release Date *</label>
+                    <input type="date" value="${window.releaseState.dates.releaseDate || ''}" 
+                           onchange="window.releaseState.dates.releaseDate = this.value" class="too-lost-input" required>
+                </div>
+                <div>
+                    <label class="too-lost-form-label">Release Timezone *</label>
+                    <select onchange="window.releaseState.dates.timezone = this.value" class="too-lost-input">
+                        <option value="Africa/Nairobi" ${window.releaseState.dates.timezone === 'Africa/Nairobi' ? 'selected' : ''}>Africa/Nairobi (EAT)</option>
+                        <option value="UTC" ${window.releaseState.dates.timezone === 'UTC' ? 'selected' : ''}>UTC</option>
+                        <option value="America/New_York" ${window.releaseState.dates.timezone === 'America/New_York' ? 'selected' : ''}>America/New York (EST)</option>
+                        <option value="Europe/London" ${window.releaseState.dates.timezone === 'Europe/London' ? 'selected' : ''}>Europe/London (GMT)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Delivery Feature Flags / DSP Toggles -->
+            <div class="border-t border-brand-border pt-4 space-y-4">
+                <h3 class="text-sm font-bold text-white">Platform Delivery Enhancements & Special DSPs</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <label class="p-3 rounded-xl bg-brand-dark border border-brand-border flex items-center justify-between cursor-pointer">
+                        <span class="text-xs font-medium text-gray-200">Beatport</span>
+                        <input type="checkbox" ${window.releaseState.delivery?.beatPort ? 'checked' : ''} 
+                               onchange="window.releaseState.delivery.beatPort = this.checked" class="rounded bg-brand-card border-brand-border text-cyan-400 focus:ring-0">
+                    </label>
+                    <label class="p-3 rounded-xl bg-brand-dark border border-brand-border flex items-center justify-between cursor-pointer">
+                        <span class="text-xs font-medium text-gray-200">YouTube Content ID</span>
+                        <input type="checkbox" ${window.releaseState.delivery?.youtube ? 'checked' : ''} 
+                               onchange="window.releaseState.delivery.youtube = this.checked" class="rounded bg-brand-card border-brand-border text-cyan-400 focus:ring-0">
+                    </label>
+                    <label class="p-3 rounded-xl bg-brand-dark border border-brand-border flex items-center justify-between cursor-pointer">
+                        <span class="text-xs font-medium text-gray-200">Facebook / Instagram Audio</span>
+                        <input type="checkbox" ${window.releaseState.delivery?.facebook ? 'checked' : ''} 
+                               onchange="window.releaseState.delivery.facebook = this.checked" class="rounded bg-brand-card border-brand-border text-cyan-400 focus:ring-0">
+                    </label>
+                </div>
+            </div>
+
+            <div class="border-t border-brand-border pt-4 space-y-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-bold text-white">Target DSP Digital Storefronts</h3>
+                        <p class="text-xs text-gray-400">${selectedCount} of ${MASTER_DSP_LIST.length} platforms selected</p>
+                    </div>
+                    <button type="button" onclick="openDspModal()" class="px-4 py-2 rounded-xl bg-brand-card border border-brand-border text-cyan-400 font-bold text-xs hover:border-cyan-400 transition">
+                        <i class="fa-solid fa-sliders mr-1.5"></i> Select Platforms (${selectedCount})
+                    </button>
+                </div>
+
+                <!-- Preview Grid for Selected DSPs -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    ${MASTER_DSP_LIST.filter(dsp => !window.releaseState.dsps || window.releaseState.dsps.includes(dsp.id)).map(dsp => `
+                        <div class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center gap-3">
+                            <i class="${dsp.icon} text-lg"></i>
+                            <span class="text-xs font-semibold text-gray-200 truncate">${dsp.name}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+window.openDspModal = function() {
+    if (!window.releaseState.dsps) {
+        window.releaseState.dsps = [];
+    }
+
+    const modalHtml = `
+        <div id="dspModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+            <div class="bg-brand-card border border-brand-border rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
+                <div class="p-5 border-b border-brand-border flex items-center justify-between">
+                    <h3 class="text-base font-bold text-white">Select Distribution Stores</h3>
+                    <div class="flex gap-2">
+                        <button type="button" onclick="toggleAllDsps(true)" class="text-xs text-cyan-400 hover:underline">Select All</button>
+                        <span class="text-gray-600">•</span>
+                        <button type="button" onclick="toggleAllDsps(false)" class="text-xs text-gray-400 hover:underline">Deselect All</button>
+                    </div>
+                </div>
+
+                <div class="p-5 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    ${MASTER_DSP_LIST.map(dsp => {
+                        const isChecked = window.releaseState.dsps.includes(dsp.id);
+                        return `
+                            <label class="p-3 rounded-xl bg-brand-dark border border-brand-border flex items-center justify-between cursor-pointer hover:border-cyan-500/50 transition">
+                                <div class="flex items-center gap-3">
+                                    <i class="${dsp.icon} text-xl w-6 text-center"></i>
+                                    <span class="text-xs font-medium text-white">${dsp.name}</span>
+                                </div>
+                                <input type="checkbox" value="${dsp.id}" ${isChecked ? 'checked' : ''} 
+                                       onchange="toggleSingleDsp('${dsp.id}', this.checked)" class="rounded bg-brand-card border-brand-border text-brand-accent focus:ring-0">
+                            </label>
+                        `;
+                    }).join('')}
+                </div>
+
+                <div class="p-4 border-t border-brand-border flex justify-end">
+                    <button type="button" onclick="closeDspModal()" class="px-5 py-2 rounded-xl bg-brand-accent text-brand-dark font-bold text-xs">Done</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.closeDspModal = function() {
+    const modal = document.getElementById('dspModal');
+    if (modal) modal.remove();
+    const container = document.getElementById('wizardStepContainer');
+    if (container && window.currentStep === 2) container.innerHTML = renderStep2Content();
+};
+
+window.toggleSingleDsp = function(id, isChecked) {
+    if (isChecked) {
+        if (!window.releaseState.dsps.includes(id)) window.releaseState.dsps.push(id);
+    } else {
+        window.releaseState.dsps = window.releaseState.dsps.filter(d => d != id);
+    }
+};
+
+window.toggleAllDsps = function(selectAll) {
+    window.releaseState.dsps = selectAll ? MASTER_DSP_LIST.map(d => d.id) : [];
+    closeDspModal();
+    openDspModal();
+};
+
+// STEP 3 CONTENT
+function renderStep3Content() {
+    return `
+        <div class="space-y-4">
+            <div>
+                <label class="too-lost-form-label">Cover Artwork Upload (Min 3000x3000px JPG/PNG) *</label>
+                <input type="file" accept="image/png, image/jpeg" onchange="handleCoverArtSelection(event)" class="too-lost-input">
+            </div>
+            <div id="artworkPreviewContainer" class="${window.releaseState.artwork.url ? '' : 'hidden'} p-4 rounded-xl bg-brand-dark border border-brand-border flex flex-col sm:flex-row gap-4 items-center">
+                <img id="artworkPreviewImg" src="${window.releaseState.artwork.url || ''}" class="w-40 h-40 rounded-xl object-cover border border-brand-border shadow-lg">
+                <div id="artworkSpecsBox" class="text-xs space-y-1.5 text-gray-300 font-mono">
+                    ${window.releaseState.artwork.inspected ? `
+                        <p>File Name: ${window.releaseState.artwork.inspected.filename}</p>
+                        <p>Dimensions: ${window.releaseState.artwork.inspected.width}x${window.releaseState.artwork.inspected.height} px</p>
+                        <p>Format: ${window.releaseState.artwork.inspected.mime}</p>
+                        <p class="${window.releaseState.artwork.inspected.valid ? 'text-emerald-400' : 'text-red-400'} font-bold">
+                            ${window.releaseState.artwork.inspected.valid ? '✓ Artwork Meets Requirements' : '✗ Invalid Dimensions or Format'}
+                        </p>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+window.handleCoverArtSelection = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    window.releaseState.artwork.file = file;
+    const previewContainer = document.getElementById('artworkPreviewContainer');
+    const previewImg = document.getElementById('artworkPreviewImg');
+    const specsBox = document.getElementById('artworkSpecsBox');
+
+    const previewUrl = URL.createObjectURL(file);
+    window.releaseState.artwork.url = previewUrl;
+    if (previewImg) previewImg.src = previewUrl;
+
+    const inspected = await inspectImageFile(file);
+    window.releaseState.artwork.inspected = inspected;
+
+    if (specsBox) {
+        specsBox.innerHTML = `
+            <p>File Name: ${inspected.filename}</p>
+            <p>Dimensions: ${inspected.width}x${inspected.height} px</p>
+            <p>Format: ${inspected.mime}</p>
+            <p class="${inspected.valid ? 'text-emerald-400' : 'text-red-400'} font-bold">
+                ${inspected.valid ? '✓ Artwork Meets Requirements' : '✗ Invalid Dimensions or Format'}
+            </p>
+        `;
+    }
+    if (previewContainer) previewContainer.classList.remove('hidden');
+};
+
+async function inspectImageFile(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = (e) => {
+            const arr = (new Uint8Array(e.target.result)).subarray(0, 4);
+            let header = "";
+            for (let i = 0; i < arr.length; i++) header += arr[i].toString(16);
+            
+            let mime = "unknown";
+            if (header.startsWith("89504e47")) mime = "image/png";
+            else if (header.startsWith("ffd8ff")) mime = "image/jpeg";
+
+            const img = new Image();
+            img.src = URL.createObjectURL(file);
+            img.onload = () => {
+                resolve({
+                    filename: file.name,
+                    mime: mime,
+                    width: img.width,
+                    height: img.height,
+                    fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+                    valid: (mime !== "unknown" && img.width >= 3000 && img.height >= 3000)
+                });
+            };
+        };
+        reader.readAsArrayBuffer(file.slice(0, 4));
+    });
+}
+
+// STEP 4 CONTENT & TRACK HANDLERS
+function renderStep4Content() {
+    const isMultiTrack = window.releaseState.metadata.type === 'EP' || window.releaseState.metadata.type === 'Album';
+
+    return `
+        <div class="space-y-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-lg font-bold text-white">Tracks Management</h2>
+                    <p class="text-xs text-gray-400">Total Tracks: ${window.releaseState.tracks.length}</p>
+                </div>
+                ${isMultiTrack ? `
+                    <button type="button" onclick="addTrackToRelease()" class="px-3 py-1.5 rounded-lg bg-brand-accent text-brand-dark font-bold text-xs hover:opacity-90 transition">
+                        <i class="fa-solid fa-plus mr-1"></i> Add Another Track
+                    </button>
+                ` : ''}
+            </div>
+
+            <div class="space-y-6">
+                ${window.releaseState.tracks.map((track, idx) => `
+                    <div class="p-5 rounded-2xl bg-brand-card border border-brand-border space-y-4 relative">
+                        <div class="flex items-center justify-between border-b border-brand-border pb-3">
+                            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider">Track ${idx + 1} of ${window.releaseState.tracks.length}</span>
+                            ${window.releaseState.tracks.length > 1 ? `
+                                <button type="button" onclick="removeTrackFromRelease(${idx})" class="text-xs text-red-400 hover:text-red-300">
+                                    <i class="fa-solid fa-trash mr-1"></i> Remove
+                                </button>
+                            ` : ''}
+                        </div>
+
+                        <!-- Track Title, Version, Disc, ISRC -->
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                            <div class="sm:col-span-2">
+                                <label class="too-lost-form-label">Track Title *</label>
+                                <input type="text" required value="${track.metadata?.title || ''}" 
+                                       oninput="window.releaseState.tracks[${idx}].metadata.title = this.value" 
+                                       class="too-lost-input" placeholder="Track Title">
+                            </div>
+                            <div>
+                                <label class="too-lost-form-label">Version / Subtitle</label>
+                                <input type="text" value="${track.metadata?.version || ''}" 
+                                       oninput="window.releaseState.tracks[${idx}].metadata.version = this.value" 
+                                       class="too-lost-input" placeholder="e.g. Extended Mix / Radio Edit">
+                            </div>
+                            <div>
+                                <label class="too-lost-form-label">Disc Number</label>
+                                <input type="number" min="1" value="${track.discNumber || 1}" 
+                                       onchange="window.releaseState.tracks[${idx}].discNumber = parseInt(this.value)" 
+                                       class="too-lost-input">
+                            </div>
+                        </div>
+
+                        <!-- Explicit Status, Genres -->
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div>
+                                <label class="too-lost-form-label">Explicit Status *</label>
+                                <select onchange="window.releaseState.tracks[${idx}].metadata.explicit = (this.value === 'true')" class="too-lost-input">
+                                    <option value="false" ${!track.metadata?.explicit ? 'selected' : ''}>Clean / Non-Explicit</option>
+                                    <option value="true" ${track.metadata?.explicit ? 'selected' : ''}>Explicit</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="too-lost-form-label">Track Genre *</label>
+                                <select onchange="handleTrackGenreChange(${idx}, this.value)" class="too-lost-input">
+                                    <option value="">Select Genre</option>
+                                    ${Object.keys(GENRE_MAP).map(g => `
+                                        <option value="${g}" ${track.metadata?.genre === g ? 'selected' : ''}>${g}</option>
+                                    `).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="too-lost-form-label">Track Subgenre *</label>
+                                <select id="track_subgenre_${idx}" onchange="window.releaseState.tracks[${idx}].metadata.subgenre = this.value" 
+                                        class="too-lost-input" ${!track.metadata?.genre ? 'disabled' : ''}>
+                                    <option value="">${track.metadata?.genre ? 'Select Subgenre' : '-- Select Genre First --'}</option>
+                                    ${track.metadata?.genre && GENRE_MAP[track.metadata.genre] 
+                                        ? GENRE_MAP[track.metadata.genre].map(sub => `
+                                            <option value="${sub}" ${track.metadata?.subgenre === sub ? 'selected' : ''}>${sub}</option>
+                                          `).join('') 
+                                        : ''}
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Audio Upload & Professional Custom Tailwind Audio Preview Component -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+                            <div>
+                                <label class="too-lost-form-label">Audio File (WAV/FLAC) *</label>
+                                <label class="mt-1 flex items-center justify-between px-3 py-2.5 rounded-xl bg-brand-dark border border-brand-border cursor-pointer hover:border-cyan-500/50 transition">
+                                    <span id="audio_file_name_${idx}" class="text-xs text-gray-300 truncate">
+                                        ${track.audioFile ? track.audioFile.name : (track.audioUrl ? 'Master Audio Loaded' : 'Choose WAV / FLAC file...')}
+                                    </span>
+                                    <span class="px-2.5 py-1 rounded-lg bg-brand-card text-cyan-400 font-bold text-[10px] uppercase">Browse</span>
+                                    <input type="file" accept="audio/wav,audio/flac,.wav,.flac" 
+                                           onchange="handleAudioPreview(${idx}, this)" 
+                                           class="hidden">
+                                </label>
+                            </div>
+                            <div>
+                                <label class="too-lost-form-label">Audio Preview</label>
+                                <div id="audio_preview_container_${idx}" class="p-3 rounded-xl bg-brand-dark border border-brand-border space-y-2">
+                                    ${track.previewUrl || track.audioUrl ? `
+                                        <div class="flex items-center gap-3">
+                                            <button type="button" onclick="toggleCustomAudioPlay(${idx})" id="play_btn_${idx}" 
+                                                    class="w-8 h-8 rounded-lg bg-cyan-400 text-brand-dark flex items-center justify-center hover:opacity-90 transition shrink-0">
+                                                <i class="fa-solid fa-play text-xs" id="play_icon_${idx}"></i>
+                                            </button>
+                                            <div class="flex-1 space-y-1">
+                                                <div class="flex justify-between text-[10px] text-gray-400 font-mono">
+                                                    <span id="current_time_${idx}">00:00</span>
+                                                    <span id="duration_${idx}">00:00</span>
+                                                </div>
+                                                <input type="range" id="audio_seekbar_${idx}" value="0" min="0" max="100" step="0.1" 
+                                                       oninput="seekCustomAudio(${idx}, this.value)"
+                                                       class="w-full h-1 bg-brand-card rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                                            </div>
+                                        </div>
+                                        <audio id="native_audio_${idx}" src="${track.previewUrl || track.audioUrl || ''}" 
+                                               ontimeupdate="updateCustomAudioProgress(${idx})" 
+                                               onloadedmetadata="initCustomAudioMeta(${idx})" 
+                                               onended="resetCustomAudio(${idx})" class="hidden"></audio>
+                                    ` : '<span class="text-xs text-gray-500 italic flex items-center h-8">No audio selected</span>'}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ISRC & TikTok Start Time -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="too-lost-form-label">ISRC (Optional - Leave blank to auto-generate)</label>
+                                <input type="text" value="${track.isrc || ''}" 
+                                       oninput="window.releaseState.tracks[${idx}].isrc = this.value" 
+                                       class="too-lost-input" placeholder="e.g. USABC1234567">
+                            </div>
+                            <div>
+                                <label class="too-lost-form-label">TikTok Clip Start Time (MM:SS)</label>
+                                <input type="text" value="${track.tiktokStartTime || '00:30'}" 
+                                       oninput="window.releaseState.tracks[${idx}].tiktokStartTime = this.value" 
+                                       class="too-lost-input" placeholder="00:30">
+                            </div>
+                        </div>
+
+                        <!-- TRACK ARTISTS -->
+                        <div class="space-y-3 border-t border-brand-border pt-4">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <label class="too-lost-form-label">Track Artists *</label>
+                                    <p class="text-[10px] text-gray-500">Artists appearing on this specific track.</p>
+                                </div>
+                                <button type="button" onclick="addTrackArtist(${idx})" class="text-xs text-cyan-400 hover:underline">+ Add Artist</button>
+                            </div>
+
+                            <div class="space-y-2">
+                                ${(track.artists || []).map((artist, artistIdx) => `
+                                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_180px_auto] gap-2">
+                                        <input type="text" required value="${escapeHtml(artist.name || '')}" 
+                                               oninput="window.releaseState.tracks[${idx}].artists[${artistIdx}].name = this.value" 
+                                               class="too-lost-input" placeholder="Artist Name *">
+                                        <select onchange="window.releaseState.tracks[${idx}].artists[${artistIdx}].role = this.value" class="too-lost-input">
+                                            <option value="primary" ${artist.role === 'primary' ? 'selected' : ''}>Primary Artist</option>
+                                            <option value="featuring" ${artist.role === 'featuring' ? 'selected' : ''}>Featured Artist</option>
+                                            <option value="remixer" ${artist.role === 'remixer' ? 'selected' : ''}>Remixer</option>
+                                        </select>
+                                        <button type="button" onclick="removeTrackArtist(${idx}, ${artistIdx})" class="px-3 text-red-400">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </button>
+                                    </div>
+                                `).join('')}
+                            </div>
+
+                            ${(track.artists || []).length === 0 ? `
+                                <div class="p-3 rounded-xl bg-brand-dark border border-dashed border-red-500/40 text-xs text-red-400">
+                                    Add at least one artist to this track.
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <!-- WRITERS -->
+                        <div class="space-y-3 border-t border-brand-border pt-4">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <label class="too-lost-form-label">Writers / Composer Credits *</label>
+                                    <p class="text-[10px] text-gray-500">Requires at least one writer with role <strong class="text-cyan-400">Instrumentalist</strong>.</p>
+                                </div>
+                                <button type="button" onclick="addTrackWriter(${idx})" class="text-xs text-cyan-400 hover:underline">+ Add Writer</button>
+                            </div>
+
+                            <div class="space-y-2">
+                                ${(track.writers || []).map((writer, writerIdx) => `
+                                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_200px_auto] gap-2">
+                                        <input type="text" required value="${escapeHtml(writer.name || '')}" 
+                                               oninput="window.releaseState.tracks[${idx}].writers[${writerIdx}].name = this.value" 
+                                               class="too-lost-input" placeholder="Writer Name *">
+                                        <select onchange="window.releaseState.tracks[${idx}].writers[${writerIdx}].role = this.value" class="too-lost-input">
+                                            <option value="instrumentalist" ${writer.role === 'instrumentalist' ? 'selected' : ''}>Instrumentalist / Composer</option>
+                                            <option value="lyricist" ${writer.role === 'lyricist' ? 'selected' : ''}>Lyricist</option>
+                                        </select>
+                                        <button type="button" onclick="removeTrackWriter(${idx}, ${writerIdx})" class="px-3 text-red-400">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <!-- INSTRUMENTAL AUDIO & PREVIEW -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center border-t border-brand-border pt-4">
+                            <div>
+                                <label class="too-lost-form-label">Instrumental / Backing Track (Optional)</label>
+                                <label class="mt-1 flex items-center justify-between px-3 py-2.5 rounded-xl bg-brand-dark border border-brand-border cursor-pointer hover:border-cyan-500/50 transition">
+                                    <span id="instrumental_file_name_${idx}" class="text-xs text-gray-300 truncate">
+                                        ${track.instrumentalFile ? track.instrumentalFile.name : (track.instrumentalUrl ? 'Instrumental Loaded' : 'Choose Instrumental WAV/FLAC...')}
+                                    </span>
+                                    <span class="px-2.5 py-1 rounded-lg bg-brand-card text-cyan-400 font-bold text-[10px] uppercase">Browse</span>
+                                    <input type="file" accept="audio/wav,audio/flac,.wav,.flac" onchange="handleInstrumentalSelection(${idx}, this)" class="hidden">
+                                </label>
+                            </div>
+                            <div>
+                                <label class="too-lost-form-label">Instrumental Preview</label>
+                                <div id="instrumental_preview_container_${idx}" class="p-3 rounded-xl bg-brand-dark border border-brand-border space-y-2">
+                                    ${track.instrumentalPreviewUrl || track.instrumentalUrl ? `
+                                        <div class="flex items-center gap-3">
+                                            <button type="button" onclick="toggleCustomInstrumentalPlay(${idx})" id="inst_play_btn_${idx}" 
+                                                    class="w-8 h-8 rounded-lg bg-cyan-400 text-brand-dark flex items-center justify-center hover:opacity-90 transition shrink-0">
+                                                <i class="fa-solid fa-play text-xs" id="inst_play_icon_${idx}"></i>
+                                            </button>
+                                            <div class="flex-1 space-y-1">
+                                                <div class="flex justify-between text-[10px] text-gray-400 font-mono">
+                                                    <span id="inst_current_time_${idx}">00:00</span>
+                                                    <span id="inst_duration_${idx}">00:00</span>
+                                                </div>
+                                                <input type="range" id="inst_seekbar_${idx}" value="0" min="0" max="100" step="0.1" 
+                                                       oninput="seekCustomInstrumental(${idx}, this.value)"
+                                                       class="w-full h-1 bg-brand-card rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                                            </div>
+                                        </div>
+                                        <audio id="native_inst_audio_${idx}" src="${track.instrumentalPreviewUrl || track.instrumentalUrl || ''}" 
+                                               ontimeupdate="updateCustomInstrumentalProgress(${idx})" 
+                                               onloadedmetadata="initCustomInstrumentalMeta(${idx})" 
+                                               onended="resetCustomInstrumental(${idx})" class="hidden"></audio>
+                                    ` : '<span class="text-xs text-gray-500 italic flex items-center h-8">No instrumental audio selected</span>'}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- LYRICS -->
+                        <div class="space-y-3 border-t border-brand-border pt-4">
+                            <label class="too-lost-form-label">Lyrics</label>
+                            <textarea oninput="window.releaseState.tracks[${idx}].lyrics.content = this.value" class="too-lost-input h-32" placeholder="Enter plain text lyrics.">${escapeHtml(track.lyrics?.content || '')}</textarea>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label class="flex items-center gap-2 text-xs text-gray-300">
+                                    <input type="checkbox" ${track.lyrics?.explicit ? 'checked' : ''} onchange="window.releaseState.tracks[${idx}].lyrics.explicit = this.checked">
+                                    Lyrics contain explicit content
+                                </label>
+                                <label class="flex items-center gap-2 text-xs text-gray-300">
+                                    <input type="checkbox" ${track.lyrics?.cleanVersion ? 'checked' : ''} onchange="window.releaseState.tracks[${idx}].lyrics.cleanVersion = this.checked">
+                                    Clean version available
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- TRACK CREDITS / NOTES (WRITER-STYLE ROW BUILDER) -->
+                        <div class="space-y-3 border-t border-brand-border pt-4">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <label class="too-lost-form-label">Track Credits / Notes *</label>
+                                    <p class="text-[10px] text-gray-500">Specify collaborator names and their precise contribution role.</p>
+                                </div>
+                                <button type="button" onclick="addTrackCreditRow(${idx})" class="text-xs text-cyan-400 hover:underline">+ Add Credit</button>
+                            </div>
+
+                            <div class="space-y-2" id="track_credits_rows_${idx}">
+                                ${parseCreditsToRows(track.credits).map((credit, creditIdx) => `
+                                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_200px_auto] gap-2">
+                                        <input type="text" value="${escapeHtml(credit.name || '')}" 
+                                               oninput="updateTrackCreditData(${idx})" 
+                                               class="too-lost-input credit-name-input" placeholder="Contributor Name (e.g. John Doe)">
+                                        <select onchange="updateTrackCreditData(${idx})" class="too-lost-input credit-role-select">
+                                            <option value="Producer" ${credit.role === 'Producer' ? 'selected' : ''}>Producer</option>
+                                            <option value="Mixing Engineer" ${credit.role === 'Mixing Engineer' ? 'selected' : ''}>Mixing Engineer</option>
+                                            <option value="Mastering Engineer" ${credit.role === 'Mastering Engineer' ? 'selected' : ''}>Mastering Engineer</option>
+                                            <option value="Recording Engineer" ${credit.role === 'Recording Engineer' ? 'selected' : ''}>Recording Engineer</option>
+                                            <option value="Studio Personnel" ${credit.role === 'Studio Personnel' ? 'selected' : ''}>Studio Personnel</option>
+                                            <option value="Musician" ${credit.role === 'Musician' ? 'selected' : ''}>Musician</option>
+                                        </select>
+                                        <button type="button" onclick="removeTrackCreditRow(${idx}, ${creditIdx})" class="px-3 text-red-400">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// Custom Audio Player helper functions for Tailwind UI preview
+window.toggleCustomAudioPlay = function(idx) {
+    const audio = document.getElementById(`native_audio_${idx}`);
+    const playIcon = document.getElementById(`play_icon_${idx}`);
+    if (!audio) return;
+
+    if (audio.paused) {
+        audio.play();
+        if (playIcon) playIcon.className = "fa-solid fa-pause text-xs";
+    } else {
+        audio.pause();
+        if (playIcon) playIcon.className = "fa-solid fa-play text-xs";
+    }
+};
+
+window.updateCustomAudioProgress = function(idx) {
+    const audio = document.getElementById(`native_audio_${idx}`);
+    const seekbar = document.getElementById(`audio_seekbar_${idx}`);
+    const currentTimeEl = document.getElementById(`current_time_${idx}`);
+    if (!audio || !seekbar) return;
+
+    const progressPercent = (audio.currentTime / audio.duration) * 100;
+    seekbar.value = isNaN(progressPercent) ? 0 : progressPercent;
+    if (currentTimeEl) currentTimeEl.innerText = formatAudioTime(audio.currentTime);
+};
+
+window.seekCustomAudio = function(idx, value) {
+    const audio = document.getElementById(`native_audio_${idx}`);
+    if (!audio || !audio.duration) return;
+    audio.currentTime = (value / 100) * audio.duration;
+};
+
+window.initCustomAudioMeta = function(idx) {
+    const audio = document.getElementById(`native_audio_${idx}`);
+    const durationEl = document.getElementById(`duration_${idx}`);
+    if (audio && durationEl) {
+        durationEl.innerText = formatAudioTime(audio.duration);
+    }
+};
+
+window.resetCustomAudio = function(idx) {
+    const playIcon = document.getElementById(`play_icon_${idx}`);
+    if (playIcon) playIcon.className = "fa-solid fa-play text-xs";
+};
+
+// Custom Instrumental Player helper functions
+window.toggleCustomInstrumentalPlay = function(idx) {
+    const audio = document.getElementById(`native_inst_audio_${idx}`);
+    const playIcon = document.getElementById(`inst_play_icon_${idx}`);
+    if (!audio) return;
+
+    if (audio.paused) {
+        audio.play();
+        if (playIcon) playIcon.className = "fa-solid fa-pause text-xs";
+    } else {
+        audio.pause();
+        if (playIcon) playIcon.className = "fa-solid fa-play text-xs";
+    }
+};
+
+window.updateCustomInstrumentalProgress = function(idx) {
+    const audio = document.getElementById(`native_inst_audio_${idx}`);
+    const seekbar = document.getElementById(`inst_seekbar_${idx}`);
+    const currentTimeEl = document.getElementById(`inst_current_time_${idx}`);
+    if (!audio || !seekbar) return;
+
+    const progressPercent = (audio.currentTime / audio.duration) * 100;
+    seekbar.value = isNaN(progressPercent) ? 0 : progressPercent;
+    if (currentTimeEl) currentTimeEl.innerText = formatAudioTime(audio.currentTime);
+};
+
+window.seekCustomInstrumental = function(idx, value) {
+    const audio = document.getElementById(`native_inst_audio_${idx}`);
+    if (!audio || !audio.duration) return;
+    audio.currentTime = (value / 100) * audio.duration;
+};
+
+window.initCustomInstrumentalMeta = function(idx) {
+    const audio = document.getElementById(`native_inst_audio_${idx}`);
+    const durationEl = document.getElementById(`inst_duration_${idx}`);
+    if (audio && durationEl) {
+        durationEl.innerText = formatAudioTime(audio.duration);
+    }
+};
+
+window.resetCustomInstrumental = function(idx) {
+    const playIcon = document.getElementById(`inst_play_icon_${idx}`);
+    if (playIcon) playIcon.className = "fa-solid fa-play text-xs";
+};
+
+// Track Credits row builder helpers
+function parseCreditsToRows(creditsStr) {
+    if (!creditsStr || typeof creditsStr !== 'string') {
+        return [{ name: '', role: 'Producer' }];
+    }
+    const parts = creditsStr.split(';').map(p => p.trim()).filter(Boolean);
+    if (parts.length === 0) return [{ name: '', role: 'Producer' }];
+
+    return parts.map(part => {
+        const sub = part.split(':').map(s => s.trim());
+        if (sub.length >= 2) {
+            return { name: sub[0], role: sub[1] };
+        }
+        return { name: part, role: 'Producer' };
+    });
+}
+
+window.updateTrackCreditData = function(trackIndex) {
+    const container = document.getElementById(`track_credits_rows_${trackIndex}`);
+    if (!container) return;
+
+    const rows = container.querySelectorAll('.grid');
+    const creditEntries = [];
+
+    rows.forEach(row => {
+        const nameInput = row.querySelector('.credit-name-input');
+        const roleSelect = row.querySelector('.credit-role-select');
+        if (nameInput && nameInput.value.trim()) {
+            creditEntries.push(`${nameInput.value.trim()}: ${roleSelect ? roleSelect.value : 'Producer'}`);
+        }
+    });
+
+    window.releaseState.tracks[trackIndex].credits = creditEntries.join('; ');
+};
+
+window.addTrackCreditRow = function(trackIndex) {
+    const container = document.getElementById(`track_credits_rows_${trackIndex}`);
+    if (!container) return;
+
+    // Save whatever is currently typed before adding the new row
+    window.updateTrackCreditData(trackIndex);
+
+    const track = window.releaseState.tracks[trackIndex];
+    const rows = parseCreditsToRows(track.credits);
+
+    // Add empty row
+    rows.push({
+        name: '',
+        role: 'Producer'
+    });
+
+    // Save back to credits
+    track.credits = rows
+        .map(r => `${r.name}: ${r.role}`)
+        .join('; ');
+
+    // Re-render
+    const wizardContainer = document.getElementById('wizardStepContainer');
+
+    if (wizardContainer && window.currentStep === 4) {
+        wizardContainer.innerHTML = renderStep4Content();
+    }
+};
+
+
+window.removeTrackCreditRow = function(trackIndex, creditIndex) {
+    const container = document.getElementById(`track_credits_rows_${trackIndex}`);
+    if (!container) return;
+
+    // Save current input/select values first
+    window.updateTrackCreditData(trackIndex);
+
+    const track = window.releaseState.tracks[trackIndex];
+    let rows = parseCreditsToRows(track.credits);
+
+    // Remove selected row
+    rows.splice(creditIndex, 1);
+
+    // Always leave one empty row
+    if (rows.length === 0) {
+        rows.push({
+            name: '',
+            role: 'Producer'
+        });
+    }
+
+    // Save back to credits
+    track.credits = rows
+        .map(r => `${r.name}: ${r.role}`)
+        .join('; ');
+
+    // Re-render
+    const wizardContainer = document.getElementById('wizardStepContainer');
+
+    if (wizardContainer && window.currentStep === 4) {
+        wizardContainer.innerHTML = renderStep4Content();
+    }
+};
+
+function formatAudioTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+window.addTrackArtist = function(trackIndex) {
+    if (!Array.isArray(window.releaseState.tracks[trackIndex].artists)) {
+        window.releaseState.tracks[trackIndex].artists = [];
+    }
+    window.releaseState.tracks[trackIndex].artists.push({ name: '', role: 'primary' });
+    document.getElementById('wizardStepContainer').innerHTML = renderStep4Content();
+};
+
+window.removeTrackArtist = function(trackIndex, artistIndex) {
+    window.releaseState.tracks[trackIndex].artists.splice(artistIndex, 1);
+    document.getElementById('wizardStepContainer').innerHTML = renderStep4Content();
+};
+
+window.addTrackWriter = function(trackIndex) {
+    if (!Array.isArray(window.releaseState.tracks[trackIndex].writers)) {
+        window.releaseState.tracks[trackIndex].writers = [];
+    }
+    window.releaseState.tracks[trackIndex].writers.push({ name: '', role: 'instrumentalist' });
+    document.getElementById('wizardStepContainer').innerHTML = renderStep4Content();
+};
+
+window.removeTrackWriter = function(trackIndex, writerIndex) {
+    const writers = window.releaseState.tracks[trackIndex].writers;
+    if (writers.length <= 1) {
+        window.showToast('Each track must have at least one Instrumentalist / Composer writer.');
+        return;
+    }
+    writers.splice(writerIndex, 1);
+    document.getElementById('wizardStepContainer').innerHTML = renderStep4Content();
+};
+
+window.handleInstrumentalSelection = function(trackIndex, input) {
+    const file = input.files?.[0];
+    if (!file) return;
+
+    const validTypes = ['audio/wav', 'audio/x-wav', 'audio/flac', 'audio/x-flac'];
+    const validExtension = /\.(wav|flac)$/i.test(file.name);
+
+    if (!validTypes.includes(file.type) && !validExtension) {
+        input.value = '';
+        window.showToast('Instrumental must be a WAV or FLAC file.');
+        return;
+    }
+
+    window.releaseState.tracks[trackIndex].instrumentalFile = file;
+    const url = URL.createObjectURL(file);
+    window.releaseState.tracks[trackIndex].instrumentalPreviewUrl = url;
+
+    const nameEl = document.getElementById(`instrumental_file_name_${trackIndex}`);
+    if (nameEl) nameEl.innerText = file.name;
+
+    const container = document.getElementById(`instrumental_preview_container_${trackIndex}`);
+    if (container) {
+        container.innerHTML = `
+            <div class="flex items-center gap-3">
+                <button type="button" onclick="toggleCustomInstrumentalPlay(${trackIndex})" id="inst_play_btn_${trackIndex}" 
+                        class="w-8 h-8 rounded-lg bg-cyan-400 text-brand-dark flex items-center justify-center hover:opacity-90 transition shrink-0">
+                    <i class="fa-solid fa-play text-xs" id="inst_play_icon_${trackIndex}"></i>
+                </button>
+                <div class="flex-1 space-y-1">
+                    <div class="flex justify-between text-[10px] text-gray-400 font-mono">
+                        <span id="inst_current_time_${trackIndex}">00:00</span>
+                        <span id="inst_duration_${trackIndex}">00:00</span>
+                    </div>
+                    <input type="range" id="inst_seekbar_${trackIndex}" value="0" min="0" max="100" step="0.1" 
+                           oninput="seekCustomInstrumental(${trackIndex}, this.value)"
+                           class="w-full h-1 bg-brand-card rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                </div>
+            </div>
+            <audio id="native_inst_audio_${trackIndex}" src="${url}" 
+                   ontimeupdate="updateCustomInstrumentalProgress(${trackIndex})" 
+                   onloadedmetadata="initCustomInstrumentalMeta(${trackIndex})" 
+                   onended="resetCustomInstrumental(${trackIndex})" class="hidden"></audio>
+        `;
+    }
+};
+
+window.syncTrackArtistsFromReleaseArtists = function() {
+    const releaseArtists = window.releaseState.artists || [];
+    window.releaseState.tracks.forEach(track => {
+        if (!Array.isArray(track.artists)) track.artists = [];
+        if (track.artists.length === 0) {
+            track.artists = releaseArtists.filter(a => a.name).map(a => ({
+                name: a.name,
+                role: String(a.role || 'primary').toLowerCase()
+            }));
+        }
+    });
+};
+
+window.syncTrackArtistsFromReleaseArtists();
+
+window.validateAudioFile = function(file, label = 'Audio') {
+    if (!file) throw new Error(`${label} file is required.`);
+    const validExtension = /\.(wav|flac)$/i.test(file.name);
+    const validMime = ['audio/wav', 'audio/x-wav', 'audio/flac', 'audio/x-flac'].includes(file.type);
+
+    if (!validExtension && !validMime) {
+        throw new Error(`${label} must be a WAV or FLAC file.`);
+    }
+    return true;
+};
+
+window.validateReleaseForSubmission = function() {
+    const s = window.releaseState;
+    const errors = [];
+
+    if (!s.metadata?.title?.trim()) errors.push('Release title is required.');
+    if (!s.metadata?.type) errors.push('Release type is required.');
+    if (!s.metadata?.language) errors.push('Release language is required.');
+    if (!s.metadata?.primaryGenre) errors.push('Primary genre is required.');
+    if (!s.metadata?.secondaryGenre) errors.push('Secondary genre is required.');
+    if (!s.dates?.releaseDate) errors.push('Release date is required.');
+    if (!s.dates?.timezone) errors.push('Release timezone is required.');
+    if (!s.label?.name?.trim()) errors.push('Record label is required.');
+    if (!s.label?.cLine?.trim()) errors.push('(C) line is required.');
+    if (!s.label?.pLine?.trim()) errors.push('(P) line is required.');
+    if (!s.artwork?.file && !s.artwork?.url) errors.push('Cover artwork is required.');
+    if (!s.artists?.length) errors.push('At least one release artist is required.');
+    if (!s.tracks?.length) errors.push('At least one track is required.');
+
+    s.tracks.forEach((track, index) => {
+        const n = index + 1;
+        if (!track.metadata?.title?.trim()) errors.push(`Track ${n}: title is required.`);
+        if (!track.audioFile && !track.audioUrl) errors.push(`Track ${n}: master audio is required.`);
+        if (!track.artists?.length) errors.push(`Track ${n}: at least one artist is required.`);
+
+        const validArtists = (track.artists || []).filter(a => a.name?.trim());
+        if (!validArtists.length) errors.push(`Track ${n}: artist name is required.`);
+
+        const writers = (track.writers || []).filter(w => w.name?.trim());
+        if (!writers.length) errors.push(`Track ${n}: at least one writer is required.`);
+
+        const hasInstrumentalist = writers.some(writer => String(writer.role).toLowerCase() === 'instrumentalist');
+        if (!hasInstrumentalist) errors.push(`Track ${n}: at least one writer must have role Instrumentalist.`);
+
+        if (track.audioFile) {
+            try { validateAudioFile(track.audioFile, `Track ${n} master audio`); } catch (err) { errors.push(err.message); }
+        }
+        if (track.instrumentalFile) {
+            try { validateAudioFile(track.instrumentalFile, `Track ${n} instrumental`); } catch (err) { errors.push(err.message); }
+        }
+    });
+
+    if (!s.agreements?.termsAccepted) errors.push('Distribution rights confirmation is required.');
+    if (!s.agreements?.rightsConfirmed) errors.push('Rights clearance confirmation is required.');
+
+    return errors;
+};
+
+window.validateDelivery = function() {
+    const s = window.releaseState;
+    const errors = [];
+    if (!s.delivery) {
+        s.delivery = { beatPort: false, youtube: true, facebook: true };
+    }
+    return errors;
+};
+
+window.handleTrackGenreChange = function(idx, genre) {
+    window.releaseState.tracks[idx].metadata.genre = genre;
+    window.releaseState.tracks[idx].metadata.subgenre = '';
+    
+    const subSelect = document.getElementById(`track_subgenre_${idx}`);
+    if (!subSelect) return;
+
+    if (genre && GENRE_MAP[genre]) {
+        subSelect.disabled = false;
+        subSelect.innerHTML = `<option value="">Select Subgenre</option>` + 
+            GENRE_MAP[genre].map(sub => `<option value="${sub}">${sub}</option>`).join('');
+    } else {
+        subSelect.disabled = true;
+        subSelect.innerHTML = `<option value="">-- Select Genre First --</option>`;
+    }
+};
+
+window.handleAudioPreview = function(trackIndex, inputElement) {
+    const file = inputElement.files[0];
+    if (!file) return;
+
+    window.releaseState.tracks[trackIndex].audioFile = file;
+    const previewUrl = URL.createObjectURL(file);
+    window.releaseState.tracks[trackIndex].previewUrl = previewUrl;
+
+    const nameEl = document.getElementById(`audio_file_name_${trackIndex}`);
+    if (nameEl) nameEl.innerText = file.name;
+
+    const container = document.getElementById(`audio_preview_container_${trackIndex}`);
+    if (container) {
+        container.innerHTML = `
+            <div class="flex items-center gap-3">
+                <button type="button" onclick="toggleCustomAudioPlay(${trackIndex})" id="play_btn_${trackIndex}" 
+                        class="w-8 h-8 rounded-lg bg-cyan-400 text-brand-dark flex items-center justify-center hover:opacity-90 transition shrink-0">
+                    <i class="fa-solid fa-play text-xs" id="play_icon_${trackIndex}"></i>
+                </button>
+                <div class="flex-1 space-y-1">
+                    <div class="flex justify-between text-[10px] text-gray-400 font-mono">
+                        <span id="current_time_${trackIndex}">00:00</span>
+                        <span id="duration_${trackIndex}">00:00</span>
+                    </div>
+                    <input type="range" id="audio_seekbar_${trackIndex}" value="0" min="0" max="100" step="0.1" 
+                           oninput="seekCustomAudio(${trackIndex}, this.value)"
+                           class="w-full h-1 bg-brand-card rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                </div>
+            </div>
+            <audio id="native_audio_${trackIndex}" src="${previewUrl}" 
+                   ontimeupdate="updateCustomAudioProgress(${trackIndex})" 
+                   onloadedmetadata="initCustomAudioMeta(${trackIndex})" 
+                   onended="resetCustomAudio(${trackIndex})" class="hidden"></audio>
+        `;
+    }
+};
+
+window.addTrackToRelease = function() {
+    window.releaseState.tracks.push({
+        metadata: { title: '', version: '', genre: window.releaseState.metadata.primaryGenre || '', subgenre: window.releaseState.metadata.secondaryGenre || '', explicit: false },
+        discNumber: 1,
+        isrc: '',
+        tiktokStartTime: '00:30',
+        audioFile: null,
+        audioUrl: '',
+        previewUrl: '',
+        instrumentalFile: null,
+        instrumentalUrl: '',
+        instrumentalPreviewUrl: '',
+        lyrics: { content: '', explicit: false, cleanVersion: false },
+        artists: [],
+        writers: [{ name: '', role: 'instrumentalist' }],
+        credits: ''
+    });
+
+    const container = document.getElementById('wizardStepContainer');
+    if (container && window.currentStep === 4) container.innerHTML = renderStep4Content();
+};
+
+window.removeTrackFromRelease = function(index) {
+    if (window.releaseState.tracks.length <= 1) return;
+    window.releaseState.tracks.splice(index, 1);
+    const container = document.getElementById('wizardStepContainer');
+    if (container && window.currentStep === 4) container.innerHTML = renderStep4Content();
+};
+
+window.adjustTracksForReleaseType = function() {
+    const type = window.releaseState.metadata.type;
+    if (type === 'Single') {
+        window.releaseState.tracks = [window.releaseState.tracks[0] || {
+            metadata: { title: window.releaseState.metadata.title || '', explicit: false },
+            discNumber: 1
+        }];
+    }
+};
+
+// STEP 5 CONTENT
+function renderStep5Content() {
+    return `
+        <div class="space-y-4">
+            <div class="p-5 rounded-2xl bg-brand-dark border border-brand-border space-y-4 text-xs text-gray-300">
+                <h3 class="font-bold text-white text-sm">Legal & Copyright Affirmation</h3>
+                <label class="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" ${window.releaseState.agreements.termsAccepted ? 'checked' : ''} onchange="window.releaseState.agreements.termsAccepted = this.checked" class="mt-0.5 rounded border-brand-border">
+                    <span>I certify that I am authorized to grant distribution rights for all masters, lyrics, and metadata supplied in this submission package.</span>
+                </label>
+                <label class="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" ${window.releaseState.agreements.rightsConfirmed ? 'checked' : ''} onchange="window.releaseState.agreements.rightsConfirmed = this.checked" class="mt-0.5 rounded border-brand-border">
+                    <span>I confirm all underlying samples, interpolations, and performances are fully cleared for commercial distribution worldwide.</span>
+                </label>
+            </div>
+        </div>
+    `;
+}
+
+// STEP 6 CONTENT
+function renderStep6Content() {
+    const s = window.releaseState;
+    if (!s.delivery) {
+        s.delivery = { beatPort: false, youtube: true, facebook: true };
+    }
+    const validationErrors = window.validateReleaseForSubmission();
+    const deliveryErrors = window.validateDelivery();
+    const allErrors = [
+        ...validationErrors,
+        ...deliveryErrors
+    ];
+    const canSubmit = allErrors.length === 0;
+
+    const validationHtml = validationErrors.length === 0
+        ? `
+            <div class="text-emerald-400 font-bold">
+                ✓ Release is ready for Too Lost submission.
+            </div>
+          `
+        : `
+            <div class="text-red-400 font-bold mb-2">
+                ✗ Release cannot be submitted yet.
+            </div>
+
+            <ul class="space-y-1 text-red-300">
+                ${validationErrors.map(error => `
+                    <li>• ${escapeHtml(error)}</li>
+                `).join('')}
+            </ul>
+          `;
+
+    // Ensure submit button state updates when step 6 renders
+    setTimeout(() => {
+        const submitBtn = document.getElementById('submitReleaseBtn');
+        if (submitBtn) {
+            submitBtn.classList.remove('hidden');
+            submitBtn.disabled = !canSubmit;
+            submitBtn.className = canSubmit 
+                ? "px-6 py-2.5 rounded-xl bg-emerald-400 text-black font-bold text-xs hover:bg-emerald-300 transition"
+                : "px-6 py-2.5 rounded-xl bg-emerald-400 text-black font-bold text-xs opacity-40 cursor-not-allowed";
+            submitBtn.innerText = canSubmit
+                ? 'Upload & Submit Release'
+                : 'Fix Validation Errors First';
+        }
+    }, 50);
+
+    return `
+        <div class="space-y-4">
+            <!-- Distribution Delivery Summary Block -->
+            <div class="p-5 rounded-2xl bg-brand-dark border border-brand-border space-y-3">
+                <h3 class="text-sm font-bold text-white">
+                    Distribution Delivery
+                </h3>
+                <div class="text-xs text-gray-400">
+                    <p>
+                        <strong class="text-gray-300">DSPs:</strong>
+                        ${s.dsps?.length || 0} selected
+                    </p>
+                    <p>
+                        <strong class="text-gray-300">Territories:</strong>
+                        Worldwide
+                    </p>
+                    <p>
+                        <strong class="text-gray-300">Beatport:</strong>
+                        ${s.delivery?.beatPort ? 'Enabled' : 'Disabled'}
+                    </p>
+                    <p>
+                        <strong class="text-gray-300">YouTube:</strong>
+                        ${s.delivery?.youtube ? 'Enabled' : 'Disabled'}
+                    </p>
+                    <p>
+                        <strong class="text-gray-300">Facebook:</strong>
+                        ${s.delivery?.facebook ? 'Enabled' : 'Disabled'}
+                    </p>
+                </div>
+            </div>
+
+            <!-- Summary Card -->
+            <div class="p-6 rounded-2xl bg-brand-dark border border-brand-border space-y-4 text-xs font-mono text-gray-300">
+                <h3 class="text-sm font-bold text-white">Release Submission Summary</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 border-b border-brand-border pb-4">
+                    <div>
+                        <p><strong class="text-gray-400">Title:</strong> ${s.metadata.title || 'Untitled'}</p>
+                        <p><strong class="text-gray-400">Type:</strong> ${s.metadata.type}</p>
+                        <p><strong class="text-gray-400">Primary Genre:</strong> ${s.metadata.primaryGenre || 'N/A'}</p>
+                        <p><strong class="text-gray-400">Subgenre:</strong> ${s.metadata.secondaryGenre || 'N/A'}</p>
+                    </div>
+                    <div>
+                        <p><strong class="text-gray-400">Artists:</strong> ${s.artists.map(a => a.name).filter(Boolean).join(', ') || 'None'}</p>
+                        <p><strong class="text-gray-400">Release Date:</strong> ${s.dates.releaseDate || 'Immediate'}</p>
+                        <p><strong class="text-gray-400">Selected Stores:</strong> ${s.dsps.length} Platforms</p>
+                        <p><strong class="text-gray-400">Total Tracks:</strong> ${s.tracks.length}</p>
+                    </div>
+                </div>
+                <div class="text-[11px]">
+                    ${validationHtml}
+                </div>
+            </div>
+
+            <!-- Submission Progress Card -->
+            <div id="submission-progress-card" class="hidden p-5 rounded-2xl bg-brand-dark border border-brand-border space-y-3">
+                <div class="flex items-center justify-between text-xs font-semibold">
+                    <span id="progress-status-text" class="text-cyan-400 flex items-center gap-2">
+                        <i class="fa-solid fa-spinner animate-spin"></i> Preparing upload...
+                    </span>
+                    <span id="progress-percentage" class="text-gray-400 font-mono">0%</span>
+                </div>
+                <div class="w-full h-2.5 bg-brand-card rounded-full overflow-hidden border border-brand-border/40">
+                    <div id="progress-bar-fill" class="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-300 rounded-full" style="width: 0%;"></div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function extractApiError(response) {
+    if (!response) {
+        return 'No response received from the distribution gateway.';
+    }
+
+    if (typeof response === 'string') {
+        return response;
+    }
+
+    if (response.errors) {
+        if (Array.isArray(response.errors)) {
+            return response.errors
+                .map(error => {
+                    if (typeof error === 'string') {
+                        return error;
+                    }
+                    return (
+                        error.message ||
+                        error.detail ||
+                        JSON.stringify(error)
+                    );
+                })
+                .join('\n');
+        }
+
+        if (typeof response.errors === 'object') {
+            return Object.entries(response.errors)
+                .map(([field, value]) =>
+                    `${field}: ${
+                        typeof value === 'string'
+                            ? value
+                            : JSON.stringify(value)
+                    }`
+                )
+                .join('\n');
+        }
+    }
+
+    return (
+        response.message ||
+        response.error ||
+        response.detail ||
+        'Unknown distribution API error.'
+    );
+}
+
+window.handleFormSubmission = async function(event) {
+    if (event) event.preventDefault();
+
+    const validationErrors = window.validateReleaseForSubmission ? window.validateReleaseForSubmission() : [];
+    const deliveryErrors = window.validateDelivery ? window.validateDelivery() : [];
+    const allErrors = [...validationErrors, ...deliveryErrors];
+
+    if (allErrors.length > 0) {
+        return window.showToast(`Cannot submit: ${allErrors[0]}`);
+    }
+
+    if (!window.releaseState.agreements?.termsAccepted) {
+        return window.showToast('Please confirm that you are authorized to distribute this release.');
+    }
+
+    if (!window.releaseState.agreements?.rightsConfirmed) {
+        return window.showToast('Please confirm that all samples, interpolations and performances are cleared.');
+    }
+
+    const hasArtworkFile = Boolean(window.releaseState.artwork?.file);
+    const existingArtworkUrl = window.releaseState.artwork?.url || '';
+    
+    if (!hasArtworkFile && !existingArtworkUrl) {
+        return window.showToast('Please upload cover artwork before submitting.');
+    }
+
+    // =========================================================
+    // 1. FAIL-SAFE GENRE & METADATA EXTRACTION (DOM + STATE FALLBACK)
+    // =========================================================
+    const primaryGenreSelect = document.getElementById('primaryGenreSelect') || 
+                               document.getElementById('primaryGenre') || 
+                               document.querySelector('[name="primaryGenre"]');
+                               
+    const secondaryGenreSelect = document.getElementById('secondaryGenreSelect') || 
+                                 document.getElementById('secondaryGenre') || 
+                                 document.querySelector('[name="secondaryGenre"]');
+
+    const domPrimaryGenre = primaryGenreSelect ? primaryGenreSelect.value : '';
+    const domSecondaryGenre = secondaryGenreSelect ? secondaryGenreSelect.value : '';
+
+    const primaryGenre = String(
+        window.releaseState.metadata?.primaryGenre ||
+        window.releaseState.metadata?.primary_genre ||
+        window.releaseState.metadata?.genre ||
+        window.releaseState.primaryGenre ||
+        window.releaseState.primary_genre ||
+        window.releaseState.genre ||
+        domPrimaryGenre ||
+        ''
+    ).trim();
+
+    const secondaryGenre = String(
+        window.releaseState.metadata?.secondaryGenre ||
+        window.releaseState.metadata?.secondary_genre ||
+        window.releaseState.metadata?.subgenre ||
+        window.releaseState.secondaryGenre ||
+        window.releaseState.secondary_genre ||
+        window.releaseState.subgenre ||
+        domSecondaryGenre ||
+        ''
+    ).trim();
+
+    if (!primaryGenre) {
+        return window.showToast('Please select a Primary Genre for this release.');
+    }
+
+    // Synchronize resolved values back into state to prevent downstream drops
+    if (!window.releaseState.metadata) window.releaseState.metadata = {};
+    window.releaseState.metadata.primaryGenre = primaryGenre;
+    window.releaseState.metadata.secondaryGenre = secondaryGenre;
+
+    const submitBtn = document.getElementById('submitReleaseBtn');
+    const progressCard = document.getElementById('submission-progress-card');
+    const statusText = document.getElementById('progress-status-text');
+    const percentageText = document.getElementById('progress-percentage');
+    const progressFill = document.getElementById('progress-bar-fill');
+
+    const updateProgress = (percent, message) => {
+        if (progressFill) progressFill.style.width = `${percent}%`;
+        if (percentageText) percentageText.innerText = `${Math.round(percent)}%`;
+        if (statusText) statusText.innerText = message;
+    };
+
+    let originalBtnHTML = '';
+    if (submitBtn) {
+        originalBtnHTML = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.style.cursor = 'not-allowed';
+        submitBtn.style.opacity = '0.7';
+        submitBtn.innerHTML = `
+            <span style="display: inline-flex; align-items: center; gap: 8px;">
+                <svg style="animation: spin 1s linear infinite; width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"></circle>
+                </svg>
+                Submitting...
+            </span>
+        `;
+    }
+
+    if (progressCard) progressCard.style.display = 'block';
+    updateProgress(5, 'Initializing submission pipeline...');
+
+    try {
+        const totalTracks = window.releaseState.tracks?.length || 0;
+        const instrumentalCount = (window.releaseState.tracks || []).filter(t => Boolean(t.instrumentalFile)).length;
+        const totalUploadSteps = (hasArtworkFile ? 1 : 0) + totalTracks + instrumentalCount;
+        let completedSteps = 0;
+
+        let finalCoverUrl = existingArtworkUrl;
+        if (hasArtworkFile) {
+            updateProgress(10, 'Uploading Cover Artwork...');
+            const uploadRes = await uploadFileToR2(window.releaseState.artwork.file, 'artwork');
+            finalCoverUrl = typeof uploadRes === 'string' ? uploadRes : (uploadRes?.url || uploadRes?.location || uploadRes?.path || '');
+
+            if (!finalCoverUrl) throw new Error('Artwork upload succeeded but returned an invalid URL.');
+
+            window.releaseState.artwork.url = finalCoverUrl;
+            completedSteps++;
+            const stepPercent = 10 + Math.floor((completedSteps / (totalUploadSteps || 1)) * 60);
+            updateProgress(stepPercent, 'Cover Artwork uploaded successfully!');
+        } else {
+            updateProgress(20, 'Using existing artwork...');
+        }
+
+        for (let i = 0; i < totalTracks; i++) {
+            const track = window.releaseState.tracks[i];
+            if (track.audioFile) {
+                updateProgress(
+                    20 + Math.floor((completedSteps / (totalUploadSteps || 1)) * 60), 
+                    `Uploading Track ${i + 1} of ${totalTracks}: "${track.metadata?.title || 'Master Audio'}"...`
+                );
+                const trackRes = await uploadFileToR2(track.audioFile, 'audio');
+                const trackUrl = typeof trackRes === 'string' ? trackRes : (trackRes?.url || trackRes?.location || '');
+                window.releaseState.tracks[i].audioUrl = trackUrl;
+            }
+
+            if (track.instrumentalFile) {
+                updateProgress(40, `Uploading Track ${i + 1} Instrumental...`);
+                const instrumentalRes = await uploadFileToR2(track.instrumentalFile, 'instrumental');
+                const instrumentalUrl = typeof instrumentalRes === 'string' ? instrumentalRes : (instrumentalRes?.url || instrumentalRes?.location || instrumentalRes?.path || '');
+
+                if (!instrumentalUrl) throw new Error(`Track ${i + 1} instrumental upload returned no URL.`);
+                window.releaseState.tracks[i].instrumentalUrl = instrumentalUrl;
+            }
+            completedSteps++;
+        }
+
+        updateProgress(80, 'Formatting release metadata & participant roles...');
+
+        const labelNameInput = typeof window.releaseState.label === 'object' 
+            ? (window.releaseState.label.name || window.releaseState.label.label) 
+            : window.releaseState.label;
+
+        const labelString = (labelNameInput && labelNameInput.trim()) ? labelNameInput.trim() : 'Independent';
+        const ALLOWED_ROLES = ['primary', 'featuring', 'remixer'];
+
+        const mappedParticipants = (window.releaseState.artists || [])
+            .map(artist => {
+                let rawRoles = Array.isArray(artist.role) ? artist.role : [artist.role || 'primary'];
+                const cleanedRoles = rawRoles.map(r => {
+                    const norm = String(r).toLowerCase().trim();
+                    if (norm.includes('feat')) return 'featuring';
+                    if (norm.includes('remix')) return 'remixer';
+                    if (ALLOWED_ROLES.includes(norm)) return norm;
+                    return 'primary';
+                });
+
+                const artistName = typeof artist === 'string' ? artist : (artist.name || artist.artist_name || '');
+                return {
+                    name: artistName.trim(),
+                    role: Array.from(new Set(cleanedRoles)),
+                    spotify_id: artist.spotify_id || '',
+                    apple_id: artist.apple_id || ''
+                };
+            })
+            .filter(p => p.name !== '');
+
+        if (mappedParticipants.length === 0) throw new Error('Please specify at least one Primary Artist name.');
+
+        const editingId = window.releaseState.editingId;
+        const isEditing = Boolean(editingId);
+
+        const currentYear = new Date().getFullYear().toString();
+        const labelObject =
+            window.releaseState.label && typeof window.releaseState.label === 'object'
+                ? window.releaseState.label
+                : {};
+
+        const rawCLine = labelObject.cLine || window.releaseState.cLine || '';
+        const rawPLine = labelObject.pLine || window.releaseState.pLine || '';
+
+        const cYearMatch = rawCLine.match(/\b(19|20)\d{2}\b/);
+        const pYearMatch = rawPLine.match(/\b(19|20)\d{2}\b/);
+
+        const extractedCYear = cYearMatch ? cYearMatch[0] : (window.releaseState.label?.cYear || currentYear);
+        const extractedPYear = pYearMatch ? pYearMatch[0] : (window.releaseState.label?.pYear || currentYear);
+
+        const primaryGenreId = !isNaN(Number(primaryGenre)) && primaryGenre !== '' ? Number(primaryGenre) : null;
+        const secondaryGenreId = !isNaN(Number(secondaryGenre)) && secondaryGenre !== '' ? Number(secondaryGenre) : null;
+
+        // Standardized Payload with all fallback keys
+        const payload = {
+            title: window.releaseState.metadata?.title || '',
+            type: window.releaseState.metadata?.type || 'Single',
+            language: window.releaseState.metadata?.language || 'en',
+
+            // Canonical Genre Keys (Strings & Numeric IDs)
+            primaryGenre: primaryGenre,
+            primary_genre: primaryGenre,
+            primary_genre_id: primaryGenreId,
+            genre: primaryGenre,
+
+            secondaryGenre: secondaryGenre || null,
+            secondary_genre: secondaryGenre || null,
+            secondary_genre_id: secondaryGenreId,
+            subgenre: secondaryGenre || null,
+
+            label: labelString,
+            cLine: rawCLine,
+            c_line: rawCLine,
+            cYear: extractedCYear,
+            c_year: extractedCYear,
+            pLine: rawPLine,
+            p_line: rawPLine,
+            pYear: extractedPYear,
+            p_year: extractedPYear,
+            
+            participants: mappedParticipants,
+            artists: mappedParticipants,
+            
+            releaseDate: window.releaseState.dates?.releaseDate || null,
+            release_date: window.releaseState.dates?.releaseDate || null,
+
+            releaseTime: window.releaseState.dates?.timezone
+                ? {
+                    time: null,
+                    timeZone: window.releaseState.dates.timezone
+                  }
+                : null,
+            
+            dsps: window.releaseState.dsps || [],
+            platforms: window.releaseState.dsps || [],
+            delivery: window.releaseState.delivery || {},
+            
+            cover_url: finalCoverUrl,
+            coverUrl: finalCoverUrl,
+            cover_art: finalCoverUrl,
+            artwork: finalCoverUrl,
+            compressed_artwork: finalCoverUrl,
+            compressedArtwork: finalCoverUrl,
+            
+            tracks: (window.releaseState.tracks || []).map(t => ({
+                title: t.metadata?.title?.trim() || '',
+                version: t.metadata?.version?.trim() || null,
+                explicit: Boolean(t.metadata?.explicit),
+                isrc: t.isrc?.trim() || null,
+                audio_url: t.audioUrl || null,
+                audioUrl: t.audioUrl || null,
+                instrumental_url: t.instrumentalUrl || null,
+                instrumentalUrl: t.instrumentalUrl || null,
+                tiktok_start_time: t.tiktokStartTime?.trim() || null,
+                lyrics: {
+                    content: t.lyrics?.content || null,
+                    explicit: Boolean(t.lyrics?.explicit),
+                    clean_version: Boolean(t.lyrics?.cleanVersion)
+                },
+                artists: (t.artists || []).filter(a => a.name?.trim()).map(a => ({
+                    name: a.name.trim(),
+                    role: a.role || 'primary'
+                })),
+                writers: (t.writers || []).filter(w => w.name?.trim()).map(w => ({
+                    name: w.name.trim(),
+                    role: w.role === 'lyricist' ? 'lyricist' : 'instrumentalist'
+                })),
+                credits: t.credits?.trim() || null
+            })),
+            submittedBy: window.currentUser ? window.currentUser.uid : 'anonymous',
+            createdAt: new Date().toISOString()
+        };
+
+        updateProgress(90, 'Dispatching metadata to Gateway...');
+
+        const token = window.currentUser?.getIdToken
+            ? await window.currentUser.getIdToken()
+            : '';
+
+        let releaseId = editingId || null;
+        let submitResponseData = null;
+
+        // CREATE OR UPDATE RELEASE DRAFT
+        const releaseEndpoint = releaseId
+            ? `${WORKER_BASE_URL}/api/releases/${releaseId}`
+            : `${WORKER_BASE_URL}/api/releases`;
+
+        const res = await fetch(releaseEndpoint, {
+            method: isEditing ? 'PUT' : 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const serverResponse = await res.json().catch(() => null);
+
+        if (!res.ok) {
+            const apiErrMessage = serverResponse?.error || serverResponse?.message || 'Failed to save release draft.';
+            throw new Error(apiErrMessage);
+        }
+
+        releaseId = serverResponse?.id || serverResponse?.data?.id || releaseId;
+
+        if (!releaseId) {
+            throw new Error('Release was created but the server did not return a release ID.');
+        }
+
+        // SUBMIT RELEASE TO TOO LOST API
+        updateProgress(95, 'Submitting release package to Too Lost...');
+
+        const submitEndpoint = `${WORKER_BASE_URL}/api/releases/${releaseId}/submit`;
+
+        const submitPayload = {
+            ...payload,
+            acceptTerms: String(Boolean(window.releaseState.agreements?.termsAccepted)),
+            accept_terms: Boolean(window.releaseState.agreements?.termsAccepted),
+            confirmRights: String(Boolean(window.releaseState.agreements?.rightsConfirmed)),
+            confirm_rights: Boolean(window.releaseState.agreements?.rightsConfirmed),
+            confirmYoutubeRights: Boolean(window.releaseState.agreements?.youtubeRightsConfirmed),
+            confirm_youtube_rights: Boolean(window.releaseState.agreements?.youtubeRightsConfirmed),
+            idempotencyKey: `${releaseId}-${Date.now()}`
+        };
+
+        const submitRes = await fetch(submitEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(submitPayload)
+        });
+
+        const submitResponseText = await submitRes.text();
+
+        try {
+            submitResponseData = JSON.parse(submitResponseText);
+        } catch (e) {
+            submitResponseData = { raw: submitResponseText };
+        }
+
+        if (!submitRes.ok) {
+            const apiMessage =
+                submitResponseData?.message ||
+                submitResponseData?.error ||
+                submitResponseData?.detail ||
+                submitResponseData?.data?.message ||
+                submitResponseText ||
+                `HTTP ${submitRes.status}`;
+
+            throw new Error(`Too Lost submit failed (${submitRes.status}): ${apiMessage}`);
+        }
+
+        updateProgress(100, `Release successfully ${isEditing ? 'updated' : 'submitted'}! Redirecting...`);
+        const currentUid = window.currentUser ? window.currentUser.uid : 'anonymous';
+        const returnedStatus =
+            submitResponseData?.status ??
+            submitResponseData?.data?.status ??
+            serverResponse?.status ??
+            serverResponse?.data?.status ??
+            'in_review';
+
+        const validStatus = typeof formatReleaseStatus === 'function' 
+            ? formatReleaseStatus(returnedStatus) 
+            : returnedStatus;
+
+        const finalId = isEditing ? editingId : (releaseId || Date.now());
+        const newReleaseItem = {
+            id: finalId,
+            title: payload.title,
+            type: payload.type,
+            status: validStatus,
+            coverUrl: finalCoverUrl,
+            compressedArtwork: finalCoverUrl,
+            participants: mappedParticipants,
+            upc:
+                submitResponseData?.upc ??
+                submitResponseData?.data?.upc ??
+                serverResponse?.upc ??
+                serverResponse?.data?.upc ??
+                'Pending',
+            submittedBy: currentUid
+        };
+
+        if (typeof loadLiveCatalog === 'function') {
+            await loadLiveCatalog();
+        }
+
+        const userLocalStorageKey = `audiory_releases_${currentUid}`;
+        let localSavedReleases = JSON.parse(localStorage.getItem(userLocalStorageKey) || localStorage.getItem('audiory_local_releases') || '[]');
+
+        if (isEditing) {
+            const index = localSavedReleases.findIndex(item => String(item.id) === String(editingId));
+            if (index !== -1) localSavedReleases[index] = { ...localSavedReleases[index], ...newReleaseItem };
+            else localSavedReleases.unshift(newReleaseItem);
+        } else {
+            localSavedReleases.unshift(newReleaseItem);
+        }
+
+        localStorage.setItem(userLocalStorageKey, JSON.stringify(localSavedReleases));
+        
+        if (!Array.isArray(window.releasesCatalog)) window.releasesCatalog = [];
+        if (isEditing) {
+            const catIndex = window.releasesCatalog.findIndex(item => String(item.id) === String(editingId));
+            if (catIndex !== -1) window.releasesCatalog[catIndex] = { ...window.releasesCatalog[catIndex], ...newReleaseItem };
+            else window.releasesCatalog.unshift(newReleaseItem);
+        } else {
+            window.releasesCatalog.unshift(newReleaseItem);
+        }
+
+        window.releaseState.editingId = null;
+
+        setTimeout(() => {
+            if (typeof window.loadLiveCatalog === 'function') {
+                try { window.loadLiveCatalog(); } catch (e) {}
+            }
+            if (typeof window.renderDashboardHome === 'function') window.renderDashboardHome();
+            if (typeof window.switchView === 'function') window.switchView('catalog');
+            
+            if (progressCard) progressCard.style.display = 'none';
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.style.cursor = 'pointer';
+                submitBtn.style.opacity = '1';
+                submitBtn.innerHTML = originalBtnHTML;
+            }
+        }, 1200);
+
+    } catch (err) {
+        console.error('Submission Error:', err);
+        if (typeof window.showToast === 'function') {
+            window.showToast(`Submission failed: ${err.message}`);
+        } else {
+            alert(`Submission failed: ${err.message}`);
+        }
+        
+        if (progressCard) progressCard.style.display = 'none';
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.style.cursor = 'pointer';
+            submitBtn.style.opacity = '1';
+            submitBtn.innerHTML = originalBtnHTML;
+        }
+    }
+};
+
+function renderCatalogView() {
+    if (!window.releasesCatalog || window.releasesCatalog.length === 0) {
+        return `
+            <div class="text-center py-24 bg-brand-card rounded-2xl border border-brand-border space-y-4 max-w-xl mx-auto">
+                <div class="w-16 h-16 rounded-full bg-cyan-500/10 text-cyan-400 flex items-center justify-center mx-auto text-2xl">
+                    <i class="fa-solid fa-compact-disc"></i>
+                </div>
+
+                <h3 class="text-lg font-bold text-white">
+                    No Releases Found
+                </h3>
+
+                <p class="text-xs text-gray-400">
+                    Start distributing your music to over 150+ streaming platforms.
+                </p>
+
+                <button
+                    onclick="switchView('create')"
+                    class="px-5 py-2.5 rounded-xl bg-brand-accent text-brand-dark font-bold text-xs hover:opacity-90 transition">
+                    + Create New Release
+                </button>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="max-w-7xl mx-auto space-y-6">
+
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-brand-border pb-5">
+
+                <div>
+                    <h1 class="text-2xl font-bold text-white tracking-tight">
+                        Releases Catalog
+                    </h1>
+
+                    <p class="text-xs text-gray-400">
+                        Manage, edit, and track your active music submissions
+                    </p>
+                </div>
+
+                <button
+                    onclick="switchView('create')"
+                    class="px-4 py-2.5 rounded-xl bg-brand-accent text-brand-dark font-bold text-xs flex items-center justify-center gap-2 hover:opacity-90 transition">
+
+                    <i class="fa-solid fa-plus"></i>
+                    New Release
+                </button>
+
+            </div>
+
+
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+
+                ${window.releasesCatalog.map((rel, idx) => {
+
+                    const title =
+                        rel.title ||
+                        rel.metadata?.title ||
+                        'Untitled Release';
+
+
+                    // =====================================================
+                    // ARTISTS
+                    // =====================================================
+
+                    let artistNames = 'Unknown Artist';
+
+                    if (
+                        Array.isArray(rel.participants) &&
+                        rel.participants.length > 0
+                    ) {
+                        artistNames = rel.participants
+                            .map(p =>
+                                typeof p === 'string'
+                                    ? p
+                                    : p.name
+                            )
+                            .filter(Boolean)
+                            .join(', ');
+
+                    } else if (
+                        Array.isArray(rel.artists) &&
+                        rel.artists.length > 0
+                    ) {
+                        artistNames = rel.artists
+                            .map(a =>
+                                typeof a === 'string'
+                                    ? a
+                                    : (a.name || '')
+                            )
+                            .filter(Boolean)
+                            .join(', ');
+
+                    } else if (rel.artist) {
+                        artistNames =
+                            typeof rel.artist === 'string'
+                                ? rel.artist
+                                : rel.artist.name;
+                    }
+
+
+                    // =====================================================
+                    // COVER
+                    // =====================================================
+
+                    let rawCover =
+                        rel.coverUrl ||
+                        rel.compressedArtwork ||
+                        rel.artworkUrl ||
+                        rel.cover_url ||
+                        rel.cover_art;
+
+                    if (!rawCover && rel.artwork) {
+                        rawCover =
+                            typeof rel.artwork === 'string'
+                                ? rel.artwork
+                                : (
+                                    rel.artwork.url ||
+                                    rel.artwork.cover_art ||
+                                    rel.artwork.path
+                                );
+                    }
+
+                    const cover =
+                        typeof rawCover === 'string' &&
+                        rawCover.trim() !== ''
+                            ? rawCover
+                            : 'https://placehold.co/400x400/1e293b/06b6d4?text=No+Cover';
+
+
+                    // =====================================================
+                    // RELEASE TYPE
+                    // =====================================================
+
+                    const releaseType =
+                        rel.type || 'Single';
+
+
+                    // =====================================================
+                    // ACTUAL TOO LOST STATUS
+                    // =====================================================
+
+                    const rawStatus =
+                        rel.status ??
+                        rel.releaseStatus ??
+                        rel.release_status ??
+                        rel.state ??
+                        null;
+
+                    const status =
+                        formatReleaseStatus(rawStatus);
+
+
+                    // =====================================================
+                    // UPC
+                    // =====================================================
+
+                    const upc =
+                        rel.upc || 'Pending';
+
+
+                    return `
+
+                        <div
+                            class="group relative bg-brand-card/60 rounded-2xl border border-brand-border p-3 flex flex-col hover:border-cyan-500/50 transition duration-300 shadow-md hover:shadow-cyan-500/5">
+
+
+                            <!-- COVER -->
+
+                            <div
+                                class="relative w-full aspect-square rounded-xl overflow-hidden bg-brand-dark border border-brand-border/40">
+
+                                <img
+                                    src="${cover}"
+                                    alt="${title}"
+                                    class="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                                    onerror="this.onerror=null; this.src='https://placehold.co/400x400/1e293b/06b6d4?text=No+Cover';">
+
+
+                                <!-- RELEASE TYPE -->
+
+                                <span
+                                    class="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[9px] font-bold text-cyan-400 uppercase tracking-wider">
+
+                                    ${releaseType}
+
+                                </span>
+
+
+                                <!-- ACTIONS -->
+
+                                <div
+                                    class="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition duration-200">
+
+                                    <button
+                                        type="button"
+                                        onclick="editReleaseCatalog(${idx})"
+                                        title="Edit Release"
+                                        class="p-1.5 rounded-lg bg-black/80 backdrop-blur-md text-gray-300 hover:text-white hover:bg-cyan-500 transition shadow">
+
+                                        <i class="fa-solid fa-pen-to-square text-xs"></i>
+
+                                    </button>
+
+
+                                    <button
+                                        type="button"
+                                        onclick="deleteReleaseCatalog('${rel.id || idx}')"
+                                        title="Delete Release"
+                                        class="p-1.5 rounded-lg bg-black/80 backdrop-blur-md text-gray-300 hover:text-red-400 hover:bg-red-500/20 transition shadow">
+
+                                        <i class="fa-solid fa-trash text-xs"></i>
+
+                                    </button>
+
+                                </div>
+
+                            </div>
+
+
+                            <!-- RELEASE INFO -->
+
+                            <div
+                                class="mt-3 flex flex-col justify-between flex-1 space-y-1">
+
+                                <div>
+
+                                    <h3
+                                        class="font-bold text-white text-xs truncate group-hover:text-cyan-400 transition"
+                                        title="${title}">
+
+                                        ${title}
+
+                                    </h3>
+
+
+                                    <p
+                                        class="text-[11px] text-gray-400 truncate"
+                                        title="${artistNames}">
+
+                                        ${artistNames}
+
+                                    </p>
+
+                                </div>
+
+
+                                <div
+                                    class="pt-2 flex items-center justify-between text-[10px]">
+
+                                    <span
+                                        class="font-mono text-gray-500">
+
+                                        UPC: ${upc}
+
+                                    </span>
+
+
+                                    <!-- ACTUAL TOO LOST STATUS -->
+
+                                    <span
+                                        title="Too Lost status: ${rawStatus || 'Unknown'}"
+                                        class="inline-flex items-center px-1.5 py-0.5 rounded-full font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 capitalize">
+
+                                        ${status}
+
+                                    </span>
+
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    `;
+
+                }).join('')}
+
+            </div>
+
+        </div>
+    `;
+}
+
+async function loadLiveCatalog() {
+    try {
+        const currentUid =
+            window.currentUser
+                ? (window.currentUser.uid || window.currentUser.id)
+                : null;
+
+        if (!currentUid) {
+            window.releasesCatalog = [];
+            renderCatalogView();
+            return;
+        }
+
+        let serverReleases = [];
+
+        // =========================================================
+        // 1. FETCH LIVE DATA FROM TOO LOST THROUGH WORKER
+        // =========================================================
+
+        try {
+            const token =
+                await window.currentUser.getIdToken();
+
+            const workerUrl =
+                window.WORKER_BASE_URL || WORKER_BASE_URL;
+
+            const res = await fetch(
+                `${workerUrl}/api/releases`,
+                {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    }
+                }
+            );
+
+            if (res.ok) {
+                const data = await res.json();
+
+                const rawList =
+                    Array.isArray(data)
+                        ? data
+                        : (
+                            data.data ||
+                            data.releases ||
+                            []
+                        );
+
+                serverReleases = rawList.filter(item => {
+                    const itemUserId =
+                        item.submittedBy ||
+                        item.userId ||
+                        item.user_id ||
+                        item.uid;
+
+                    return (
+                        !itemUserId ||
+                        String(itemUserId) === String(currentUid)
+                    );
+                });
+            } else {
+                console.error(
+                    'Catalog API returned:',
+                    res.status,
+                    await res.text()
+                );
+            }
+
+        } catch (fetchErr) {
+            console.error(
+                'API Gateway fetch error:',
+                fetchErr
+            );
+        }
+
+        // =========================================================
+        // 2. LOAD LOCAL CACHE
+        // =========================================================
+
+        const userLocalStorageKey =
+            `audiory_releases_${currentUid}`;
+
+        let allLocalReleases = [];
+
+        try {
+            allLocalReleases =
+                JSON.parse(
+                    localStorage.getItem(
+                        userLocalStorageKey
+                    ) ||
+                    localStorage.getItem(
+                        'audiory_local_releases'
+                    ) ||
+                    '[]'
+                );
+        } catch (e) {
+            allLocalReleases = [];
+        }
+
+        const localReleases =
+            Array.isArray(allLocalReleases)
+                ? allLocalReleases.filter(item => {
+                    const itemUserId =
+                        item.submittedBy ||
+                        item.userId ||
+                        item.user_id;
+
+                    return (
+                        !itemUserId ||
+                        String(itemUserId) === String(currentUid)
+                    );
+                })
+                : [];
+
+        // =========================================================
+        // 3. COVER RESOLVER
+        // =========================================================
+
+        const resolveCoverUrl = (item) => {
+            if (!item) return '';
+
+            if (typeof item.artwork === 'string') {
+                return item.artwork;
+            }
+
+            if (
+                item.artwork &&
+                typeof item.artwork === 'object'
+            ) {
+                return (
+                    item.artwork.url ||
+                    item.artwork.cover_art ||
+                    item.artwork.path ||
+                    ''
+                );
+            }
+
+            return (
+                item.coverUrl ||
+                item.compressedArtwork ||
+                item.artworkUrl ||
+                item.cover_url ||
+                item.cover_art ||
+                item.image ||
+                ''
+            );
+        };
+
+        // =========================================================
+        // 4. MERGE
+        // =========================================================
+
+        const releaseMap = new Map();
+
+        // ---------------------------------------------------------
+        // LOCAL DATA FIRST
+        // ---------------------------------------------------------
+
+        localReleases.forEach(item => {
+            if (!item?.id) return;
+
+            const key = String(item.id);
+
+            releaseMap.set(key, {
+                ...item,
+                submittedBy: currentUid,
+                coverUrl: resolveCoverUrl(item),
+                __fromTooLost: false
+            });
+        });
+
+        // ---------------------------------------------------------
+        // TOO LOST DATA LAST
+        // ---------------------------------------------------------
+        // This means Too Lost always wins for:
+        // status
+        // title
+        // type
+        // UPC
+        // participants
+        // releaseDate
+        // etc.
+        // ---------------------------------------------------------
+
+        serverReleases.forEach(item => {
+            if (!item?.id) return;
+
+            const key = String(item.id);
+
+            const existing =
+                releaseMap.get(key);
+
+            releaseMap.set(key, {
+                ...(existing || {}),
+                ...item,
+
+                submittedBy:
+                    item.submittedBy ||
+                    existing?.submittedBy ||
+                    currentUid,
+
+                coverUrl:
+                    resolveCoverUrl(item) ||
+                    existing?.coverUrl ||
+                    '',
+
+                status:
+                    item.status ??
+                    item.releaseStatus ??
+                    item.release_status ??
+                    item.state ??
+                    existing?.status ??
+                    'Unknown',
+
+                __fromTooLost: true
+            });
+        });
+        // =========================================================
+        // 5. FINAL CATALOG
+        // =========================================================
+        window.releasesCatalog =
+            Array.from(
+                releaseMap.values()
+            );
+
+        // =========================================================
+        // 6. RENDER
+        // =========================================================
+        renderCatalogView();
+
+    } catch (err) {
+        console.error(
+            'Error loading live catalog:',
+            err
+        );
+    }
+}
+
+2.WORKERS
+
+// =============================================================
+// RELEASE API ROUTES
+// Too Lost integration
+// =============================================================
+
+const isReleasePath = url.pathname === "/api/releases" ||
+                      url.pathname.startsWith("/api/releases/");
+
+if (isReleasePath) {
+
+  if (!userId) {
+    return new Response(
+      JSON.stringify({
+        error: "Unauthorized: Invalid or missing authentication token."
+      }),
+      {
+        status: 401,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  const baseUrl = (
+    env.TOO_LOST_BASE_URL ||
+    "https://api-sandbox.toolost.com/v1"
+  ).replace(/\/$/, "");
+
+  // -------------------------------------------------------------
+  // Get Too Lost access token
+  // -------------------------------------------------------------
+
+  let accessToken;
+
+  try {
+    accessToken = await getAccessToken(env);
+  } catch (authError) {
+
+    console.error(
+      "Too Lost Authentication Error:",
+      authError
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: "Too Lost Authentication Failed",
+        details: authError?.message || "Unable to authenticate with Too Lost."
+      }),
+      {
+        status: 401,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  // =============================================================
+// ROUTE 1: CREATE RELEASE DRAFT
+//
+// POST /api/releases
+//
+// Audiory -> Too Lost
+// POST /releases
+// =============================================================
+
+if (
+  url.pathname === "/api/releases" &&
+  request.method === "POST"
+) {
+  const payloadText = await request.text();
+
+  let payloadObj = {};
+
+  try {
+    payloadObj = JSON.parse(payloadText || "{}");
+  } catch (e) {
+    return new Response(
+      JSON.stringify({
+        error: "Invalid JSON request body."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // Extract raw genre once for unified mapping
+  const rawPrimaryGenre = String(
+      payloadObj.genre ||
+      payloadObj.primaryGenre ||
+      payloadObj.primary_genre ||
+      ""
+  ).trim();
+
+  const rawSecondaryGenre = String(
+      payloadObj.subgenre ||
+      payloadObj.secondaryGenre ||
+      payloadObj.secondary_genre ||
+      ""
+  ).trim();
+
+  // ===========================================================
+  // NORMALIZE RELEASE DATA FOR TOO LOST
+  // ===========================================================
+
+  const normalizedPayload = {
+      title: String(
+          payloadObj.title ||
+          payloadObj.releaseTitle ||
+          ""
+      ).trim(),
+
+      type: payloadObj.type || payloadObj.releaseType || "Single",
+
+      language:
+          payloadObj.language ||
+          payloadObj.primaryLanguage ||
+          null,
+
+      // CANONICAL TOO LOST FIELDS
+      genre: rawPrimaryGenre,
+      subgenre: rawSecondaryGenre || null,
+
+      // Compatibility aliases
+      primaryGenre: rawPrimaryGenre,
+      primary_genre: rawPrimaryGenre,
+      secondaryGenre: rawSecondaryGenre || null,
+      secondary_genre: rawSecondaryGenre || null,
+
+    // ---------------------------------------------------------
+    // LABEL
+    // ---------------------------------------------------------
+    label: payloadObj.label || "AudioryDistribution",
+
+    // ---------------------------------------------------------
+    // COPYRIGHT
+    // ---------------------------------------------------------
+    cLine: payloadObj.cLine || payloadObj.c_line || null,
+    cYear: payloadObj.cYear || payloadObj.c_year || null,
+    pLine: payloadObj.pLine || payloadObj.p_line || null,
+    pYear: payloadObj.pYear || payloadObj.p_year || null,
+
+    // ---------------------------------------------------------
+    // RELEASE DATE
+    // ---------------------------------------------------------
+    releaseDate: payloadObj.releaseDate || payloadObj.release_date || null,
+
+    // ---------------------------------------------------------
+    // ARTWORK
+    // ---------------------------------------------------------
+    coverUrl: payloadObj.coverUrl || payloadObj.cover_url || payloadObj.cover_art || null,
+    cover_url: payloadObj.coverUrl || payloadObj.cover_url || payloadObj.cover_art || null,
+
+    compressedArtwork: payloadObj.compressedArtwork || payloadObj.compressed_artwork || payloadObj.coverUrl || payloadObj.cover_url || null,
+
+    // ---------------------------------------------------------
+    // PARTICIPANTS / ARTISTS
+    // ---------------------------------------------------------
+    participants: payloadObj.participants || payloadObj.artists || [],
+    artists: payloadObj.participants || payloadObj.artists || [],
+
+    // ---------------------------------------------------------
+    // DELIVERY & TARGETS
+    // ---------------------------------------------------------
+    delivery: payloadObj.delivery || {},
+    platforms: payloadObj.platforms || payloadObj.dsps || [],
+    dsps: payloadObj.platforms || payloadObj.dsps || [],
+    territories: payloadObj.territories || [],
+
+    // ---------------------------------------------------------
+    // TRACKS
+    // ---------------------------------------------------------
+    tracks: Array.isArray(payloadObj.tracks) ? payloadObj.tracks : []
+  };
+
+  // ===========================================================
+  // VALIDATE PRIMARY GENRE BEFORE TOO LOST
+  // ===========================================================
+
+  if (!normalizedPayload.primaryGenre) {
+    return new Response(
+      JSON.stringify({
+        error: "Primary Genre is required.",
+        field: "primaryGenre",
+        message: "Missing Primary Genre."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // ===========================================================
+  // DEBUG LOG
+  // ===========================================================
+
+  console.log("Audiory -> Too Lost CREATE RELEASE", {
+    title: normalizedPayload.title,
+    type: normalizedPayload.type,
+    primaryGenre: normalizedPayload.primaryGenre,
+    secondaryGenre: normalizedPayload.secondaryGenre,
+    language: normalizedPayload.language,
+    releaseDate: normalizedPayload.releaseDate,
+    hasCoverUrl: Boolean(normalizedPayload.coverUrl),
+    trackCount: normalizedPayload.tracks.length
+  });
+
+  // ===========================================================
+  // CREATE RELEASE IN TOO LOST
+  // ===========================================================
+
+  const response = await fetch(
+    `${baseUrl}/releases`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(normalizedPayload)
+    }
+  );
+
+  const responseText = await response.text();
+  let serverData = {};
+
+  try {
+    serverData = JSON.parse(responseText);
+  } catch (e) {
+    serverData = {};
+  }
+
+  // ===========================================================
+  // HANDLE UPSTREAM ERRORS
+  // ===========================================================
+
+  if (!response.ok) {
+    console.error(
+      "Too Lost CREATE RELEASE ERROR:",
+      response.status,
+      responseText
+    );
+
+    return new Response(
+      responseText || JSON.stringify({
+        error: "Too Lost rejected release creation."
+      }),
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // ===========================================================
+  // GET CREATED RELEASE
+  // ===========================================================
+
+  const release = serverData?.data || serverData || {};
+  const releaseId = release.id || null;
+
+  if (!releaseId) {
+    console.error(
+      "Too Lost CREATE succeeded but no release ID returned:",
+      responseText
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: "Too Lost created the release but did not return a release ID.",
+        response: serverData
+      }),
+      {
+        status: 502,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // ===========================================================
+  // VERIFY RETURNED GENRE
+  // ===========================================================
+
+  const returnedPrimaryGenre =
+    release.primaryGenre ||
+    release.primary_genre ||
+    normalizedPayload.primaryGenre;
+
+  console.log(
+    "Too Lost created release:",
+    releaseId,
+    "primaryGenre:",
+    returnedPrimaryGenre
+  );
+
+  // ===========================================================
+  // CACHE RELEASE IN KV
+  // ===========================================================
+
+  if (env.AUDIORY_KV) {
+    const resolvedCover =
+      normalizedPayload.coverUrl ||
+      normalizedPayload.compressedArtwork ||
+      "";
+
+    const cacheItem = {
+      id: releaseId,
+      title: release.title || normalizedPayload.title || "Untitled",
+      type: release.type || normalizedPayload.type || "Single",
+      status: release.status || "draft",
+      label: typeof release.label === "string" ? release.label : normalizedPayload.label,
+      primaryGenre:
+        release.primaryGenre ||
+        release.primary_genre ||
+        release.genre ||
+        normalizedPayload.primaryGenre ||
+        normalizedPayload.genre,
+
+      genre:
+        release.genre ||
+        release.primaryGenre ||
+        release.primary_genre ||
+        normalizedPayload.genre ||
+        normalizedPayload.primaryGenre,
+
+      secondaryGenre:
+        release.secondaryGenre ||
+        release.secondary_genre ||
+        release.subgenre ||
+        normalizedPayload.secondaryGenre ||
+        normalizedPayload.subgenre,
+
+      subgenre:
+        release.subgenre ||
+        release.secondaryGenre ||
+        release.secondary_genre ||
+        normalizedPayload.subgenre ||
+        normalizedPayload.secondaryGenre,
+      coverUrl: release.coverUrl || release.cover_url || resolvedCover,
+      compressedArtwork: release.compressedArtwork || release.compressed_artwork || resolvedCover,
+      participants: release.participants || release.artists || normalizedPayload.participants || [],
+      upc: release.upc || normalizedPayload.upc || "Pending",
+      submittedBy: userId,
+      createdAt: release.createdAt || release.created_at || new Date().toISOString()
+    };
+
+    const userKvKey = `RELEASES_USER_${userId}`;
+    let existingCached = [];
+
+    try {
+      existingCached = JSON.parse(
+        await env.AUDIORY_KV.get(userKvKey) || "[]"
+      );
+    } catch (e) {
+      existingCached = [];
+    }
+
+    const existingIdx = existingCached.findIndex(
+      item => String(item.id) === String(releaseId)
+    );
+
+    if (existingIdx !== -1) {
+      existingCached[existingIdx] = {
+        ...existingCached[existingIdx],
+        ...cacheItem
+      };
+    } else {
+      existingCached.unshift(cacheItem);
+    }
+
+    await env.AUDIORY_KV.put(
+      userKvKey,
+      JSON.stringify(existingCached)
+    );
+  }
+
+  // ===========================================================
+  // RETURN RESPONSE
+  // ===========================================================
+
+  return new Response(
+    responseText,
+    {
+      status: response.status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+
+
+  // =============================================================
+// ROUTE 2: SUBMIT RELEASE
+//
+// POST /api/releases/:id/submit
+//
+// IMPORTANT:
+// Too Lost validates the SAVED release.
+// Therefore we verify the release first.
+// =============================================================
+
+const submitMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)\/submit$/
+  );
+
+if (
+  submitMatch &&
+  request.method === "POST"
+) {
+
+  const releaseId =
+    submitMatch[1];
+
+  const payloadText =
+    await request.text();
+
+  let submitPayload = {};
+
+  try {
+    submitPayload =
+      JSON.parse(payloadText || "{}");
+  } catch (e) {
+    submitPayload = {};
+  }
+
+  // ===========================================================
+  // FETCH ACTUAL TOO LOST RELEASE
+  // ===========================================================
+
+  const releaseCheckResponse =
+    await fetch(
+      `${baseUrl}/releases/${releaseId}`,
+      {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        }
+      }
+    );
+
+  const releaseCheckText =
+    await releaseCheckResponse.text();
+
+  let releaseCheckData = {};
+
+  try {
+    releaseCheckData =
+      JSON.parse(releaseCheckText);
+  } catch (e) {
+    releaseCheckData = {};
+  }
+
+  if (!releaseCheckResponse.ok) {
+
+    console.error(
+      "Too Lost RELEASE CHECK FAILED:",
+      releaseCheckResponse.status,
+      releaseCheckText
+    );
+
+    return new Response(
+      releaseCheckText,
+      {
+        status: releaseCheckResponse.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  const release =
+    releaseCheckData?.data ||
+    releaseCheckData ||
+    {};
+
+  // ===========================================================
+  // CHECK PRIMARY GENRE
+  // Fall back to local KV cache if Too Lost GET didn't return it
+  // ===========================================================
+
+  let storedPrimaryGenre =
+    String(
+      release.primaryGenre ||
+      release.primary_genre ||
+      release.genre ||
+      release.metadata?.primaryGenre ||
+      release.metadata?.primary_genre ||
+      release.metadata?.genre ||
+      ""
+    ).trim();
+
+  // KV Fallback Check
+  if (!storedPrimaryGenre && env.AUDIORY_KV) {
+    try {
+      const userKvKey = `RELEASES_USER_${userId}`;
+      const cached = JSON.parse(await env.AUDIORY_KV.get(userKvKey) || "[]");
+      const localRelease = cached.find(item => String(item.id) === String(releaseId));
+      if (
+        localRelease?.primaryGenre ||
+        localRelease?.primary_genre ||
+        localRelease?.genre
+      ) {
+          storedPrimaryGenre = String(
+              localRelease.primaryGenre ||
+              localRelease.primary_genre ||
+              localRelease.genre
+          ).trim();
+      }
+    } catch (e) {
+      console.warn("KV fallback read failed during submit check:", e);
+    }
+  }
+
+  console.log(
+    "TOO LOST SUBMIT CHECK",
+    {
+      releaseId,
+      title: release.title,
+      primaryGenre: storedPrimaryGenre,
+      secondaryGenre: release.secondaryGenre || release.secondary_genre,
+      status: release.status
+    }
+  );
+
+  // ===========================================================
+  // DO NOT CALL SUBMIT IF GENRE IS STILL MISSING
+  // ===========================================================
+
+  if (!storedPrimaryGenre) {
+
+    return new Response(
+      JSON.stringify({
+        error: "Too Lost draft is missing Primary Genre.",
+        code: "MISSING_PRIMARY_GENRE_ON_DRAFT",
+        releaseId: releaseId,
+        tooLostRelease: {
+          id: release.id,
+          title: release.title,
+          primaryGenre:
+            release.primaryGenre ??
+            release.primary_genre ??
+            release.genre ??
+            release.metadata?.primaryGenre ??
+            release.metadata?.primary_genre ??
+            release.metadata?.genre ??
+            null,
+
+          secondaryGenre:
+            release.secondaryGenre ??
+            release.secondary_genre ??
+            release.subgenre ??
+            release.metadata?.secondaryGenre ??
+            release.metadata?.secondary_genre ??
+            release.metadata?.subgenre ??
+            null,
+          status: release.status ?? null
+        }
+      }),
+      {
+        status: 422,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // ===========================================================
+  // SUBMIT TO TOO LOST
+  // Sends both snake_case and camelCase boolean/string flags
+  // ===========================================================
+
+  const isTermsAccepted = submitPayload.acceptTerms === true || submitPayload.acceptTerms === "true";
+  const isRightsConfirmed = submitPayload.confirmRights === true || submitPayload.confirmRights === "true";
+
+  // ===========================================================
+  // RESOLVE CANONICAL TOO LOST GENRE FOR SUBMISSION
+  // ===========================================================
+
+  const submitPrimaryGenre = String(
+      release.genre ||
+      release.primaryGenre ||
+      release.primary_genre ||
+      release.metadata?.genre ||
+      release.metadata?.primaryGenre ||
+      release.metadata?.primary_genre ||
+      ""
+  ).trim();
+
+  const submitSecondaryGenre = String(
+      release.subgenre ||
+      release.secondaryGenre ||
+      release.secondary_genre ||
+      release.metadata?.subgenre ||
+      release.metadata?.secondaryGenre ||
+      release.metadata?.secondary_genre ||
+      ""
+  ).trim();
+
+  console.log(
+      "TOO LOST FINAL SUBMIT GENRE:",
+      JSON.stringify({
+          releaseId,
+          genre: submitPrimaryGenre,
+          subgenre: submitSecondaryGenre
+      })
+  );
+
+  if (!submitPrimaryGenre) {
+      return new Response(
+          JSON.stringify({
+              error: "Too Lost draft is missing Primary Genre.",
+              code: "MISSING_PRIMARY_GENRE_ON_DRAFT",
+              releaseId,
+              tooLostRelease: {
+                  id: release.id ?? null,
+                  title: release.title ?? null,
+                  genre: release.genre ?? null,
+                  primaryGenre: release.primaryGenre ?? null,
+                  subgenre: release.subgenre ?? null,
+                  secondaryGenre: release.secondaryGenre ?? null
+              }
+          }),
+          {
+              status: 422,
+              headers: {
+                  ...corsHeaders,
+                  "Content-Type": "application/json"
+              }
+          }
+      );
+  }
+
+  // ===========================================================
+  // SUBMIT BODY
+  // ===========================================================
+
+  const submitBody = {
+      // Canonical Too Lost genre fields
+      genre: submitPrimaryGenre,
+      subgenre: submitSecondaryGenre || null,
+
+      // Compatibility aliases
+      primaryGenre: submitPrimaryGenre,
+      primary_genre: submitPrimaryGenre,
+      secondaryGenre: submitSecondaryGenre || null,
+      secondary_genre: submitSecondaryGenre || null,
+
+      acceptTerms: String(isTermsAccepted),
+      accept_terms: isTermsAccepted,
+
+      confirmRights: String(isRightsConfirmed),
+      confirm_rights: isRightsConfirmed,
+
+      confirmYoutubeRights:
+          submitPayload.confirmYoutubeRights ?? null,
+
+      confirm_youtube_rights:
+          submitPayload.confirmYoutubeRights ?? null,
+
+      idempotencyKey:
+          submitPayload.idempotencyKey || crypto.randomUUID(),
+
+      idempotency_key:
+          submitPayload.idempotencyKey || crypto.randomUUID()
+  };
+
+  const submitResponse =
+    await fetch(
+      `${baseUrl}/releases/${releaseId}/submit`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        },
+
+        body: JSON.stringify(submitBody)
+      }
+    );
+
+  const responseText =
+    await submitResponse.text();
+
+  // ===========================================================
+  // CACHE STATUS AFTER SUCCESS
+  // ===========================================================
+
+  if (
+    env.AUDIORY_KV &&
+    submitResponse.ok
+  ) {
+
+    const serverData =
+      (() => {
+        try {
+          return JSON.parse(responseText);
+        } catch (e) {
+          return {};
+        }
+      })();
+
+    const submittedRelease =
+      serverData?.data ||
+      serverData ||
+      {};
+
+    const userKvKey =
+      `RELEASES_USER_${userId}`;
+
+    let existingCached = [];
+
+    try {
+      existingCached =
+        JSON.parse(
+          await env.AUDIORY_KV.get(userKvKey) || "[]"
+        );
+    } catch (e) {
+      existingCached = [];
+    }
+
+    const idx =
+      existingCached.findIndex(
+        item =>
+          String(item.id) === String(releaseId)
+      );
+
+    if (idx !== -1) {
+
+      existingCached[idx] = {
+        ...existingCached[idx],
+
+        status:
+          submittedRelease.status ||
+          "in_review",
+
+        submittedAt:
+          submittedRelease.submittedAt ||
+          submittedRelease.submitted_at ||
+          new Date().toISOString()
+      };
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(existingCached)
+      );
+    }
+  }
+
+  // ===========================================================
+  // RETURN TOO LOST RESPONSE
+  // ===========================================================
+
+  return new Response(
+    responseText,
+    {
+      status: submitResponse.status,
+
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+  // =============================================================
+  // ROUTE 3: DELETE RELEASE DRAFT
+  //
+  // DELETE /api/releases/:id
+  // =============================================================
+
+  const deleteMatch =
+    url.pathname.match(
+      /^\/api\/releases\/([^/]+)$/
+    );
+
+
+  if (
+    deleteMatch &&
+    request.method === "DELETE"
+  ) {
+
+    const releaseId =
+      deleteMatch[1];
+
+
+    const response =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          }
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    // -------------------------------------------------------------
+    // Only remove local cache if Too Lost successfully deleted it.
+    // -------------------------------------------------------------
+
+    if (
+      response.ok &&
+      env.AUDIORY_KV
+    ) {
+
+      const userKvKey =
+        `RELEASES_USER_${userId}`;
+
+
+      let existingCached = [];
+
+      try {
+        existingCached =
+          JSON.parse(
+            await env.AUDIORY_KV.get(userKvKey) || "[]"
+          );
+      } catch (e) {
+        existingCached = [];
+      }
+
+
+      const filteredKV =
+        existingCached.filter(
+          item =>
+            String(item.id) !== String(releaseId)
+        );
+
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(filteredKV)
+      );
+    }
+
+
+    return new Response(
+      responseText || JSON.stringify({
+        message:
+          response.ok
+            ? "Release deleted successfully"
+            : "Unable to delete release"
+      }),
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+
+ // =============================================================
+// ROUTE 4: RELEASE INFORMATION / UPDATE DRAFT
+//
+// PUT /api/releases/:id
+// PATCH /api/releases/:id
+//
+// Audiory -> Too Lost
+// PUT /releases/:id
+// =============================================================
+
+const releaseInfoMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)$/
+  );
+
+if (
+  releaseInfoMatch &&
+  (
+    request.method === "PUT" ||
+    request.method === "PATCH"
+  )
+) {
+
+  const releaseId =
+    releaseInfoMatch[1];
+
+  const payloadText =
+    await request.text();
+
+  let payloadObj = {};
+
+  try {
+    payloadObj =
+      JSON.parse(
+        payloadText || "{}"
+      );
+  } catch (e) {
+    return new Response(
+      JSON.stringify({
+        error: "Invalid JSON request body."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // Extract raw genres for dual-key mapping
+  const rawPrimaryGenre = String(
+    payloadObj.primaryGenre ||
+    payloadObj.primary_genre ||
+    payloadObj.genre ||
+    ""
+  ).trim();
+
+  const rawSecondaryGenre = String(
+    payloadObj.secondaryGenre ||
+    payloadObj.secondary_genre ||
+    payloadObj.subgenre ||
+    ""
+  ).trim();
+
+  // ===========================================================
+  // NORMALIZE UPDATE PAYLOAD FOR TOO LOST
+  // ===========================================================
+
+  const updatePayload = {
+    ...payloadObj,
+
+    title:
+      payloadObj.title ||
+      payloadObj.releaseTitle ||
+      "",
+
+    type:
+      payloadObj.type ||
+      payloadObj.releaseType ||
+      "Single",
+
+    language:
+      payloadObj.language ||
+      payloadObj.primaryLanguage ||
+      null,
+
+    // Dual-key normalization for genre safety
+    genre: rawPrimaryGenre,
+    subgenre: rawSecondaryGenre || null,
+
+    primaryGenre: rawPrimaryGenre,
+    primary_genre: rawPrimaryGenre,
+
+    secondaryGenre: rawSecondaryGenre || null,
+    secondary_genre: rawSecondaryGenre || null,
+
+    label:
+      payloadObj.label ||
+      "Independent",
+
+    upc:
+      payloadObj.upc ||
+      payloadObj.upc_code ||
+      null,
+
+    upc_code:
+      payloadObj.upc ||
+      payloadObj.upc_code ||
+      null,
+
+    releaseDate:
+      payloadObj.releaseDate ||
+      payloadObj.release_date ||
+      null,
+
+    release_date:
+      payloadObj.releaseDate ||
+      payloadObj.release_date ||
+      null,
+
+    coverUrl:
+      payloadObj.coverUrl ||
+      payloadObj.cover_url ||
+      payloadObj.cover_art ||
+      null,
+
+    cover_url:
+      payloadObj.coverUrl ||
+      payloadObj.cover_url ||
+      payloadObj.cover_art ||
+      null,
+
+    compressedArtwork:
+      payloadObj.compressedArtwork ||
+      payloadObj.compressed_artwork ||
+      payloadObj.coverUrl ||
+      payloadObj.cover_url ||
+      null,
+
+    compressed_artwork:
+      payloadObj.compressedArtwork ||
+      payloadObj.compressed_artwork ||
+      payloadObj.coverUrl ||
+      payloadObj.cover_url ||
+      null,
+
+    participants:
+      payloadObj.participants ||
+      payloadObj.artists ||
+      [],
+
+    artists:
+      payloadObj.participants ||
+      payloadObj.artists ||
+      [],
+
+    delivery:
+      payloadObj.delivery ||
+      {},
+
+    platforms:
+      payloadObj.platforms ||
+      payloadObj.dsps ||
+      [],
+
+    dsps:
+      payloadObj.platforms ||
+      payloadObj.dsps ||
+      [],
+
+    territories:
+      payloadObj.territories ||
+      [],
+
+    tracks:
+      Array.isArray(payloadObj.tracks)
+        ? payloadObj.tracks
+        : []
+  };
+
+  // ===========================================================
+  // VALIDATE PRIMARY GENRE BEFORE UPDATE
+  // ===========================================================
+
+  if (!updatePayload.primaryGenre) {
+    return new Response(
+      JSON.stringify({
+        error: "Primary Genre is required.",
+        field: "primaryGenre",
+        message: "Missing Primary Genre."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  console.log(
+    "Audiory -> Too Lost UPDATE:",
+    JSON.stringify({
+      releaseId,
+      title: updatePayload.title,
+      primaryGenre: updatePayload.primaryGenre,
+      secondaryGenre: updatePayload.secondaryGenre
+    })
+  );
+
+  // ===========================================================
+  // PUT UPDATE TO TOO LOST
+  // ===========================================================
+
+  const response =
+    await fetch(
+      `${baseUrl}/releases/${releaseId}`,
+      {
+        method: "PUT",
+
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        },
+
+        body: JSON.stringify(updatePayload)
+      }
+    );
+
+  const responseText = await response.text();
+
+  // ===========================================================
+  // SYNC UPDATED DRAFT TO LOCAL KV CACHE
+  // ===========================================================
+
+  if (response.ok && env.AUDIORY_KV) {
+    let serverData = {};
+    try {
+      serverData = JSON.parse(responseText);
+    } catch (e) {
+      serverData = {};
+    }
+
+    const updatedRelease = serverData?.data || serverData || {};
+    const userKvKey = `RELEASES_USER_${userId}`;
+
+    let existingCached = [];
+    try {
+      existingCached = JSON.parse(
+        (await env.AUDIORY_KV.get(userKvKey)) || "[]"
+      );
+    } catch (e) {
+      existingCached = [];
+    }
+
+    const resolvedCover =
+      updatePayload.coverUrl ||
+      updatePayload.compressedArtwork ||
+      "";
+
+    const updatedItem = {
+      id: releaseId,
+      title: updatedRelease.title || updatePayload.title || "Untitled",
+      type: updatedRelease.type || updatePayload.type || "Single",
+      status: updatedRelease.status || "draft",
+      label: typeof updatedRelease.label === "string" ? updatedRelease.label : updatePayload.label,
+      primaryGenre: updatePayload.primaryGenre,
+      secondaryGenre: updatePayload.secondaryGenre,
+      coverUrl: updatedRelease.coverUrl || updatedRelease.cover_url || resolvedCover,
+      compressedArtwork: updatedRelease.compressedArtwork || updatedRelease.compressed_artwork || resolvedCover,
+      participants: updatedRelease.participants || updatedRelease.artists || updatePayload.participants || [],
+      upc: updatedRelease.upc || updatedRelease.upc_code || updatePayload.upc || "Pending",
+      submittedBy: userId,
+      updatedAt: new Date().toISOString()
+    };
+
+    const idx = existingCached.findIndex(
+      (item) => String(item.id) === String(releaseId)
+    );
+
+    if (idx !== -1) {
+      existingCached[idx] = {
+        ...existingCached[idx],
+        ...updatedItem
+      };
+    } else {
+      existingCached.unshift(updatedItem);
+    }
+
+    await env.AUDIORY_KV.put(
+      userKvKey,
+      JSON.stringify(existingCached)
+    );
+  }
+
+  // ===========================================================
+  // RETURN TOO LOST RESPONSE
+  // ===========================================================
+
+  return new Response(
+    responseText,
+    {
+      status: response.status,
+
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+  // =============================================================
+// ROUTE 5: RELEASE DELIVERY & TARGETS
+//
+// PUT /api/releases/:id/delivery
+// PATCH /api/releases/:id/delivery
+//
+// Audiory -> Too Lost
+// PUT /releases/:id/delivery
+// PATCH /releases/:id/delivery
+// =============================================================
+
+const deliveryMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)\/delivery$/
+  );
+
+if (
+  deliveryMatch &&
+  (
+    request.method === "PUT" ||
+    request.method === "PATCH"
+  )
+) {
+  const releaseId = deliveryMatch[1];
+  const payloadText = await request.text();
+
+  let payloadObj = {};
+
+  try {
+    payloadObj = JSON.parse(payloadText || "{}");
+  } catch (e) {
+    return new Response(
+      JSON.stringify({
+        error: "Invalid JSON request body."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // Extract platforms/DSPs and territories
+  const resolvedPlatforms =
+    payloadObj.platforms ||
+    payloadObj.dsps ||
+    payloadObj.delivery?.platforms ||
+    payloadObj.delivery?.dsps ||
+    [];
+
+  const resolvedTerritories =
+    payloadObj.territories ||
+    payloadObj.delivery?.territories ||
+    [];
+
+  // ===========================================================
+  // NORMALIZE DELIVERY PAYLOAD FOR TOO LOST
+  // ===========================================================
+
+  const deliveryPayload = {
+    ...payloadObj,
+
+    platforms: resolvedPlatforms,
+    dsps: resolvedPlatforms,
+
+    territories: resolvedTerritories,
+
+    delivery: {
+      ...(payloadObj.delivery || {}),
+      platforms: resolvedPlatforms,
+      dsps: resolvedPlatforms,
+      territories: resolvedTerritories
+    }
+  };
+
+  console.log("Audiory -> Too Lost DELIVERY UPDATE", {
+    releaseId,
+    method: request.method,
+    platformCount: resolvedPlatforms.length,
+    territoryCount: resolvedTerritories.length
+  });
+
+  // ===========================================================
+  // FORWARD TO TOO LOST
+  // ===========================================================
+
+  const response = await fetch(
+    `${baseUrl}/releases/${releaseId}/delivery`,
+    {
+      method: request.method,
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(deliveryPayload)
+    }
+  );
+
+  const responseText = await response.text();
+
+  // ===========================================================
+  // SYNC DELIVERY CONFIG TO LOCAL KV CACHE
+  // ===========================================================
+
+  if (response.ok && env.AUDIORY_KV) {
+    const userKvKey = `RELEASES_USER_${userId}`;
+    let existingCached = [];
+
+    try {
+      existingCached = JSON.parse(
+        (await env.AUDIORY_KV.get(userKvKey)) || "[]"
+      );
+    } catch (e) {
+      existingCached = [];
+    }
+
+    const idx = existingCached.findIndex(
+      (item) => String(item.id) === String(releaseId)
+    );
+
+    if (idx !== -1) {
+      existingCached[idx] = {
+        ...existingCached[idx],
+        platforms: resolvedPlatforms,
+        dsps: resolvedPlatforms,
+        territories: resolvedTerritories,
+        delivery: deliveryPayload.delivery,
+        updatedAt: new Date().toISOString()
+      };
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(existingCached)
+      );
+    }
+  }
+
+  // ===========================================================
+  // RETURN TOO LOST RESPONSE
+  // ===========================================================
+
+  return new Response(
+    responseText,
+    {
+      status: response.status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+
+
+  // =============================================================
+// ROUTE 6: FETCH USER CATALOGUE
+//
+// GET /api/releases
+//
+// IMPORTANT:
+// Audiory KV is the ownership source.
+// Too Lost provides the latest release data.
+// Only Too Lost releases already owned by this Audiory user
+// in KV are allowed into the final catalogue.
+// =============================================================
+
+if (
+  url.pathname === "/api/releases" &&
+  request.method === "GET"
+) {
+
+  // -------------------------------------------------------------
+  // Get Audiory local cache FIRST
+  // -------------------------------------------------------------
+
+  let userCachedReleases = [];
+
+  if (env.AUDIORY_KV) {
+
+    const userKvKey =
+      `RELEASES_USER_${userId}`;
+
+    try {
+
+      const cachedValue =
+        await env.AUDIORY_KV.get(userKvKey);
+
+      if (cachedValue) {
+
+        const parsed =
+          JSON.parse(cachedValue);
+
+        if (Array.isArray(parsed)) {
+          userCachedReleases = parsed;
+        }
+
+      }
+
+    } catch (e) {
+
+      console.error(
+        "Audiory KV Release Cache Error:",
+        e
+      );
+
+      userCachedReleases = [];
+    }
+  }
+
+
+  // -------------------------------------------------------------
+  // Build ownership list from Audiory KV
+  //
+  // This is the security boundary.
+  // A Too Lost release is only accepted if its ID is already
+  // associated with this Audiory user.
+  // -------------------------------------------------------------
+
+  const ownedReleaseIds =
+    new Set(
+      userCachedReleases
+        .filter(item => item?.id)
+        .map(item => String(item.id))
+    );
+
+
+  // -------------------------------------------------------------
+  // Fetch releases from Too Lost
+  // -------------------------------------------------------------
+
+  let apiReleases = [];
+
+  let tooLostError = null;
+
+  try {
+
+    const response =
+      await fetch(
+        `${baseUrl}/releases${url.search}`,
+        {
+          method: "GET",
+
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          }
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    // -----------------------------------------------------------
+    // Handle Too Lost errors explicitly
+    // -----------------------------------------------------------
+
+    if (!response.ok) {
+
+      console.error(
+        "Too Lost Fetch Error:",
+        response.status,
+        responseText
+      );
+
+      tooLostError = {
+        status: response.status,
+        body: responseText
+      };
+
+    } else {
+
+      let resJson = {};
+
+      try {
+
+        resJson =
+          JSON.parse(responseText);
+
+      } catch (e) {
+
+        console.error(
+          "Too Lost returned invalid JSON:",
+          responseText
+        );
+
+        tooLostError = {
+          status: 502,
+          body: "Too Lost returned invalid JSON."
+        };
+      }
+
+
+      // ---------------------------------------------------------
+      // Normalize Too Lost response
+      // ---------------------------------------------------------
+
+      if (!tooLostError) {
+
+        const rawList =
+          Array.isArray(resJson)
+            ? resJson
+            : (
+                Array.isArray(resJson?.data)
+                  ? resJson.data
+                  : (
+                      Array.isArray(resJson?.releases)
+                        ? resJson.releases
+                        : []
+                    )
+              );
+
+
+        // -------------------------------------------------------
+        // SECURITY FILTER
+        //
+        // NEVER use:
+        //
+        // !item.submittedBy
+        //
+        // because submittedBy is Audiory's local ownership field,
+        // not a reliable Too Lost ownership identifier.
+        // -------------------------------------------------------
+
+        apiReleases =
+          rawList.filter(item => {
+
+            if (!item?.id) {
+              return false;
+            }
+
+            return ownedReleaseIds.has(
+              String(item.id)
+            );
+          });
+      }
+    }
+
+  } catch (e) {
+
+    console.error(
+      "Too Lost Fetch Error:",
+      e
+    );
+
+    tooLostError = {
+      status: 502,
+      body: e?.message ||
+        "Unable to contact Too Lost."
+    };
+  }
+
+
+  // -------------------------------------------------------------
+  // Merge Too Lost data with Audiory's local data
+  //
+  // Start with the user's KV releases so locally-created drafts
+  // remain visible even if Too Lost is temporarily unavailable.
+  // -------------------------------------------------------------
+
+  const combinedMap =
+    new Map();
+
+
+  userCachedReleases.forEach(item => {
+
+    if (!item?.id) {
+      return;
+    }
+
+    combinedMap.set(
+      String(item.id),
+      {
+        ...item
+      }
+    );
+
+  });
+
+
+  // -------------------------------------------------------------
+  // Overlay the latest Too Lost data
+  // -------------------------------------------------------------
+
+  apiReleases.forEach(item => {
+
+    if (!item?.id) {
+      return;
+    }
+
+    const key =
+      String(item.id);
+
+    const existing =
+      combinedMap.get(key);
+
+
+    if (existing) {
+
+      combinedMap.set(
+        key,
+        {
+          ...existing,
+          ...item,
+
+          // Too Lost is authoritative for current status.
+          status:
+            item.status ??
+            existing.status,
+
+          // Audiory remains authoritative for ownership.
+          submittedBy:
+            existing.submittedBy ||
+            userId
+        }
+      );
+
+    }
+
+  });
+
+
+  // -------------------------------------------------------------
+  // Final catalogue
+  //
+  // Only releases already belonging to this Audiory user
+  // are present here.
+  // -------------------------------------------------------------
+
+  const finalCatalog =
+    Array.from(
+      combinedMap.values()
+    );
+
+
+  // -------------------------------------------------------------
+  // Return catalogue
+  // -------------------------------------------------------------
+
+  return new Response(
+    JSON.stringify(
+      finalCatalog
+    ),
+    {
+      status: 200,
+
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+
+// -------------------------------------------------------------
+// Unknown release route
+// -------------------------------------------------------------
+
+return new Response(
+  JSON.stringify({
+    error: "Unknown release API route."
+  }),
+  {
+    status: 404,
+
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json"
+    }
+  }
+);
+}
