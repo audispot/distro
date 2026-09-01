@@ -1,0 +1,1316 @@
+*Create release (draft) Body ·StoreReleaseRequest
+
+participants - [{"name":"Nova Waves","artistId":123,"role":["primary"]}] 
+name Type:string max length: 120Nova Waves 
+role Type:array string[] 1… max length: 40 enum required["primary"] values primary featuring remixer 
+artistId Type:integer | null min: 1 example 123 
+connect Type:object | null Example {"apple":{"url":"https://music.apple.com/artist/nova-waves/123456"},"spotify":{"url":"https://open.spotify.com/artist/1a2b3c"}}
+apple Type:obje
+url Type:string | null max length:  255 Format:uri Example https://music.apple.com/artist/nova-waves/123456
+spotify Type:object
+url Type:string | null max length:  255 Format:uri Example https://open.spotify.com/artist/1a2b3c
+title link to title Type:string max length:  120 required Example Midnight Echoes
+type link to type Type:string enum required Example Album
+values= Single EP Album Compilation MusicVideo Music Video
+label link to label Type:string | null max length:  120 Example Too Lost Records
+language Type:string | null required Example en
+
+*Submit release Body ·SubmitReleaseReques
+
+acceptTerms link to acceptTerms Type:string required Example true
+confirmRights link to confirmRights Type:string required true
+confirmYoutubeRights link to confirmYoutubeRights Type:boolean | null Example true
+idempotencyKey link to idempotencyKey Type:string | null max length:  128 Example rel-submit-73518-20260320
+
+*Release delivery Body ·UpdateReleaseDeliveryRequest
+
+delivery link to delivery Type:object required Example {"platforms":["Spotify","Apple Music"],"territories":["US","CA"],"additional":{"youtube":true}}
+additional Type:object | null Example {"youtube":true,"facebook":false}
+beatPort Type:boolean | null Example false
+beatPortForm Type:object | null Example {"hasAccount":true,"link":"https://www.beatport.com/label/example/12345","newLogo":null,"removeImg":false}
+hasAccount Type:boolean | null Example true
+link Type:string | null max length:  2048 Format:uri Example https://www.beatport.com/label/example/12345
+newLogo Type:string | null max length:  2048 Format:uri Example https://bucket.s3.amazonaws.com/beatport/logo.jpg
+removeImg Type:boolean | null Example false
+facebook Type:boolean | null Example false
+lyricfind Type:boolean | null Example false
+soundcloud Type:boolean | null Example false
+soundExchange Type:boolean | null Example true
+trackLibs Type:boolean | null Example true
+youtube Type:boolean | null Example true
+platforms Type:array string[] | null max length:  120 enum Example ["Spotify", "Apple Music"]
+values =
+24-7 Entertainment
+3.DK
+58pic
+5sing
+7Digital
+ACRCloud
+AGEDI
+AMI Entertainment
+AWA
+Acer
+Adaptr
+Agora
+Air Vanuatu
+AirAsia
+AirAsiaX
+Akazoo
+AliGenie
+Alibaba
+Alibaba Cloud Computing Co. Ltd.
+Alibaba Group
+Alipay
+Amazon Music
+Ambients App
+Anghami
+Aobai
+Apple Music
+Artie
+Artistxite
+Astro
+Audible Magic - Fulfillment360
+Audible Magic - Rights360
+Audio Stock
+Audioclub
+Audiojungle
+Audiomack
+B612
+BMAT
+BUBUKA
+Bandcamp
+Barstool Sports
+Beat.no
+Beatsource
+Beeline Music
+Beijing Eye
+Belgacom
+Bijian
+Bilibili
+Bleep
+Boomplay
+Boomplay Music
+Bose
+Broadtime
+Bucher.de
+Bugs Music
+Bugs!
+Bzstech
+CCA
+CCI Distribution
+CDON
+CIG
+CTS Eventim AG
+Canva
+Celcom
+Changba
+China Airlines
+China Telecom
+China Unicom
+Chunghwa Mobile
+Claro Música
+ClickNClear
+Clip Interactive
+Clone Digital
+CoSleep&Heartide
+Coda Music
+Coolvox
+Curve
+Cyberlink
+Cyworld
+DISCO
+DOOLUU
+Daily Yoga
+Dalkom
+Dance All Day
+DanceFight
+Daum
+Deedo
+Deezer
+Delta
+Deutsche Telekom Austria and Netherlands
+DiGi
+Dianyin
+Digitally Imported
+Discogs
+Douban Music
+Douyin
+Dragonfly FM
+DroitVision
+Duanku
+Dubset
+Duitang
+Echo
+Ex Libris
+ExLibris
+FETnet
+FLO
+FNAC
+FUHU
+Facebook/Instagram
+Fan Label
+Fanxian
+Fastweb
+Findspire
+Fliggy
+Flipagram
+Fonmix
+Forest Incentives
+Friday Music (Omusic)
+GHH Commerce
+GMF AeroAsia
+Gaana
+Genie Music
+Gismart
+Global Radio
+Google Play
+Gracenote
+Grandpad
+Gravity Mobile
+HELLORF
+HMV
+HTC One
+HUAWEI Hi-Res
+Haitu
+Hangout
+Hardstyle.com
+Hema
+High Res Audio
+HighResAudio
+Himalayan FM
+Huawei Global Radio
+Huawei Middle East
+Huawei Middle Eeast
+Huawei Music
+Huawei Music - Hi res
+Huawei Ringtone
+Huawei South Africa
+Hunanzhangyue
+Hungama
+Huoshan
+Hym
+Hyundaicard Music
+IMI Mobile
+Iguplus
+In8 Mobile
+Infogo
+Intime
+Intoo
+JOOX
+JPay
+Jaxsta
+Jazzed
+Jeou Tai
+Jetstar
+Jiadeyin
+Jinli Music
+Jinshan
+JioSaavn
+Juhuasuan
+KDigital Media
+KKBOX
+KTV
+Kakao
+Kanjian
+Kanjian Music
+Keefe Group
+Keep
+Kids+
+Koala FM
+Kobo
+Ku FM
+Kuack Media
+Kuaishou
+Kugou
+Kugou KTV
+Kugou Live
+Kugou Ringtone
+Kugou Sing
+Kuwo
+Kuwo Boom
+Kuwo Juxing
+Kuwo KTV
+Kuwo Tingshu
+Kuwo Vedio
+Kuyin Ringtone
+Kwai
+LINE Music
+La Musica
+Last FM
+Lefit
+Lenovo Music
+Lenovo Sound
+Lequ Music
+Lickd
+Line Music (JP)
+Lissen
+Litup
+Lizhi FM
+Love Music
+Love Music (China Telecom)
+Lululemon
+Lutong
+MELON
+MGTV
+MOO
+MOOV
+MQA
+Mach by Mariposa
+Manbo
+Maxis
+Me2u Music
+MePlaylist
+Media Markt
+Medianet
+Medion
+Meishe
+Meitu
+Melon Kt
+Mi Tracks
+Migu Music
+Migu Music (China Mobile)
+Mixcloud
+Mixette
+Mixpixie
+Mixup Digital
+Mnet
+Moi Mir
+Momople
+Monkey3
+MoodAgent
+Motie
+Muserk
+Music Reports
+Music Worx
+MusicQubed
+MusicToday
+Musixmatch
+Muztube
+My Melo
+MyMelo
+MyMusic
+Mythical Games
+NEC
+Napster
+NatWest
+Naver
+Naver Vibe
+NetEase Cloud Music
+Netease Music
+Nile Air
+Nuuday
+Odnoklassniki
+Oga Dance (MoveWorld)
+Olleh+Genie
+Onkyo
+Onmobile US
+Open Live
+Orange France
+Overmax
+P.R.O. Agency
+PEX
+PEX Attribution Engine
+PPTV
+PURE ENERGY GO
+Pandora
+Peloton
+Perfect World Co.,Ltd
+Perfectpark
+Philippine Airlines
+Pikbest
+Pinterest
+Pizza Hut
+Play Network
+Pledge
+Plern
+Pono
+PortalDisc
+Pretzel Rocks
+Prodigium
+Psonar
+Psycle
+Pubbles
+Pulselocker
+Pure Music
+Puxin
+QNX CAR
+QNX CAR™
+QQ FM
+QQ Music
+Qantas
+Qianku
+Qianqian Music
+Qingting
+Qishui Music
+Qobuz
+Qub Musique
+RBS
+ROK mobile
+RabbitPre
+Rainbow Music
+Raku
+Rakuten
+Rakuten Music
+Rebelation
+Reload
+Resso
+Rhapsody
+Rhino
+Roblox
+Rockbot
+Roxi
+Rythm
+SENYU
+SUPERMONKEY
+Sainsburys
+Samsung Music
+Saturn
+SberZvuk
+Senzari
+Shazam
+Shiliu
+Shipingyingye
+Shishuo
+ShopTo
+Sina Video
+Sirius XM
+Slacker
+Slacker Radio
+Snack Video
+Snapchat
+Soda Music
+Sohu Video
+Sona
+Sonos
+Soribada
+Soundhound
+Soundmouse
+Soundtrack Your Brand
+Soundtrack by Twitch
+Spanish Broadcasting System
+Spinlet
+Spotify
+Stardtb
+Stellar
+Styngr
+SunExpress
+Sunrise
+Supernatural
+Swisscom
+T Star
+T-Mobile
+TDC
+TDC/TDC Mobile
+TELE2
+TIM Music
+TaiHua
+Taiwan Mobile
+Tango
+Taobao
+Taomailang
+Technics Tracks
+Tencent
+Tencent Video
+Tesla Music
+Thai Airways
+The Overflow
+Tidal
+Tigo
+TikTok
+TingTing FM
+Tmall
+Tonspion
+Top Music
+TouchTunes
+Toutiao
+Trackdrip
+Tradebit
+Traxsource
+Trebel
+Triller
+Triplay
+Tuned Global
+Tunewiki
+Tuokeshangmao
+Turnkey Corrections
+Turntable.fm
+Tuzhan
+Twitch
+U-Mobile
+UC
+Ucmba
+United Media Agency (UMA)
+VCG
+VEVO
+VISTOPIA
+VIVO Hi-Res
+VKontakte
+VL Group
+VUE
+ViaPath
+Viamaker
+Vibe
+Vibo Telecom
+Videoshow
+Viper HIFI
+Virgin Australia
+Vodafone
+WAYZ
+WEYV
+Walkgame
+Wasu
+Wasu TV
+We Sing
+WeChat
+WeSing
+Weibo Music
+Weishi
+Weltbild DE
+Whales
+Wo Music
+Wxduoduo
+Xiaomi Music
+Xiaoying
+Xigua Video
+Xinhua Zhiyun Technology Co.,Ltd.
+Xinpianchang
+Xinxun
+Xiquduoduo
+Xiumi
+Xiutang
+Xplore Music Stores
+Yandex
+Yingyintonghua
+Yiqixiu
+YouTube Music
+Youku&Tudou
+Zvooq
+aiyinsitanFM
+babubabu
+babytree
+baotu
+dajiang
+doubleTwist
+eMusic
+epub360
+fizy
+friDay
+gaoding
+hidooro
+hmv PLAY (Soliton)
+iFeng
+iHeart
+iMusica
+iQiyi & PPS
+iSHEJI
+iTunes
+iam+ Dial
+kelakela
+kuaijianji
+kugouzhibobanlv
+lrts
+mangguofm
+mobilcom-debitel
+mylafe
+nMusic
+ooopic
+tingxi
+wondershare
+xiaohongshu
+yesoul
+yunting
+territories Type:array string[] | null min length:  2 max length:  2 enum Example ["US", "CA"]
+
+*Release information Body ·UpdateReleaseMetadataRequest
+
+aiDocumentationCopy link to aiDocumentation Type:object Example {"fileName":"ai_proof.pdf","fileUrl":"https://bucket.s3.amazonaws.com/docs/ai.pdf"}
+fileName Type:string | null max length:  255 Example ai_proof.pdf
+fileUrl Type:string | null max length:  2048 Format:uri Example https://bucket.s3.amazonaws.com/docs/ai.pdf
+applePreorder link to applePreorder Type:boolean | null Example false
+applePreorderDate link to applePreorderDate Type:string | null Example 2026-03-28
+cLineC link to cLine Type:string | null max length:  120 Example 2026 Too Lost Records
+compressedArtwork link to compressedArtwork Type:string | null max length:  2048 Format:uri Example https://bucket.s3.amazonaws.com/artworks/a_small.jpg
+coverSongs link to coverSongs Type:array string[] | null max length:  255 Example ["Song A", "Song B"]
+coverUrl link to coverUrl Type:string | null max length:  2048 Format:uri Example https://bucket.s3.amazonaws.com/artworks/a.jpg
+cYear link to cYear Type:integer | null min:  1900 max:  2100 Example 2026
+isAiGenerated link to isAiGenerated Type:boolean | null Example true 
+label link to label Type:string | null max length:  120 Example Too Lost Records
+language link to language Type:string | null max length:  40 Example en
+licenseInfo link to licenseInfo Type:string | null max length:  500 Example Owned by artist and label.
+licenseType link to licenseType Type:string | null enum Example Copyright 
+values=
+Copyright
+Creative Commons
+CreativeCommons
+motionArt1x1 link to motionArt1x1 Type:array string[] | null Example {"url":"https://bucket.s3.amazonaws.com/motion/1.json","md5hash":"abc"}
+motionArt3x4y link to motionArt3x4 Type:array string[] | null Example {"url":"https://bucket.s3.amazonaws.com/motion/2.json","md5hash":"def"}
+originalReleaseDate link to originalReleaseDate Type:string | null Format:date Example 2025-01-01
+participantsCopy link to participants Type:array object[] | null 1… Example [{"name":"Nova Waves","artistId":123,"role":["primary"]}]
+artistId Type:integer | null min:  1 Example 123
+connect Type:object | null Example {"apple":{"url":"https://music.apple.com/artist/nova-waves/123456"},"spotify":{"url":"https://open.spotify.com/artist/1a2b3c"}}
+name Type:string max length:  120 Example Nova Waves
+role Type:array string[] 1… max length:  40 enum Example ["primary"]
+values=
+primary
+featuring
+remixer
+pLine link to pLine Type:string | null max length:  120 Example 2026 Too Lost Records
+primaryGenreC link to primaryGenre Type:string | null max length:  120 enum Example Alternative/Gothic
+values
+140 / Deep Dubstep / Grime
+50s/60s/Rock'n'Roll/Rhythm & Blues
+African
+Afro House
+Afro House (Afro / Latin, Afro Melodic, 3Step)
+Alternative
+Alternative/Experimental
+Alternative/Gothic
+Alternative/Grunge
+Alternative/Indie Pop
+Alternative/Indie Rock
+Alternative/Rock
+Amapiano
+Amapiano (Gqom)
+Ambient / Experimental
+Ambient/Drone
+Ambient/New Age
+Ambient/New Age/Meditation
+Audiobooks
+Balearic/Downtempo
+Bass
+Bass / Club
+Bass / Club (UK Funky, Global Club, Jersey Club, Juke/Footwork, Reggae/Dancehall)
+Bass House
+Blues
+Blues/Contemporary Blues
+Blues/New Orleans Blues
+Blues/Traditional Blues
+Brazilian Funk
+Brazilian Funk (Carioca Funk, Mandelao Funk, BH Funk, Melodic Funk)
+Breakbeat
+Breaks / Breakbeat / UK Bass
+Breaks / Breakbeat / UK Bass (Glitch Hop)
+Broken Beat/Nu Jazz/Nu Soul
+Caribbean
+Children's Music
+Children's Music/Classic
+Children's Music/Holiday
+Children's Music/Stories
+Classical
+Classical/Antique
+Classical/Baroque
+Classical/Chamber
+Classical/Concert
+Classical/Modern Compositions
+Classical/Opera
+Classical/Orchestral
+Classical/Piano
+Classical/Romantic
+Coldwave/Synth
+Comedy
+Country
+Country Dance
+Country Pop
+Country/Bluegrass
+Country/Contemporary
+Country/Honky Tonk
+Country/Nashville
+Country/Pop
+Country/Square Dance
+Dance
+Dance / Electro Pop
+Dance / Pop
+Dance / Pop (Afro Pop, Pop, Tropical House)
+Dancehall/Ragga/Reggaeton
+Deep Dubstep
+Deep Dubstep / Grime
+Deep Dubstep / Grime (Grime)
+Deep House
+Dirty Dubstep/Trap/Grime
+Disco/Nu-Disco
+DJ Tools
+DJ Tools (Loops, Acapellas, Battle Tools)
+DJ Tools/Acappellas/Scratch Records
+Downtempo
+Drum & Bass
+Drum & Bass (Liquid, Jump Up, Jungle, Deep, Halftime)
+Drum & Bass / Deep
+Drum & Bass / Halftime
+Drum & Bass / Jump Up
+Drum & Bass / Jungle
+Drum & Bass / Liquid
+Dub
+Dubstep
+Dubstep (Melodic Dubstep, Midtempo)
+Easy Listening
+Easy Listening/Bar Jazz/Cocktail
+Easy Listening/Bossa Nova
+Easy Listening/Lounge
+Easy Listening/Traditional
+Electro
+Electro (Classic / Detroit / Modern)
+Electro house/Electroclash
+Electronic
+Electronic/Acid House
+Electronic/Afro House
+Electronic/Breaks
+Electronic/Broken beat
+Electronic/Chill Out
+Electronic/Dance
+Electronic/Deep House
+Electronic/DJ Tools/Sample Packs
+Electronic/Downtempo - experimental
+Electronic/Drum & Bass
+Electronic/Dub/Reggae/Dancehall
+Electronic/Dubstep/Grime
+Electronic/Electro House
+Electronic/Glitch Hop
+Electronic/Hard Dance
+Electronic/Hard Techno
+Electronic/Hardcore
+Electronic/Hardstyle
+Electronic/House
+Electronic/Indie Dance/Nu Disco
+Electronic/Jazz
+Electronic/Minimal
+Electronic/Pop Trance
+Electronic/Progressive House
+Electronic/Psy-Trance
+Electronic/Tech House
+Electronic/Techno
+Electronic/Trance
+Electronic/Trip Hop
+Electronica
+Eletrofunk
+Euro Dance/Pop Dance
+Experimental
+Experimental/Electronic
+Fitness&Workout
+Flamenco
+Folk
+Footwork/Juke
+Funk Soul & Jazz
+Funk/R&B
+Funk/Rare Groove
+Funky House
+Funky/Club House
+Gabba
+Hard Dance / Hardcore / Neo Rave
+Hard Dance / Hardcore / Neo Rave (Hardstyle, Hard House, Uptempo, Terror, UK/Happy Hardcore, Frenchcore, Neo Rave)
+Hard House
+Hard Techno
+Hard Trance
+Hardcore/hardstyle
+Hardstyle/Jumpstyle
+Hip Hop/R&B
+Hip-Hop
+Hip-Hop/Rap
+Hip-Hop/Rap/Gangsta & Hardcore
+Holiday/Christmas
+House
+House (Acid, Soulful)
+Indie Dance
+Indie Dance (Dark Disco)
+Indie Rock
+Indie/Alternative
+Industrial/Noise
+Inspirational
+International
+Jackin House
+Jazz
+Jazz/Bebop
+Jazz/Big Band
+Jazz/Brazilian Jazz
+Jazz/Classic
+Jazz/Contemporary
+Jazz/Dixie/Rag Time
+Jazz/Free Jazz
+Jazz/Fusion
+Jazz/Jazz Funk
+Jazz/Latin Jazz
+Jazz/Nu Jazz/Acid Jazz
+Jazz/Smooth Jazz
+Jazz/Swing
+Jazz/Traditional
+Jazz/World
+Karaoke
+Latin
+Latin/Bachata
+Latin/Banda
+Latin/Big Band
+Latin/Bolero
+Latin/Bossa Nova
+Latin/Brasil/Tropical
+Latin/Christian
+Latin/Conjunto
+Latin/Corridos
+Latin/Cuban
+Latin/Cumbia
+Latin/Duranguense
+Latin/Electronica
+Latin/Grupero
+Latin/Hip Hop
+Latin/Latin Rap
+Latin/Mambo
+Latin/Mariachi
+Latin/Norteño
+Latin/Pop
+Latin/Ranchera
+Latin/Reggaeton
+Latin/Regional Mexicano
+Latin/Rock en Español
+Latin/Salsa
+Latin/Salsa/Merengue
+Latin/Sierreño
+Latin/Sonidero
+Latin/Tango
+Latin/Tejano
+Latin/Tierra Caliente
+Latin/Traditional Mexican
+Latin/Vallenato
+Leftfield
+Mainstage
+Mainstage (Big Room, Electro House, Future House, Speed House, Future Rave)
+Melodic House & Techno
+Melodic House & Techno (Melodic House, Melodic Techno)
+Metal
+Minimal / Deep Tech
+Minimal / Deep Tech (Bounce, Deep Tech)
+Minimal House/Tech House
+New Age
+Nu Disco / Disco
+Nu Disco / Disco (Funk / Soul, Italo)
+Organic House
+Organic House / Downtempo
+Pop
+Pop Trance
+Pop/Contemporary/Adult
+Pop/J-Pop
+Pop/K-Pop
+Pop/Mandopop
+Pop/Singer Songwriter
+Progressive House
+Psy‑Trance
+Psy‑Trance (Full‑On, Progressive Psy, Psychedelic, Dark & Forest, Goa Trance, Psycore & Hi‑Tech)
+Psychedelic Trance/Goa Trance
+Punk
+Punk & Pop Punk
+R&B
+Reggae
+Reggae Classics/Oldies/Ska
+Reggae/Dancehall/Ska
+Rock
+Rock (All)
+Rock/Brit-Pop
+Rock/Classic
+Rock/Glam Rock
+Rock/Hard Rock/Heavy Metal
+Rock/Heavy Metal
+Rock/Progressive
+Rock/Rock 'n' Roll
+Rock/Singer/Songwriter
+Roots Reggae/Lovers Rock/One Drop
+Scouse House/Bouncy House
+Ska
+Soul
+Soundtrack
+Soundtrack/Anime
+Soundtrack/Musical
+Soundtrack/TV
+Soundtracks
+Spiritual
+Spiritual/Christian
+Spiritual/Gospel
+Spiritual/Gregorian
+Spiritual/India
+Spiritual/Judaica
+Spiritual/World
+Spoken Word/Speeches
+Tech House
+Tech House (Latin Tech)
+Techno
+Techno (All)
+Techno (Peak Time / Driving)
+Techno (Peak Time / Driving) (Driving, Peak Time)
+Techno (Raw / Deep / Hypnotic)
+Techno (Raw / Deep / Hypnotic) (Broken, Deep / Hypnotic, Dub, EBM, Raw)
+Trance (Main Floor)
+Trance (Main Floor) (Progressive Trance, Tech Trance, Uplifting Trance, Vocal Trance, Hard Trance)
+Trance (Raw / Deep / Hypnotic)
+Trance (Raw / Deep / Hypnotic) (Raw Trance, Deep Trance, Hypnotic Trance)
+Trance Music
+Trap / Wave
+UK Garage
+UK Garage / Bassline
+UK Hardcore/Nu Rave
+Uplifting Trance/Progressive Trance
+Vocal/Nostalgia
+World
+World/African
+World/Afro-Beat
+World/Afro-Pop
+World/Americas/Argentina
+World/Americas/Brazilian
+World/Americas/Brazilian/Axé
+World/Americas/Brazilian/Black Music
+World/Americas/Brazilian/Bossa Nova
+World/Americas/Brazilian/Chorinho
+World/Americas/Brazilian/Folk
+World/Americas/Brazilian/Funk Carioca
+World/Americas/Brazilian/Marchinha
+World/Americas/Brazilian/MPB
+World/Americas/Brazilian/Pagode
+World/Americas/Brazilian/Samba
+World/Americas/Brazilian/Samba-de-Raiz
+World/Americas/Brazilian/Samba-enredo
+World/Americas/Brazilian/Samba-Rock
+World/Americas/Brazilian/Sambalanço
+World/Americas/Cajun-Creole
+World/Americas/Calypso
+World/Americas/Colombia
+World/Americas/Cuba-Caribbean
+World/Americas/Mexican
+World/Americas/North-American
+World/Americas/Panama
+World/Americas/Peru
+World/Americas/South-American
+World/Arabic
+World/Asian/Central Asia
+World/Asian/China
+World/Asian/India
+World/Asian/India-Bollywood
+World/Asian/Japan
+World/Asian/South Asia
+World/Australian/Pacific
+World/Ethnic
+World/Europe/Eastern
+World/Europe/French
+World/Europe/German
+World/Europe/Northern
+World/Europe/Southern
+World/Europe/Spain
+World/Europe/Western
+World/Mediterranean/Greece
+World/Mediterranean/Italy
+World/Mediterranean/Spain
+World/Russian
+World/Worldbeat
+releaseDate link to releaseDate Type:string | null Format:date Example 2026-04-04
+releaseTime link to releaseTime Type:string | null Example 05:55
+remixTitle link to remixTitle Type:string | null max length:  120 Example Nova Waves Remix
+review link to review Type:object Example {"note":"Contains a cover song clearance.","fileName":"clearance.pdf","fileUrl":"https://bucket.s3.amazonaws.com/review/clearance.pdf"}
+fileName Type:string | null max length:  255 Example clearance.pdf
+fileType Type:string | null max length:  40 Example pdf
+fileUrl Type:string | null max length:  2048 Format:uri Example https://bucket.s3.amazonaws.com/review/clearance.pdf
+note Type:string | null max length:  4000 Example Contains a cover song clearance.
+secondaryGenre link to secondaryGenre Type:string | null max length:  120 enum Example Alternative/Grunge
+140 / Deep Dubstep / Grime
+50s/60s/Rock'n'Roll/Rhythm & Blues
+African
+Afro House
+Afro House (Afro / Latin, Afro Melodic, 3Step)
+Alternative
+Alternative/Experimental
+Alternative/Gothic
+Alternative/Grunge
+Alternative/Indie Pop
+Alternative/Indie Rock
+Alternative/Rock
+Amapiano
+Amapiano (Gqom)
+Ambient / Experimental
+Ambient/Drone
+Ambient/New Age
+Ambient/New Age/Meditation
+Audiobooks
+Balearic/Downtempo
+Bass
+Bass / Club
+Bass / Club (UK Funky, Global Club, Jersey Club, Juke/Footwork, Reggae/Dancehall)
+Bass House
+Blues
+Blues/Contemporary Blues
+Blues/New Orleans Blues
+Blues/Traditional Blues
+Brazilian Funk
+Brazilian Funk (Carioca Funk, Mandelao Funk, BH Funk, Melodic Funk)
+Breakbeat
+Breaks / Breakbeat / UK Bass
+Breaks / Breakbeat / UK Bass (Glitch Hop)
+Broken Beat/Nu Jazz/Nu Soul
+Caribbean
+Children's Music
+Children's Music/Classic
+Children's Music/Holiday
+Children's Music/Stories
+Classical
+Classical/Antique
+Classical/Baroque
+Classical/Chamber
+Classical/Concert
+Classical/Modern Compositions
+Classical/Opera
+Classical/Orchestral
+Classical/Piano
+Classical/Romantic
+Coldwave/Synth
+Comedy
+Country
+Country Dance
+Country Pop
+Country/Bluegrass
+Country/Contemporary
+Country/Honky Tonk
+Country/Nashville
+Country/Pop
+Country/Square Dance
+Dance
+Dance / Electro Pop
+Dance / Pop
+Dance / Pop (Afro Pop, Pop, Tropical House)
+Dancehall/Ragga/Reggaeton
+Deep Dubstep
+Deep Dubstep / Grime
+Deep Dubstep / Grime (Grime)
+Deep House
+Dirty Dubstep/Trap/Grime
+Disco/Nu-Disco
+DJ Tools
+DJ Tools (Loops, Acapellas, Battle Tools)
+DJ Tools/Acappellas/Scratch Records
+Downtempo
+Drum & Bass
+Drum & Bass (Liquid, Jump Up, Jungle, Deep, Halftime)
+Drum & Bass / Deep
+Drum & Bass / Halftime
+Drum & Bass / Jump Up
+Drum & Bass / Jungle
+Drum & Bass / Liquid
+Dub
+Dubstep
+Dubstep (Melodic Dubstep, Midtempo)
+Easy Listening
+Easy Listening/Bar Jazz/Cocktail
+Easy Listening/Bossa Nova
+Easy Listening/Lounge
+Easy Listening/Traditional
+Electro
+Electro (Classic / Detroit / Modern)
+Electro house/Electroclash
+Electronic
+Electronic/Acid House
+Electronic/Afro House
+Electronic/Breaks
+Electronic/Broken beat
+Electronic/Chill Out
+Electronic/Dance
+Electronic/Deep House
+Electronic/DJ Tools/Sample Packs
+Electronic/Downtempo - experimental
+Electronic/Drum & Bass
+Electronic/Dub/Reggae/Dancehall
+Electronic/Dubstep/Grime
+Electronic/Electro House
+Electronic/Glitch Hop
+Electronic/Hard Dance
+Electronic/Hard Techno
+Electronic/Hardcore
+Electronic/Hardstyle
+Electronic/House
+Electronic/Indie Dance/Nu Disco
+Electronic/Jazz
+Electronic/Minimal
+Electronic/Pop Trance
+Electronic/Progressive House
+Electronic/Psy-Trance
+Electronic/Tech House
+Electronic/Techno
+Electronic/Trance
+Electronic/Trip Hop
+Electronica
+Eletrofunk
+Euro Dance/Pop Dance
+Experimental
+Experimental/Electronic
+Fitness&Workout
+Flamenco
+Folk
+Footwork/Juke
+Funk Soul & Jazz
+Funk/R&B
+Funk/Rare Groove
+Funky House
+Funky/Club House
+Gabba
+Hard Dance / Hardcore / Neo Rave
+Hard Dance / Hardcore / Neo Rave (Hardstyle, Hard House, Uptempo, Terror, UK/Happy Hardcore, Frenchcore, Neo Rave)
+Hard House
+Hard Techno
+Hard Trance
+Hardcore/hardstyle
+Hardstyle/Jumpstyle
+Hip Hop/R&B
+Hip-Hop
+Hip-Hop/Rap
+Hip-Hop/Rap/Gangsta & Hardcore
+Holiday/Christmas
+House
+House (Acid, Soulful)
+Indie Dance
+Indie Dance (Dark Disco)
+Indie Rock
+Indie/Alternative
+Industrial/Noise
+Inspirational
+International
+Jackin House
+Jazz
+Jazz/Bebop
+Jazz/Big Band
+Jazz/Brazilian Jazz
+Jazz/Classic
+Jazz/Contemporary
+Jazz/Dixie/Rag Time
+Jazz/Free Jazz
+Jazz/Fusion
+Jazz/Jazz Funk
+Jazz/Latin Jazz
+Jazz/Nu Jazz/Acid Jazz
+Jazz/Smooth Jazz
+Jazz/Swing
+Jazz/Traditional
+Jazz/World
+Karaoke
+Latin
+Latin/Bachata
+Latin/Banda
+Latin/Big Band
+Latin/Bolero
+Latin/Bossa Nova
+Latin/Brasil/Tropical
+Latin/Christian
+Latin/Conjunto
+Latin/Corridos
+Latin/Cuban
+Latin/Cumbia
+Latin/Duranguense
+Latin/Electronica
+Latin/Grupero
+Latin/Hip Hop
+Latin/Latin Rap
+Latin/Mambo
+Latin/Mariachi
+Latin/Norteño
+Latin/Pop
+Latin/Ranchera
+Latin/Reggaeton
+Latin/Regional Mexicano
+Latin/Rock en Español
+Latin/Salsa
+Latin/Salsa/Merengue
+Latin/Sierreño
+Latin/Sonidero
+Latin/Tango
+Latin/Tejano
+Latin/Tierra Caliente
+Latin/Traditional Mexican
+Latin/Vallenato
+Leftfield
+Mainstage
+Mainstage (Big Room, Electro House, Future House, Speed House, Future Rave)
+Melodic House & Techno
+Melodic House & Techno (Melodic House, Melodic Techno)
+Metal
+Minimal / Deep Tech
+Minimal / Deep Tech (Bounce, Deep Tech)
+Minimal House/Tech House
+New Age
+Nu Disco / Disco
+Nu Disco / Disco (Funk / Soul, Italo)
+Organic House
+Organic House / Downtempo
+Pop
+Pop Trance
+Pop/Contemporary/Adult
+Pop/J-Pop
+Pop/K-Pop
+Pop/Mandopop
+Pop/Singer Songwriter
+Progressive House
+Psy‑Trance
+Psy‑Trance (Full‑On, Progressive Psy, Psychedelic, Dark & Forest, Goa Trance, Psycore & Hi‑Tech)
+Psychedelic Trance/Goa Trance
+Punk
+Punk & Pop Punk
+R&B
+Reggae
+Reggae Classics/Oldies/Ska
+Reggae/Dancehall/Ska
+Rock
+Rock (All)
+Rock/Brit-Pop
+Rock/Classic
+Rock/Glam Rock
+Rock/Hard Rock/Heavy Metal
+Rock/Heavy Metal
+Rock/Progressive
+Rock/Rock 'n' Roll
+Rock/Singer/Songwriter
+Roots Reggae/Lovers Rock/One Drop
+Scouse House/Bouncy House
+Ska
+Soul
+Soundtrack
+Soundtrack/Anime
+Soundtrack/Musical
+Soundtrack/TV
+Soundtracks
+Spiritual
+Spiritual/Christian
+Spiritual/Gospel
+Spiritual/Gregorian
+Spiritual/India
+Spiritual/Judaica
+Spiritual/World
+Spoken Word/Speeches
+Tech House
+Tech House (Latin Tech)
+Techno
+Techno (All)
+Techno (Peak Time / Driving)
+Techno (Peak Time / Driving) (Driving, Peak Time)
+Techno (Raw / Deep / Hypnotic)
+Techno (Raw / Deep / Hypnotic) (Broken, Deep / Hypnotic, Dub, EBM, Raw)
+Trance (Main Floor)
+Trance (Main Floor) (Progressive Trance, Tech Trance, Uplifting Trance, Vocal Trance, Hard Trance)
+Trance (Raw / Deep / Hypnotic)
+Trance (Raw / Deep / Hypnotic) (Raw Trance, Deep Trance, Hypnotic Trance)
+Trance Music
+Trap / Wave
+UK Garage
+UK Garage / Bassline
+UK Hardcore/Nu Rave
+Uplifting Trance/Progressive Trance
+Vocal/Nostalgia
+World
+World/African
+World/Afro-Beat
+World/Afro-Pop
+World/Americas/Argentina
+World/Americas/Brazilian
+World/Americas/Brazilian/Axé
+World/Americas/Brazilian/Black Music
+World/Americas/Brazilian/Bossa Nova
+World/Americas/Brazilian/Chorinho
+World/Americas/Brazilian/Folk
+World/Americas/Brazilian/Funk Carioca
+World/Americas/Brazilian/Marchinha
+World/Americas/Brazilian/MPB
+World/Americas/Brazilian/Pagode
+World/Americas/Brazilian/Samba
+World/Americas/Brazilian/Samba-de-Raiz
+World/Americas/Brazilian/Samba-enredo
+World/Americas/Brazilian/Samba-Rock
+World/Americas/Brazilian/Sambalanço
+World/Americas/Cajun-Creole
+World/Americas/Calypso
+World/Americas/Colombia
+World/Americas/Cuba-Caribbean
+World/Americas/Mexican
+World/Americas/North-American
+World/Americas/Panama
+World/Americas/Peru
+World/Americas/South-American
+World/Arabic
+World/Asian/Central Asia
+World/Asian/China
+World/Asian/India
+World/Asian/India-Bollywood
+World/Asian/Japan
+World/Asian/South Asia
+World/Australian/Pacific
+World/Ethnic
+World/Europe/Eastern
+World/Europe/French
+World/Europe/German
+World/Europe/Northern
+World/Europe/Southern
+World/Europe/Spain
+World/Europe/Western
+World/Mediterranean/Greece
+World/Mediterranean/Italy
+World/Mediterranean/Spain
+World/Russian
+timeZone link to timeZone Type:string | null max length:  80 Example Pacific/Niue
+title link to title Type:string | null max length:  120 Example Midnight Echoes
+type link to type Type:string | null enum Example Album
+values
+Single
+EP
+Album
+Compilation
+MusicVideo
+Music Video
+upc link to upc Type:string | null Example 123456789012
+version link to version Type:string | null max length:  120 Example Deluxe
+
+*Create track upload URL Body ·CreateTrackUploadUrlRequest
+
+contentTypeCopy link to contentType enum const:  audio/flac required Example audio/flac
+fileName link to fileName Type:string max length:  255 required pattern \.flac$ Example track-main.flac
+kind link to kind Type:string enum required Example audio
+values=
+audio
+instrumental
+dolby
+
+*Update single track file Body ·ReplaceSingleTrackFileRequest
+
+fileKey link to fileKey Type:string max length:  512required Example pattern ^external\/tracks\/v1\/releases\/\d+\/(audio|instrumental|dolby)\/[A-Za-z0-9\-_]+\.(flac)$ Example external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac
+kind link to kind Type:string enum required Example audio
+values=
+audio
+instrumental
+dolby
+
+*Validate ISRC​ Body ·ValidateIsrcRequest
+
+isrc link to isrc Type:string required Example USABC1234567
+
+*Release tracks Body ·ReplaceReleaseTracksRequest
+
+tracks link to tracks Type:array object[] 1… required Example [{"title":"Track One","language":"en","audioFileKey":"external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac","instrumentalFileKey":"external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac","dolbyFileKey":"external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac","artists":[{"name":"Nova Waves","role":["primary"]}],"writers":[{"name":"John Doe","role":["instrumentalist"]},{"name":"Jane Roe","role":["lyricist"]}]}]
+artists Type:array object[] 1… required Example [{"name":"Nova Waves","role":["primary"],"default":true}]
+name Type:string max length: 120 required Example Nova Waves
+role Type:array string[] 1… max length: 40 required Example ["primary"]
+connect Type:object | null Example {"apple":{"url":"https://music.apple.com/artist/id"},"spotify":{"url":"https://open.spotify.com/artist/id"}}
+apple Type:object url Type:string | null max length:  2048 Format:uri Example https://music.apple.com/artist/id
+spotify Type:object url Type:string | null max length:  2048 Format:uri Example https://open.spotify.com/artist/id
+default Type:boolean | null Example true
+audioFileKey Type:string max length:  512 required Example pattern ^external\/tracks\/v1\/releases\/\d+\/audio\/[A-Za-z0-9\-_]+\.(flac)$ Example external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac
+language Type:string max length:  40 required Example en
+title Type:string max length:  120 required Example Track One
+writers Type:array object[] 1… required Example [{"name":"John Doe","role":["instrumentalist"]}, {"name":"Jane Roe","role":["lyricist"]}]
+name Type:string max length:  120 required Example John Doe
+aiAssisted Type:boolean | null Example true
+aiAssistedFileName Type:string | null max length:  255 Example track1_ai.pdf
+aiAssistedFileUrl Type:string | null max length:  2048 Format:uri https://bucket.s3.amazonaws.com/docs/track1_ai.pdf
+credits Type:array object[] | null Example [{"name":"Jane Smith","role":["producer"]}]
+name Type:string max length:  120 Example Jane Smith
+role Type:array string[] 1… max length:  40 Example ["producer"]
+dolbyFileKey Type:string | null max length:  512 Example pattern ^external\/tracks\/v1\/releases\/\d+\/dolby\/[A-Za-z0-9\-_]+\.(flac)$ Example external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac
+instrumentalFileKey Type:string | null max length:  512 Pattern ^external\/tracks\/v1\/releases\/\d+\/instrumental\/[A-Za-z0-9\-_]+\.(flac)$ Example external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac
+isrc Type:string | null Example USABC1234567
+iswc Type:string | null max length:  32 Example T0345246801
+linerNote Type:string | null max length:  2000 Example Recorded in New York.
+lyrics Type:object | null {"content":"Lyrics text","explicit":false,"cleanVersion":true}
+cleanVersion Type:boolean | null Example true
+content Type:string | null max length:  6499 Example Lyrics text
+explicit Type:boolean | null Example false
+tiktokStartTime Type:string | null Example 00:30
+version Type:string | null max length:  120 Example Extended Mix
+
+*Validate UPC​ Body ·ValidateUpcRequest
+
+upc link to upc Type:string required Example 123456789012
+releaseId link to releaseId Type:integer | null min:  1 Example 73518
