@@ -1,0 +1,6262 @@
+1.CREATE RELEASE
+
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "examples": [
+            73518
+          ]
+        },
+        "type": {
+          "examples": [
+            "Album"
+          ],
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "MusicVideo"
+              ]
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "in_review",
+            "live",
+            "takedown_pending",
+            "takedown_complete"
+          ],
+          "examples": [
+            "draft"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "API Validation Test Release"
+          ]
+        },
+        "upc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "catalogNumber": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "TOOLOST3000073518"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "remixTitle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "coverSongs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {}
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela"
+          ]
+        },
+        "primaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Gothic"
+          ]
+        },
+        "secondaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Grunge"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "en"
+          ]
+        },
+        "releaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026-04-04"
+          ]
+        },
+        "originalReleaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "applePreorder": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "applePreorderDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "licenseType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Copyright"
+          ]
+        },
+        "licenseInfo": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "cYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "cLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela cline"
+          ]
+        },
+        "pYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "pLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela pline"
+          ]
+        },
+        "coverUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork.jpg"
+          ]
+        },
+        "compressedArtwork": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork_small.jpg"
+          ]
+        },
+        "isAiGeneratedArtwork": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "aiContentApproved": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "participants": {
+          "type": "string"
+        },
+        "releaseTime": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "time": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeZone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "time",
+            "timeZone"
+          ]
+        },
+        "motionArt": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "motionArt1x1": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "motionArt3x4": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            }
+          },
+          "required": [
+            "motionArt1x1",
+            "motionArt3x4"
+          ]
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "youtube": {
+              "type": "boolean"
+            },
+            "facebook": {
+              "type": "boolean"
+            },
+            "soundcloud": {
+              "type": "boolean"
+            },
+            "soundExchange": {
+              "type": "boolean"
+            },
+            "beatPort": {
+              "type": "boolean"
+            },
+            "beatPortHasAccount": {
+              "type": "boolean"
+            },
+            "beatPortLink": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "beatPortLabelLogo": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "trackLibs": {
+              "type": "boolean"
+            },
+            "hook": {
+              "type": "boolean"
+            },
+            "lyricfind": {
+              "type": "boolean"
+            },
+            "even": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "youtube",
+            "facebook",
+            "soundcloud",
+            "soundExchange",
+            "beatPort",
+            "beatPortHasAccount",
+            "beatPortLink",
+            "beatPortLabelLogo",
+            "trackLibs",
+            "hook",
+            "lyricfind",
+            "even"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "territories": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "review": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "note",
+            "fileName",
+            "fileUrl",
+            "fileType"
+          ]
+        },
+        "aiDocumentation": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "fileName",
+            "fileUrl"
+          ]
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "examples": [
+                  98341
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Track One"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Extended Mix"
+                ]
+              },
+              "linerNote": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Recorded in New York."
+                ]
+              },
+              "isrc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "USABC1234567"
+                ]
+              },
+              "iswc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "T0345246801"
+                ]
+              },
+              "language": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "en"
+                ]
+              },
+              "audioFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac"
+                ]
+              },
+              "audioUrl": {
+                "type": "string"
+              },
+              "instrumentalFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac"
+                ]
+              },
+              "instrumentalUrl": {
+                "type": "string"
+              },
+              "dolbyFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac"
+                ]
+              },
+              "dolbyUrl": {
+                "type": "string"
+              },
+              "tiktokStartTime": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "00:30"
+                ]
+              },
+              "lyrics": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "explicit": {
+                    "type": "boolean"
+                  },
+                  "cleanVersion": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "content",
+                  "explicit",
+                  "cleanVersion"
+                ]
+              },
+              "aiAssisted": {
+                "type": "boolean",
+                "examples": [
+                  true
+                ]
+              },
+              "aiAssistedFileUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "aiAssistedFileName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artists": {
+                "type": "string"
+              },
+              "writers": {
+                "type": "string"
+              },
+              "credits": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "version",
+              "linerNote",
+              "isrc",
+              "iswc",
+              "language",
+              "audioFileKey",
+              "audioUrl",
+              "instrumentalFileKey",
+              "instrumentalUrl",
+              "dolbyFileKey",
+              "dolbyUrl",
+              "tiktokStartTime",
+              "lyrics",
+              "aiAssisted",
+              "aiAssistedFileUrl",
+              "aiAssistedFileName",
+              "artists",
+              "writers",
+              "credits",
+              "createdAt",
+              "updatedAt"
+            ],
+            "title": "TrackResource"
+          }
+        },
+        "video": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "videoUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "md5hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "videoType": {
+              "type": "string"
+            },
+            "ageRestriction": {
+              "type": "string"
+            },
+            "isCoverVersion": {
+              "type": "boolean"
+            },
+            "referenceUpc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "referenceIsrc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "metadata": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "delivery": {
+              "type": "object",
+              "properties": {
+                "appleMusic": {
+                  "type": "boolean"
+                },
+                "vevo": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "appleMusic",
+                "vevo"
+              ]
+            },
+            "participants": {
+              "type": "string"
+            },
+            "writers": {
+              "type": "string"
+            },
+            "credits": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "videoUrl",
+            "md5hash",
+            "videoType",
+            "ageRestriction",
+            "isCoverVersion",
+            "referenceUpc",
+            "referenceIsrc",
+            "metadata",
+            "delivery",
+            "participants",
+            "writers",
+            "credits"
+          ]
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "title",
+        "upc",
+        "catalogNumber",
+        "version",
+        "remixTitle",
+        "coverSongs",
+        "label",
+        "primaryGenre",
+        "secondaryGenre",
+        "language",
+        "releaseDate",
+        "originalReleaseDate",
+        "applePreorder",
+        "applePreorderDate",
+        "licenseType",
+        "licenseInfo",
+        "cYear",
+        "cLine",
+        "pYear",
+        "pLine",
+        "coverUrl",
+        "compressedArtwork",
+        "isAiGeneratedArtwork",
+        "aiContentApproved",
+        "participants",
+        "releaseTime",
+        "motionArt",
+        "delivery",
+        "platforms",
+        "territories",
+        "review",
+        "aiDocumentation",
+        "tracks",
+        "video",
+        "submittedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "ReleaseResource"
+    }
+  },
+  "required": [
+    "data"
+  ]
+}
+
+2. SUBMIT RELEASES
+
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "examples": [
+            73518
+          ]
+        },
+        "type": {
+          "examples": [
+            "Album"
+          ],
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "MusicVideo"
+              ]
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "in_review",
+            "live",
+            "takedown_pending",
+            "takedown_complete"
+          ],
+          "examples": [
+            "draft"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "API Validation Test Release"
+          ]
+        },
+        "upc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "catalogNumber": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "TOOLOST3000073518"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "remixTitle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "coverSongs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {}
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela"
+          ]
+        },
+        "primaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Gothic"
+          ]
+        },
+        "secondaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Grunge"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "en"
+          ]
+        },
+        "releaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026-04-04"
+          ]
+        },
+        "originalReleaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "applePreorder": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "applePreorderDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "licenseType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Copyright"
+          ]
+        },
+        "licenseInfo": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "cYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "cLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela cline"
+          ]
+        },
+        "pYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "pLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela pline"
+          ]
+        },
+        "coverUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork.jpg"
+          ]
+        },
+        "compressedArtwork": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork_small.jpg"
+          ]
+        },
+        "isAiGeneratedArtwork": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "aiContentApproved": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "participants": {
+          "type": "string"
+        },
+        "releaseTime": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "time": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeZone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "time",
+            "timeZone"
+          ]
+        },
+        "motionArt": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "motionArt1x1": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "motionArt3x4": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            }
+          },
+          "required": [
+            "motionArt1x1",
+            "motionArt3x4"
+          ]
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "youtube": {
+              "type": "boolean"
+            },
+            "facebook": {
+              "type": "boolean"
+            },
+            "soundcloud": {
+              "type": "boolean"
+            },
+            "soundExchange": {
+              "type": "boolean"
+            },
+            "beatPort": {
+              "type": "boolean"
+            },
+            "beatPortHasAccount": {
+              "type": "boolean"
+            },
+            "beatPortLink": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "beatPortLabelLogo": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "trackLibs": {
+              "type": "boolean"
+            },
+            "hook": {
+              "type": "boolean"
+            },
+            "lyricfind": {
+              "type": "boolean"
+            },
+            "even": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "youtube",
+            "facebook",
+            "soundcloud",
+            "soundExchange",
+            "beatPort",
+            "beatPortHasAccount",
+            "beatPortLink",
+            "beatPortLabelLogo",
+            "trackLibs",
+            "hook",
+            "lyricfind",
+            "even"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "territories": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "review": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "note",
+            "fileName",
+            "fileUrl",
+            "fileType"
+          ]
+        },
+        "aiDocumentation": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "fileName",
+            "fileUrl"
+          ]
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "examples": [
+                  98341
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Track One"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Extended Mix"
+                ]
+              },
+              "linerNote": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Recorded in New York."
+                ]
+              },
+              "isrc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "USABC1234567"
+                ]
+              },
+              "iswc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "T0345246801"
+                ]
+              },
+              "language": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "en"
+                ]
+              },
+              "audioFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac"
+                ]
+              },
+              "audioUrl": {
+                "type": "string"
+              },
+              "instrumentalFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac"
+                ]
+              },
+              "instrumentalUrl": {
+                "type": "string"
+              },
+              "dolbyFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac"
+                ]
+              },
+              "dolbyUrl": {
+                "type": "string"
+              },
+              "tiktokStartTime": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "00:30"
+                ]
+              },
+              "lyrics": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "explicit": {
+                    "type": "boolean"
+                  },
+                  "cleanVersion": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "content",
+                  "explicit",
+                  "cleanVersion"
+                ]
+              },
+              "aiAssisted": {
+                "type": "boolean",
+                "examples": [
+                  true
+                ]
+              },
+              "aiAssistedFileUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "aiAssistedFileName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artists": {
+                "type": "string"
+              },
+              "writers": {
+                "type": "string"
+              },
+              "credits": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "version",
+              "linerNote",
+              "isrc",
+              "iswc",
+              "language",
+              "audioFileKey",
+              "audioUrl",
+              "instrumentalFileKey",
+              "instrumentalUrl",
+              "dolbyFileKey",
+              "dolbyUrl",
+              "tiktokStartTime",
+              "lyrics",
+              "aiAssisted",
+              "aiAssistedFileUrl",
+              "aiAssistedFileName",
+              "artists",
+              "writers",
+              "credits",
+              "createdAt",
+              "updatedAt"
+            ],
+            "title": "TrackResource"
+          }
+        },
+        "video": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "videoUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "md5hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "videoType": {
+              "type": "string"
+            },
+            "ageRestriction": {
+              "type": "string"
+            },
+            "isCoverVersion": {
+              "type": "boolean"
+            },
+            "referenceUpc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "referenceIsrc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "metadata": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "delivery": {
+              "type": "object",
+              "properties": {
+                "appleMusic": {
+                  "type": "boolean"
+                },
+                "vevo": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "appleMusic",
+                "vevo"
+              ]
+            },
+            "participants": {
+              "type": "string"
+            },
+            "writers": {
+              "type": "string"
+            },
+            "credits": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "videoUrl",
+            "md5hash",
+            "videoType",
+            "ageRestriction",
+            "isCoverVersion",
+            "referenceUpc",
+            "referenceIsrc",
+            "metadata",
+            "delivery",
+            "participants",
+            "writers",
+            "credits"
+          ]
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "title",
+        "upc",
+        "catalogNumber",
+        "version",
+        "remixTitle",
+        "coverSongs",
+        "label",
+        "primaryGenre",
+        "secondaryGenre",
+        "language",
+        "releaseDate",
+        "originalReleaseDate",
+        "applePreorder",
+        "applePreorderDate",
+        "licenseType",
+        "licenseInfo",
+        "cYear",
+        "cLine",
+        "pYear",
+        "pLine",
+        "coverUrl",
+        "compressedArtwork",
+        "isAiGeneratedArtwork",
+        "aiContentApproved",
+        "participants",
+        "releaseTime",
+        "motionArt",
+        "delivery",
+        "platforms",
+        "territories",
+        "review",
+        "aiDocumentation",
+        "tracks",
+        "video",
+        "submittedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "ReleaseResource"
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "data",
+    "message"
+  ]
+}
+
+3. RELEASE DELIVERY
+
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "examples": [
+            73518
+          ]
+        },
+        "type": {
+          "examples": [
+            "Album"
+          ],
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "MusicVideo"
+              ]
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "in_review",
+            "live",
+            "takedown_pending",
+            "takedown_complete"
+          ],
+          "examples": [
+            "draft"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "API Validation Test Release"
+          ]
+        },
+        "upc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "catalogNumber": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "TOOLOST3000073518"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "remixTitle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "coverSongs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {}
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela"
+          ]
+        },
+        "primaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Gothic"
+          ]
+        },
+        "secondaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Grunge"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "en"
+          ]
+        },
+        "releaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026-04-04"
+          ]
+        },
+        "originalReleaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "applePreorder": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "applePreorderDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "licenseType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Copyright"
+          ]
+        },
+        "licenseInfo": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "cYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "cLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela cline"
+          ]
+        },
+        "pYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "pLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela pline"
+          ]
+        },
+        "coverUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork.jpg"
+          ]
+        },
+        "compressedArtwork": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork_small.jpg"
+          ]
+        },
+        "isAiGeneratedArtwork": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "aiContentApproved": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "participants": {
+          "type": "string"
+        },
+        "releaseTime": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "time": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeZone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "time",
+            "timeZone"
+          ]
+        },
+        "motionArt": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "motionArt1x1": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "motionArt3x4": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            }
+          },
+          "required": [
+            "motionArt1x1",
+            "motionArt3x4"
+          ]
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "youtube": {
+              "type": "boolean"
+            },
+            "facebook": {
+              "type": "boolean"
+            },
+            "soundcloud": {
+              "type": "boolean"
+            },
+            "soundExchange": {
+              "type": "boolean"
+            },
+            "beatPort": {
+              "type": "boolean"
+            },
+            "beatPortHasAccount": {
+              "type": "boolean"
+            },
+            "beatPortLink": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "beatPortLabelLogo": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "trackLibs": {
+              "type": "boolean"
+            },
+            "hook": {
+              "type": "boolean"
+            },
+            "lyricfind": {
+              "type": "boolean"
+            },
+            "even": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "youtube",
+            "facebook",
+            "soundcloud",
+            "soundExchange",
+            "beatPort",
+            "beatPortHasAccount",
+            "beatPortLink",
+            "beatPortLabelLogo",
+            "trackLibs",
+            "hook",
+            "lyricfind",
+            "even"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "territories": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "review": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "note",
+            "fileName",
+            "fileUrl",
+            "fileType"
+          ]
+        },
+        "aiDocumentation": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "fileName",
+            "fileUrl"
+          ]
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "examples": [
+                  98341
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Track One"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Extended Mix"
+                ]
+              },
+              "linerNote": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Recorded in New York."
+                ]
+              },
+              "isrc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "USABC1234567"
+                ]
+              },
+              "iswc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "T0345246801"
+                ]
+              },
+              "language": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "en"
+                ]
+              },
+              "audioFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac"
+                ]
+              },
+              "audioUrl": {
+                "type": "string"
+              },
+              "instrumentalFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac"
+                ]
+              },
+              "instrumentalUrl": {
+                "type": "string"
+              },
+              "dolbyFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac"
+                ]
+              },
+              "dolbyUrl": {
+                "type": "string"
+              },
+              "tiktokStartTime": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "00:30"
+                ]
+              },
+              "lyrics": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "explicit": {
+                    "type": "boolean"
+                  },
+                  "cleanVersion": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "content",
+                  "explicit",
+                  "cleanVersion"
+                ]
+              },
+              "aiAssisted": {
+                "type": "boolean",
+                "examples": [
+                  true
+                ]
+              },
+              "aiAssistedFileUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "aiAssistedFileName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artists": {
+                "type": "string"
+              },
+              "writers": {
+                "type": "string"
+              },
+              "credits": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "version",
+              "linerNote",
+              "isrc",
+              "iswc",
+              "language",
+              "audioFileKey",
+              "audioUrl",
+              "instrumentalFileKey",
+              "instrumentalUrl",
+              "dolbyFileKey",
+              "dolbyUrl",
+              "tiktokStartTime",
+              "lyrics",
+              "aiAssisted",
+              "aiAssistedFileUrl",
+              "aiAssistedFileName",
+              "artists",
+              "writers",
+              "credits",
+              "createdAt",
+              "updatedAt"
+            ],
+            "title": "TrackResource"
+          }
+        },
+        "video": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "videoUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "md5hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "videoType": {
+              "type": "string"
+            },
+            "ageRestriction": {
+              "type": "string"
+            },
+            "isCoverVersion": {
+              "type": "boolean"
+            },
+            "referenceUpc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "referenceIsrc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "metadata": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "delivery": {
+              "type": "object",
+              "properties": {
+                "appleMusic": {
+                  "type": "boolean"
+                },
+                "vevo": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "appleMusic",
+                "vevo"
+              ]
+            },
+            "participants": {
+              "type": "string"
+            },
+            "writers": {
+              "type": "string"
+            },
+            "credits": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "videoUrl",
+            "md5hash",
+            "videoType",
+            "ageRestriction",
+            "isCoverVersion",
+            "referenceUpc",
+            "referenceIsrc",
+            "metadata",
+            "delivery",
+            "participants",
+            "writers",
+            "credits"
+          ]
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "title",
+        "upc",
+        "catalogNumber",
+        "version",
+        "remixTitle",
+        "coverSongs",
+        "label",
+        "primaryGenre",
+        "secondaryGenre",
+        "language",
+        "releaseDate",
+        "originalReleaseDate",
+        "applePreorder",
+        "applePreorderDate",
+        "licenseType",
+        "licenseInfo",
+        "cYear",
+        "cLine",
+        "pYear",
+        "pLine",
+        "coverUrl",
+        "compressedArtwork",
+        "isAiGeneratedArtwork",
+        "aiContentApproved",
+        "participants",
+        "releaseTime",
+        "motionArt",
+        "delivery",
+        "platforms",
+        "territories",
+        "review",
+        "aiDocumentation",
+        "tracks",
+        "video",
+        "submittedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "ReleaseResource"
+    }
+  },
+  "required": [
+    "data"
+  ]
+}
+
+4. RELEASE INFORMATION
+
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "examples": [
+            73518
+          ]
+        },
+        "type": {
+          "examples": [
+            "Album"
+          ],
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "MusicVideo"
+              ]
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "in_review",
+            "live",
+            "takedown_pending",
+            "takedown_complete"
+          ],
+          "examples": [
+            "draft"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "API Validation Test Release"
+          ]
+        },
+        "upc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "catalogNumber": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "TOOLOST3000073518"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "remixTitle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "coverSongs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {}
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela"
+          ]
+        },
+        "primaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Gothic"
+          ]
+        },
+        "secondaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Grunge"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "en"
+          ]
+        },
+        "releaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026-04-04"
+          ]
+        },
+        "originalReleaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "applePreorder": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "applePreorderDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "licenseType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Copyright"
+          ]
+        },
+        "licenseInfo": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "cYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "cLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela cline"
+          ]
+        },
+        "pYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "pLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela pline"
+          ]
+        },
+        "coverUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork.jpg"
+          ]
+        },
+        "compressedArtwork": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork_small.jpg"
+          ]
+        },
+        "isAiGeneratedArtwork": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "aiContentApproved": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "participants": {
+          "type": "string"
+        },
+        "releaseTime": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "time": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeZone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "time",
+            "timeZone"
+          ]
+        },
+        "motionArt": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "motionArt1x1": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "motionArt3x4": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            }
+          },
+          "required": [
+            "motionArt1x1",
+            "motionArt3x4"
+          ]
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "youtube": {
+              "type": "boolean"
+            },
+            "facebook": {
+              "type": "boolean"
+            },
+            "soundcloud": {
+              "type": "boolean"
+            },
+            "soundExchange": {
+              "type": "boolean"
+            },
+            "beatPort": {
+              "type": "boolean"
+            },
+            "beatPortHasAccount": {
+              "type": "boolean"
+            },
+            "beatPortLink": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "beatPortLabelLogo": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "trackLibs": {
+              "type": "boolean"
+            },
+            "hook": {
+              "type": "boolean"
+            },
+            "lyricfind": {
+              "type": "boolean"
+            },
+            "even": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "youtube",
+            "facebook",
+            "soundcloud",
+            "soundExchange",
+            "beatPort",
+            "beatPortHasAccount",
+            "beatPortLink",
+            "beatPortLabelLogo",
+            "trackLibs",
+            "hook",
+            "lyricfind",
+            "even"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "territories": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "review": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "note",
+            "fileName",
+            "fileUrl",
+            "fileType"
+          ]
+        },
+        "aiDocumentation": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "fileName",
+            "fileUrl"
+          ]
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "examples": [
+                  98341
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Track One"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Extended Mix"
+                ]
+              },
+              "linerNote": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Recorded in New York."
+                ]
+              },
+              "isrc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "USABC1234567"
+                ]
+              },
+              "iswc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "T0345246801"
+                ]
+              },
+              "language": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "en"
+                ]
+              },
+              "audioFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac"
+                ]
+              },
+              "audioUrl": {
+                "type": "string"
+              },
+              "instrumentalFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac"
+                ]
+              },
+              "instrumentalUrl": {
+                "type": "string"
+              },
+              "dolbyFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac"
+                ]
+              },
+              "dolbyUrl": {
+                "type": "string"
+              },
+              "tiktokStartTime": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "00:30"
+                ]
+              },
+              "lyrics": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "explicit": {
+                    "type": "boolean"
+                  },
+                  "cleanVersion": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "content",
+                  "explicit",
+                  "cleanVersion"
+                ]
+              },
+              "aiAssisted": {
+                "type": "boolean",
+                "examples": [
+                  true
+                ]
+              },
+              "aiAssistedFileUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "aiAssistedFileName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artists": {
+                "type": "string"
+              },
+              "writers": {
+                "type": "string"
+              },
+              "credits": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "version",
+              "linerNote",
+              "isrc",
+              "iswc",
+              "language",
+              "audioFileKey",
+              "audioUrl",
+              "instrumentalFileKey",
+              "instrumentalUrl",
+              "dolbyFileKey",
+              "dolbyUrl",
+              "tiktokStartTime",
+              "lyrics",
+              "aiAssisted",
+              "aiAssistedFileUrl",
+              "aiAssistedFileName",
+              "artists",
+              "writers",
+              "credits",
+              "createdAt",
+              "updatedAt"
+            ],
+            "title": "TrackResource"
+          }
+        },
+        "video": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "videoUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "md5hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "videoType": {
+              "type": "string"
+            },
+            "ageRestriction": {
+              "type": "string"
+            },
+            "isCoverVersion": {
+              "type": "boolean"
+            },
+            "referenceUpc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "referenceIsrc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "metadata": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "delivery": {
+              "type": "object",
+              "properties": {
+                "appleMusic": {
+                  "type": "boolean"
+                },
+                "vevo": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "appleMusic",
+                "vevo"
+              ]
+            },
+            "participants": {
+              "type": "string"
+            },
+            "writers": {
+              "type": "string"
+            },
+            "credits": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "videoUrl",
+            "md5hash",
+            "videoType",
+            "ageRestriction",
+            "isCoverVersion",
+            "referenceUpc",
+            "referenceIsrc",
+            "metadata",
+            "delivery",
+            "participants",
+            "writers",
+            "credits"
+          ]
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "title",
+        "upc",
+        "catalogNumber",
+        "version",
+        "remixTitle",
+        "coverSongs",
+        "label",
+        "primaryGenre",
+        "secondaryGenre",
+        "language",
+        "releaseDate",
+        "originalReleaseDate",
+        "applePreorder",
+        "applePreorderDate",
+        "licenseType",
+        "licenseInfo",
+        "cYear",
+        "cLine",
+        "pYear",
+        "pLine",
+        "coverUrl",
+        "compressedArtwork",
+        "isAiGeneratedArtwork",
+        "aiContentApproved",
+        "participants",
+        "releaseTime",
+        "motionArt",
+        "delivery",
+        "platforms",
+        "territories",
+        "review",
+        "aiDocumentation",
+        "tracks",
+        "video",
+        "submittedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "ReleaseResource"
+    }
+  },
+  "required": [
+    "data"
+  ]
+}
+
+5. CREATE TRACK UPLOAD URL
+
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "uploadUrl": {
+          "type": "string"
+        },
+        "fileKey": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "expiresIn": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "uploadUrl",
+        "fileKey",
+        "method",
+        "headers",
+        "expiresIn"
+      ]
+    }
+  },
+  "required": [
+    "data"
+  ]
+}
+
+6. GET TRACK
+
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "examples": [
+            98341
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Track One"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Extended Mix"
+          ]
+        },
+        "linerNote": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Recorded in New York."
+          ]
+        },
+        "isrc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "USABC1234567"
+          ]
+        },
+        "iswc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "T0345246801"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "en"
+          ]
+        },
+        "audioFileKey": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac"
+          ]
+        },
+        "audioUrl": {
+          "type": "string"
+        },
+        "instrumentalFileKey": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac"
+          ]
+        },
+        "instrumentalUrl": {
+          "type": "string"
+        },
+        "dolbyFileKey": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac"
+          ]
+        },
+        "dolbyUrl": {
+          "type": "string"
+        },
+        "tiktokStartTime": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "00:30"
+          ]
+        },
+        "lyrics": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "explicit": {
+              "type": "boolean"
+            },
+            "cleanVersion": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "content",
+            "explicit",
+            "cleanVersion"
+          ]
+        },
+        "aiAssisted": {
+          "type": "boolean",
+          "examples": [
+            true
+          ]
+        },
+        "aiAssistedFileUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "aiAssistedFileName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "artists": {
+          "type": "string"
+        },
+        "writers": {
+          "type": "string"
+        },
+        "credits": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "version",
+        "linerNote",
+        "isrc",
+        "iswc",
+        "language",
+        "audioFileKey",
+        "audioUrl",
+        "instrumentalFileKey",
+        "instrumentalUrl",
+        "dolbyFileKey",
+        "dolbyUrl",
+        "tiktokStartTime",
+        "lyrics",
+        "aiAssisted",
+        "aiAssistedFileUrl",
+        "aiAssistedFileName",
+        "artists",
+        "writers",
+        "credits",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "TrackResource"
+    }
+  },
+  "required": [
+    "data"
+  ]
+}
+
+7. UPDATE SINGLE TRACK FILE
+
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "examples": [
+            73518
+          ]
+        },
+        "type": {
+          "examples": [
+            "Album"
+          ],
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "MusicVideo"
+              ]
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "in_review",
+            "live",
+            "takedown_pending",
+            "takedown_complete"
+          ],
+          "examples": [
+            "draft"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "API Validation Test Release"
+          ]
+        },
+        "upc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "catalogNumber": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "TOOLOST3000073518"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "remixTitle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "coverSongs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {}
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela"
+          ]
+        },
+        "primaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Gothic"
+          ]
+        },
+        "secondaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Grunge"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "en"
+          ]
+        },
+        "releaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026-04-04"
+          ]
+        },
+        "originalReleaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "applePreorder": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "applePreorderDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "licenseType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Copyright"
+          ]
+        },
+        "licenseInfo": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "cYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "cLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela cline"
+          ]
+        },
+        "pYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "pLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela pline"
+          ]
+        },
+        "coverUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork.jpg"
+          ]
+        },
+        "compressedArtwork": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork_small.jpg"
+          ]
+        },
+        "isAiGeneratedArtwork": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "aiContentApproved": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "participants": {
+          "type": "string"
+        },
+        "releaseTime": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "time": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeZone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "time",
+            "timeZone"
+          ]
+        },
+        "motionArt": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "motionArt1x1": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "motionArt3x4": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            }
+          },
+          "required": [
+            "motionArt1x1",
+            "motionArt3x4"
+          ]
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "youtube": {
+              "type": "boolean"
+            },
+            "facebook": {
+              "type": "boolean"
+            },
+            "soundcloud": {
+              "type": "boolean"
+            },
+            "soundExchange": {
+              "type": "boolean"
+            },
+            "beatPort": {
+              "type": "boolean"
+            },
+            "beatPortHasAccount": {
+              "type": "boolean"
+            },
+            "beatPortLink": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "beatPortLabelLogo": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "trackLibs": {
+              "type": "boolean"
+            },
+            "hook": {
+              "type": "boolean"
+            },
+            "lyricfind": {
+              "type": "boolean"
+            },
+            "even": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "youtube",
+            "facebook",
+            "soundcloud",
+            "soundExchange",
+            "beatPort",
+            "beatPortHasAccount",
+            "beatPortLink",
+            "beatPortLabelLogo",
+            "trackLibs",
+            "hook",
+            "lyricfind",
+            "even"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "territories": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "review": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "note",
+            "fileName",
+            "fileUrl",
+            "fileType"
+          ]
+        },
+        "aiDocumentation": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "fileName",
+            "fileUrl"
+          ]
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "examples": [
+                  98341
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Track One"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Extended Mix"
+                ]
+              },
+              "linerNote": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Recorded in New York."
+                ]
+              },
+              "isrc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "USABC1234567"
+                ]
+              },
+              "iswc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "T0345246801"
+                ]
+              },
+              "language": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "en"
+                ]
+              },
+              "audioFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac"
+                ]
+              },
+              "audioUrl": {
+                "type": "string"
+              },
+              "instrumentalFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac"
+                ]
+              },
+              "instrumentalUrl": {
+                "type": "string"
+              },
+              "dolbyFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac"
+                ]
+              },
+              "dolbyUrl": {
+                "type": "string"
+              },
+              "tiktokStartTime": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "00:30"
+                ]
+              },
+              "lyrics": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "explicit": {
+                    "type": "boolean"
+                  },
+                  "cleanVersion": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "content",
+                  "explicit",
+                  "cleanVersion"
+                ]
+              },
+              "aiAssisted": {
+                "type": "boolean",
+                "examples": [
+                  true
+                ]
+              },
+              "aiAssistedFileUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "aiAssistedFileName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artists": {
+                "type": "string"
+              },
+              "writers": {
+                "type": "string"
+              },
+              "credits": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "version",
+              "linerNote",
+              "isrc",
+              "iswc",
+              "language",
+              "audioFileKey",
+              "audioUrl",
+              "instrumentalFileKey",
+              "instrumentalUrl",
+              "dolbyFileKey",
+              "dolbyUrl",
+              "tiktokStartTime",
+              "lyrics",
+              "aiAssisted",
+              "aiAssistedFileUrl",
+              "aiAssistedFileName",
+              "artists",
+              "writers",
+              "credits",
+              "createdAt",
+              "updatedAt"
+            ],
+            "title": "TrackResource"
+          }
+        },
+        "video": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "videoUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "md5hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "videoType": {
+              "type": "string"
+            },
+            "ageRestriction": {
+              "type": "string"
+            },
+            "isCoverVersion": {
+              "type": "boolean"
+            },
+            "referenceUpc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "referenceIsrc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "metadata": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "delivery": {
+              "type": "object",
+              "properties": {
+                "appleMusic": {
+                  "type": "boolean"
+                },
+                "vevo": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "appleMusic",
+                "vevo"
+              ]
+            },
+            "participants": {
+              "type": "string"
+            },
+            "writers": {
+              "type": "string"
+            },
+            "credits": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "videoUrl",
+            "md5hash",
+            "videoType",
+            "ageRestriction",
+            "isCoverVersion",
+            "referenceUpc",
+            "referenceIsrc",
+            "metadata",
+            "delivery",
+            "participants",
+            "writers",
+            "credits"
+          ]
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "title",
+        "upc",
+        "catalogNumber",
+        "version",
+        "remixTitle",
+        "coverSongs",
+        "label",
+        "primaryGenre",
+        "secondaryGenre",
+        "language",
+        "releaseDate",
+        "originalReleaseDate",
+        "applePreorder",
+        "applePreorderDate",
+        "licenseType",
+        "licenseInfo",
+        "cYear",
+        "cLine",
+        "pYear",
+        "pLine",
+        "coverUrl",
+        "compressedArtwork",
+        "isAiGeneratedArtwork",
+        "aiContentApproved",
+        "participants",
+        "releaseTime",
+        "motionArt",
+        "delivery",
+        "platforms",
+        "territories",
+        "review",
+        "aiDocumentation",
+        "tracks",
+        "video",
+        "submittedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "ReleaseResource"
+    }
+  },
+  "required": [
+    "data"
+  ]
+}
+
+8. GET RELEASE
+
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "examples": [
+            73518
+          ]
+        },
+        "type": {
+          "examples": [
+            "Album"
+          ],
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "MusicVideo"
+              ]
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "in_review",
+            "live",
+            "takedown_pending",
+            "takedown_complete"
+          ],
+          "examples": [
+            "draft"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "API Validation Test Release"
+          ]
+        },
+        "upc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "catalogNumber": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "TOOLOST3000073518"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "remixTitle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "coverSongs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {}
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela"
+          ]
+        },
+        "primaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Gothic"
+          ]
+        },
+        "secondaryGenre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Alternative/Grunge"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "en"
+          ]
+        },
+        "releaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026-04-04"
+          ]
+        },
+        "originalReleaseDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "applePreorder": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "applePreorderDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "licenseType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Copyright"
+          ]
+        },
+        "licenseInfo": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            null
+          ]
+        },
+        "cYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "cLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela cline"
+          ]
+        },
+        "pYear": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "2026"
+          ]
+        },
+        "pLine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Bela pline"
+          ]
+        },
+        "coverUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork.jpg"
+          ]
+        },
+        "compressedArtwork": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "https://s3.amazonaws.com/bucket/artwork_small.jpg"
+          ]
+        },
+        "isAiGeneratedArtwork": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "aiContentApproved": {
+          "type": "boolean",
+          "examples": [
+            false
+          ]
+        },
+        "participants": {
+          "type": "string"
+        },
+        "releaseTime": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "time": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeZone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "time",
+            "timeZone"
+          ]
+        },
+        "motionArt": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "motionArt1x1": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "motionArt3x4": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            }
+          },
+          "required": [
+            "motionArt1x1",
+            "motionArt3x4"
+          ]
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "youtube": {
+              "type": "boolean"
+            },
+            "facebook": {
+              "type": "boolean"
+            },
+            "soundcloud": {
+              "type": "boolean"
+            },
+            "soundExchange": {
+              "type": "boolean"
+            },
+            "beatPort": {
+              "type": "boolean"
+            },
+            "beatPortHasAccount": {
+              "type": "boolean"
+            },
+            "beatPortLink": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "beatPortLabelLogo": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "trackLibs": {
+              "type": "boolean"
+            },
+            "hook": {
+              "type": "boolean"
+            },
+            "lyricfind": {
+              "type": "boolean"
+            },
+            "even": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "youtube",
+            "facebook",
+            "soundcloud",
+            "soundExchange",
+            "beatPort",
+            "beatPortHasAccount",
+            "beatPortLink",
+            "beatPortLabelLogo",
+            "trackLibs",
+            "hook",
+            "lyricfind",
+            "even"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "territories": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 0,
+              "maxItems": 0,
+              "additionalItems": false
+            }
+          ]
+        },
+        "review": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "note",
+            "fileName",
+            "fileUrl",
+            "fileType"
+          ]
+        },
+        "aiDocumentation": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "fileName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fileUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "fileName",
+            "fileUrl"
+          ]
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "examples": [
+                  98341
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Track One"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Extended Mix"
+                ]
+              },
+              "linerNote": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Recorded in New York."
+                ]
+              },
+              "isrc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "USABC1234567"
+                ]
+              },
+              "iswc": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "T0345246801"
+                ]
+              },
+              "language": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "en"
+                ]
+              },
+              "audioFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac"
+                ]
+              },
+              "audioUrl": {
+                "type": "string"
+              },
+              "instrumentalFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac"
+                ]
+              },
+              "instrumentalUrl": {
+                "type": "string"
+              },
+              "dolbyFileKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac"
+                ]
+              },
+              "dolbyUrl": {
+                "type": "string"
+              },
+              "tiktokStartTime": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "00:30"
+                ]
+              },
+              "lyrics": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "explicit": {
+                    "type": "boolean"
+                  },
+                  "cleanVersion": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "content",
+                  "explicit",
+                  "cleanVersion"
+                ]
+              },
+              "aiAssisted": {
+                "type": "boolean",
+                "examples": [
+                  true
+                ]
+              },
+              "aiAssistedFileUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "aiAssistedFileName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artists": {
+                "type": "string"
+              },
+              "writers": {
+                "type": "string"
+              },
+              "credits": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "version",
+              "linerNote",
+              "isrc",
+              "iswc",
+              "language",
+              "audioFileKey",
+              "audioUrl",
+              "instrumentalFileKey",
+              "instrumentalUrl",
+              "dolbyFileKey",
+              "dolbyUrl",
+              "tiktokStartTime",
+              "lyrics",
+              "aiAssisted",
+              "aiAssistedFileUrl",
+              "aiAssistedFileName",
+              "artists",
+              "writers",
+              "credits",
+              "createdAt",
+              "updatedAt"
+            ],
+            "title": "TrackResource"
+          }
+        },
+        "video": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "videoUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "md5hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "videoType": {
+              "type": "string"
+            },
+            "ageRestriction": {
+              "type": "string"
+            },
+            "isCoverVersion": {
+              "type": "boolean"
+            },
+            "referenceUpc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "referenceIsrc": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "metadata": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {}
+            },
+            "delivery": {
+              "type": "object",
+              "properties": {
+                "appleMusic": {
+                  "type": "boolean"
+                },
+                "vevo": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "appleMusic",
+                "vevo"
+              ]
+            },
+            "participants": {
+              "type": "string"
+            },
+            "writers": {
+              "type": "string"
+            },
+            "credits": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "videoUrl",
+            "md5hash",
+            "videoType",
+            "ageRestriction",
+            "isCoverVersion",
+            "referenceUpc",
+            "referenceIsrc",
+            "metadata",
+            "delivery",
+            "participants",
+            "writers",
+            "credits"
+          ]
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "status",
+        "title",
+        "upc",
+        "catalogNumber",
+        "version",
+        "remixTitle",
+        "coverSongs",
+        "label",
+        "primaryGenre",
+        "secondaryGenre",
+        "language",
+        "releaseDate",
+        "originalReleaseDate",
+        "applePreorder",
+        "applePreorderDate",
+        "licenseType",
+        "licenseInfo",
+        "cYear",
+        "cLine",
+        "pYear",
+        "pLine",
+        "coverUrl",
+        "compressedArtwork",
+        "isAiGeneratedArtwork",
+        "aiContentApproved",
+        "participants",
+        "releaseTime",
+        "motionArt",
+        "delivery",
+        "platforms",
+        "territories",
+        "review",
+        "aiDocumentation",
+        "tracks",
+        "video",
+        "submittedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "ReleaseResource"
+    }
+  },
+  "required": [
+    "data"
+  ]
+}
+
+9. LIST RELEASES
+
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "examples": [
+              73518
+            ]
+          },
+          "type": {
+            "examples": [
+              "Album"
+            ],
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "MusicVideo"
+                ]
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "in_review",
+              "live",
+              "takedown_pending",
+              "takedown_complete"
+            ],
+            "examples": [
+              "draft"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "API Validation Test Release"
+            ]
+          },
+          "upc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              null
+            ]
+          },
+          "catalogNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "TOOLOST3000073518"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              null
+            ]
+          },
+          "remixTitle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              null
+            ]
+          },
+          "coverSongs": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {}
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 0,
+                "maxItems": 0,
+                "additionalItems": false
+              }
+            ]
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "Bela"
+            ]
+          },
+          "primaryGenre": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "Alternative/Gothic"
+            ]
+          },
+          "secondaryGenre": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "Alternative/Grunge"
+            ]
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "en"
+            ]
+          },
+          "releaseDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "2026-04-04"
+            ]
+          },
+          "originalReleaseDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              null
+            ]
+          },
+          "applePreorder": {
+            "type": "boolean",
+            "examples": [
+              false
+            ]
+          },
+          "applePreorderDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              null
+            ]
+          },
+          "licenseType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "Copyright"
+            ]
+          },
+          "licenseInfo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              null
+            ]
+          },
+          "cYear": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "2026"
+            ]
+          },
+          "cLine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "Bela cline"
+            ]
+          },
+          "pYear": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "2026"
+            ]
+          },
+          "pLine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "Bela pline"
+            ]
+          },
+          "coverUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "https://s3.amazonaws.com/bucket/artwork.jpg"
+            ]
+          },
+          "compressedArtwork": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "https://s3.amazonaws.com/bucket/artwork_small.jpg"
+            ]
+          },
+          "isAiGeneratedArtwork": {
+            "type": "boolean",
+            "examples": [
+              false
+            ]
+          },
+          "aiContentApproved": {
+            "type": "boolean",
+            "examples": [
+              false
+            ]
+          },
+          "participants": {
+            "type": "string"
+          },
+          "releaseTime": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "time": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timeZone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "time",
+              "timeZone"
+            ]
+          },
+          "motionArt": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "motionArt1x1": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {}
+              },
+              "motionArt3x4": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {}
+              }
+            },
+            "required": [
+              "motionArt1x1",
+              "motionArt3x4"
+            ]
+          },
+          "delivery": {
+            "type": "object",
+            "properties": {
+              "youtube": {
+                "type": "boolean"
+              },
+              "facebook": {
+                "type": "boolean"
+              },
+              "soundcloud": {
+                "type": "boolean"
+              },
+              "soundExchange": {
+                "type": "boolean"
+              },
+              "beatPort": {
+                "type": "boolean"
+              },
+              "beatPortHasAccount": {
+                "type": "boolean"
+              },
+              "beatPortLink": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "beatPortLabelLogo": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "trackLibs": {
+                "type": "boolean"
+              },
+              "hook": {
+                "type": "boolean"
+              },
+              "lyricfind": {
+                "type": "boolean"
+              },
+              "even": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "youtube",
+              "facebook",
+              "soundcloud",
+              "soundExchange",
+              "beatPort",
+              "beatPortHasAccount",
+              "beatPortLink",
+              "beatPortLabelLogo",
+              "trackLibs",
+              "hook",
+              "lyricfind",
+              "even"
+            ]
+          },
+          "platforms": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 0,
+                "maxItems": 0,
+                "additionalItems": false
+              }
+            ]
+          },
+          "territories": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 0,
+                "maxItems": 0,
+                "additionalItems": false
+              }
+            ]
+          },
+          "review": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fileName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fileUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fileType": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "note",
+              "fileName",
+              "fileUrl",
+              "fileType"
+            ]
+          },
+          "aiDocumentation": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "fileName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fileUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "fileName",
+              "fileUrl"
+            ]
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "examples": [
+                    98341
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "Track One"
+                  ]
+                },
+                "version": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "Extended Mix"
+                  ]
+                },
+                "linerNote": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "Recorded in New York."
+                  ]
+                },
+                "isrc": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "USABC1234567"
+                  ]
+                },
+                "iswc": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "T0345246801"
+                  ]
+                },
+                "language": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "en"
+                  ]
+                },
+                "audioFileKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac"
+                  ]
+                },
+                "audioUrl": {
+                  "type": "string"
+                },
+                "instrumentalFileKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac"
+                  ]
+                },
+                "instrumentalUrl": {
+                  "type": "string"
+                },
+                "dolbyFileKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac"
+                  ]
+                },
+                "dolbyUrl": {
+                  "type": "string"
+                },
+                "tiktokStartTime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "00:30"
+                  ]
+                },
+                "lyrics": {
+                  "type": "object",
+                  "properties": {
+                    "content": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "explicit": {
+                      "type": "boolean"
+                    },
+                    "cleanVersion": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "content",
+                    "explicit",
+                    "cleanVersion"
+                  ]
+                },
+                "aiAssisted": {
+                  "type": "boolean",
+                  "examples": [
+                    true
+                  ]
+                },
+                "aiAssistedFileUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "aiAssistedFileName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "artists": {
+                  "type": "string"
+                },
+                "writers": {
+                  "type": "string"
+                },
+                "credits": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "version",
+                "linerNote",
+                "isrc",
+                "iswc",
+                "language",
+                "audioFileKey",
+                "audioUrl",
+                "instrumentalFileKey",
+                "instrumentalUrl",
+                "dolbyFileKey",
+                "dolbyUrl",
+                "tiktokStartTime",
+                "lyrics",
+                "aiAssisted",
+                "aiAssistedFileUrl",
+                "aiAssistedFileName",
+                "artists",
+                "writers",
+                "credits",
+                "createdAt",
+                "updatedAt"
+              ],
+              "title": "TrackResource"
+            }
+          },
+          "video": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "videoUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "md5hash": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "videoType": {
+                "type": "string"
+              },
+              "ageRestriction": {
+                "type": "string"
+              },
+              "isCoverVersion": {
+                "type": "boolean"
+              },
+              "referenceUpc": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "referenceIsrc": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "metadata": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {}
+              },
+              "delivery": {
+                "type": "object",
+                "properties": {
+                  "appleMusic": {
+                    "type": "boolean"
+                  },
+                  "vevo": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "appleMusic",
+                  "vevo"
+                ]
+              },
+              "participants": {
+                "type": "string"
+              },
+              "writers": {
+                "type": "string"
+              },
+              "credits": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "videoUrl",
+              "md5hash",
+              "videoType",
+              "ageRestriction",
+              "isCoverVersion",
+              "referenceUpc",
+              "referenceIsrc",
+              "metadata",
+              "delivery",
+              "participants",
+              "writers",
+              "credits"
+            ]
+          },
+          "submittedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "status",
+          "title",
+          "upc",
+          "catalogNumber",
+          "version",
+          "remixTitle",
+          "coverSongs",
+          "label",
+          "primaryGenre",
+          "secondaryGenre",
+          "language",
+          "releaseDate",
+          "originalReleaseDate",
+          "applePreorder",
+          "applePreorderDate",
+          "licenseType",
+          "licenseInfo",
+          "cYear",
+          "cLine",
+          "pYear",
+          "pLine",
+          "coverUrl",
+          "compressedArtwork",
+          "isAiGeneratedArtwork",
+          "aiContentApproved",
+          "participants",
+          "releaseTime",
+          "motionArt",
+          "delivery",
+          "platforms",
+          "territories",
+          "review",
+          "aiDocumentation",
+          "tracks",
+          "video",
+          "submittedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "ReleaseResource"
+      },
+      "title": "ReleaseCollection"
+    },
+    "currentPage": {
+      "type": "integer"
+    },
+    "perPage": {
+      "type": "integer"
+    },
+    "totalItems": {
+      "type": "integer"
+    },
+    "totalPages": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "data",
+    "currentPage",
+    "perPage",
+    "totalItems",
+    "totalPages"
+  ]
+}
+
+10. LIST TRACKS
+
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "examples": [
+              98341
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "Track One"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "Extended Mix"
+            ]
+          },
+          "linerNote": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "Recorded in New York."
+            ]
+          },
+          "isrc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "USABC1234567"
+            ]
+          },
+          "iswc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "T0345246801"
+            ]
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "en"
+            ]
+          },
+          "audioFileKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "external/tracks/v1/releases/73518/audio/2f7f1147-d5b0-4cd9-818b-236d05bd8263.flac"
+            ]
+          },
+          "audioUrl": {
+            "type": "string"
+          },
+          "instrumentalFileKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "external/tracks/v1/releases/73518/instrumental/a818d714-547a-43f9-b5aa-b64af03917eb.flac"
+            ]
+          },
+          "instrumentalUrl": {
+            "type": "string"
+          },
+          "dolbyFileKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "external/tracks/v1/releases/73518/dolby/63e99108-950d-4dc2-bf0d-f8ad32fcd883.flac"
+            ]
+          },
+          "dolbyUrl": {
+            "type": "string"
+          },
+          "tiktokStartTime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "00:30"
+            ]
+          },
+          "lyrics": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "explicit": {
+                "type": "boolean"
+              },
+              "cleanVersion": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "content",
+              "explicit",
+              "cleanVersion"
+            ]
+          },
+          "aiAssisted": {
+            "type": "boolean",
+            "examples": [
+              true
+            ]
+          },
+          "aiAssistedFileUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "aiAssistedFileName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artists": {
+            "type": "string"
+          },
+          "writers": {
+            "type": "string"
+          },
+          "credits": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "version",
+          "linerNote",
+          "isrc",
+          "iswc",
+          "language",
+          "audioFileKey",
+          "audioUrl",
+          "instrumentalFileKey",
+          "instrumentalUrl",
+          "dolbyFileKey",
+          "dolbyUrl",
+          "tiktokStartTime",
+          "lyrics",
+          "aiAssisted",
+          "aiAssistedFileUrl",
+          "aiAssistedFileName",
+          "artists",
+          "writers",
+          "credits",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "TrackResource"
+      }
+    }
+  },
+  "required": [
+    "data"
+  ]
+}
