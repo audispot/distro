@@ -1,7 +1,797 @@
-FRONTED
+1.FRONTED
 
+// =========================================================
+        // TOO LOST PLATFORM LIST
+        // =========================================================
+        //
+        // IMPORTANT:
+        // - `id` is Audiory's internal ID.
+        // - `name` is what the artist sees.
+        // - `tooLostValue` is EXACTLY what Too Lost expects.
+        //
+        // Too Lost allows a maximum of 120 platforms per release.
+        // =========================================================
+
+        const TOO_LOST_PLATFORM_VALUES = `
+        24-7 Entertainment
+        3.DK
+        58pic
+        5sing
+        7Digital
+        ACRCloud
+        AGEDI
+        AMI Entertainment
+        AWA
+        Acer
+        Adaptr
+        Agora
+        Air Vanuatu
+        AirAsia
+        AirAsiaX
+        Akazoo
+        AliGenie
+        Alibaba
+        Alibaba Cloud Computing Co. Ltd.
+        Alibaba Group
+        Alipay
+        Amazon Music
+        Ambients App
+        Anghami
+        Aobai
+        Apple Music
+        Artie
+        Artistxite
+        Astro
+        Audible Magic - Fulfillment360
+        Audible Magic - Rights360
+        Audio Stock
+        Audioclub
+        Audiojungle
+        Audiomack
+        B612
+        BMAT
+        BUBUKA
+        Bandcamp
+        Barstool Sports
+        Beat.no
+        Beatsource
+        Beeline Music
+        Beijing Eye
+        Belgacom
+        Bijian
+        Bilibili
+        Bleep
+        Boomplay
+        Boomplay Music
+        Bose
+        Broadtime
+        Bucher.de
+        Bugs Music
+        Bugs!
+        Bzstech
+        CCA
+        CCI Distribution
+        CDON
+        CIG
+        CTS Eventim AG
+        Canva
+        Celcom
+        Changba
+        China Airlines
+        China Telecom
+        China Unicom
+        Chunghwa Mobile
+        Claro Música
+        ClickNClear
+        Clip Interactive
+        Clone Digital
+        CoSleep&Heartide
+        Coda Music
+        Coolvox
+        Curve
+        Cyberlink
+        Cyworld
+        DISCO
+        DOOLUU
+        Daily Yoga
+        Dalkom
+        Dance All Day
+        DanceFight
+        Daum
+        Deedo
+        Deezer
+        Delta
+        Deutsche Telekom Austria and Netherlands
+        DiGi
+        Dianyin
+        Digitally Imported
+        Discogs
+        Douban Music
+        Douyin
+        Dragonfly FM
+        DroitVision
+        Duanku
+        Dubset
+        Duitang
+        Echo
+        Ex Libris
+        ExLibris
+        FETnet
+        FLO
+        FNAC
+        FUHU
+        Facebook/Instagram
+        Fan Label
+        Fanxian
+        Fastweb
+        Findspire
+        Fliggy
+        Flipagram
+        Fonmix
+        Forest Incentives
+        Friday Music (Omusic)
+        GHH Commerce
+        GMF AeroAsia
+        Gaana
+        Genie Music
+        Gismart
+        Global Radio
+        Google Play
+        Gracenote
+        Grandpad
+        Gravity Mobile
+        HELLORF
+        HMV
+        HTC One
+        HUAWEI Hi-Res
+        Haitu
+        Hangout
+        Hardstyle.com
+        Hema
+        High Res Audio
+        HighResAudio
+        Himalayan FM
+        Huawei Global Radio
+        Huawei Middle East
+        Huawei Middle Eeast
+        Huawei Music
+        Huawei Music - Hi res
+        Huawei Ringtone
+        Huawei South Africa
+        Hunanzhangyue
+        Hungama
+        Huoshan
+        Hym
+        Hyundaicard Music
+        IMI Mobile
+        Iguplus
+        In8 Mobile
+        Infogo
+        Intime
+        Intoo
+        JOOX
+        JPay
+        Jaxsta
+        Jazzed
+        Jeou Tai
+        Jetstar
+        Jiadeyin
+        Jinli Music
+        Jinshan
+        JioSaavn
+        Juhuasuan
+        KDigital Media
+        KKBOX
+        KTV
+        Kakao
+        Kanjian
+        Kanjian Music
+        Keefe Group
+        Keep
+        Kids+
+        Koala FM
+        Kobo
+        Ku FM
+        Kuack Media
+        Kuaishou
+        Kugou
+        Kugou KTV
+        Kugou Live
+        Kugou Ringtone
+        Kugou Sing
+        Kuwo
+        Kuwo Boom
+        Kuwo Juxing
+        Kuwo KTV
+        Kuwo Tingshu
+        Kuwo Vedio
+        Kuyin Ringtone
+        Kwai
+        LINE Music
+        La Musica
+        Last FM
+        Lefit
+        Lenovo Music
+        Lenovo Sound
+        Lequ Music
+        Lickd
+        Line Music (JP)
+        Lissen
+        Litup
+        Lizhi FM
+        Love Music
+        Love Music (China Telecom)
+        Lululemon
+        Lutong
+        MELON
+        MGTV
+        MOO
+        MOOV
+        MQA
+        Mach by Mariposa
+        Manbo
+        Maxis
+        Me2u Music
+        MePlaylist
+        Media Markt
+        Medianet
+        Medion
+        Meishe
+        Meitu
+        Melon Kt
+        Mi Tracks
+        Migu Music
+        Migu Music (China Mobile)
+        Mixcloud
+        Mixette
+        Mixpixie
+        Mixup Digital
+        Mnet
+        Moi Mir
+        Momople
+        Monkey3
+        MoodAgent
+        Motie
+        Muserk
+        Music Reports
+        Music Worx
+        MusicQubed
+        MusicToday
+        Musixmatch
+        Muztube
+        My Melo
+        MyMelo
+        MyMusic
+        Mythical Games
+        NEC
+        Napster
+        NatWest
+        Naver
+        Naver Vibe
+        NetEase Cloud Music
+        Netease Music
+        Nile Air
+        Nuuday
+        Odnoklassniki
+        Oga Dance (MoveWorld)
+        Olleh+Genie
+        Onkyo
+        Onmobile US
+        Open Live
+        Orange France
+        Overmax
+        P.R.O. Agency
+        PEX
+        PEX Attribution Engine
+        PPTV
+        PURE ENERGY GO
+        Pandora
+        Peloton
+        Perfect World Co.,Ltd
+        Perfectpark
+        Philippine Airlines
+        Pikbest
+        Pinterest
+        Pizza Hut
+        Play Network
+        Pledge
+        Plern
+        Pono
+        PortalDisc
+        Pretzel Rocks
+        Prodigium
+        Psonar
+        Psycle
+        Pubbles
+        Pulselocker
+        Pure Music
+        Puxin
+        QNX CAR
+        QNX CAR™
+        QQ FM
+        QQ Music
+        Qantas
+        Qianku
+        Qianqian Music
+        Qingting
+        Qishui Music
+        Qobuz
+        Qub Musique
+        RBS
+        ROK mobile
+        RabbitPre
+        Rainbow Music
+        Raku
+        Rakuten
+        Rakuten Music
+        Rebelation
+        Reload
+        Resso
+        Rhapsody
+        Rhino
+        Roblox
+        Rockbot
+        Roxi
+        Rythm
+        SENYU
+        SUPERMONKEY
+        Sainsburys
+        Samsung Music
+        Saturn
+        SberZvuk
+        Senzari
+        Shazam
+        Shiliu
+        Shipingyingye
+        Shishuo
+        ShopTo
+        Sina Video
+        Sirius XM
+        Slacker
+        Slacker Radio
+        Snack Video
+        Snapchat
+        Soda Music
+        Sohu Video
+        Sona
+        Sonos
+        Soribada
+        Soundhound
+        Soundmouse
+        Soundtrack Your Brand
+        Soundtrack by Twitch
+        Spanish Broadcasting System
+        Spinlet
+        Spotify
+        Stardtb
+        Stellar
+        Styngr
+        SunExpress
+        Sunrise
+        Supernatural
+        Swisscom
+        T Star
+        T-Mobile
+        TDC
+        TDC/TDC Mobile
+        TELE2
+        TIM Music
+        TaiHua
+        Taiwan Mobile
+        Tango
+        Taobao
+        Taomailang
+        Technics Tracks
+        Tencent
+        Tencent Video
+        Tesla Music
+        Thai Airways
+        The Overflow
+        Tidal
+        Tigo
+        TikTok
+        TingTing FM
+        Tmall
+        Tonspion
+        TouchTunes
+        Toutiao
+        Trackdrip
+        Tradebit
+        Traxsource
+        Trebel
+        Triller
+        Triplay
+        Tuned Global
+        Tunewiki
+        Tuokeshangmao
+        Turnkey Corrections
+        Turntable.fm
+        Tuzhan
+        Twitch
+        U-Mobile
+        UC
+        Ucmba
+        United Media Agency (UMA)
+        VCG
+        VEVO
+        VISTOPIA
+        VIVO Hi-Res
+        VKontakte
+        VL Group
+        VUE
+        ViaPath
+        Viamaker
+        Vibe
+        Vibo Telecom
+        Videoshow
+        Viper HIFI
+        Virgin Australia
+        Vodafone
+        WAYZ
+        WEYV
+        Walkgame
+        Wasu
+        Wasu TV
+        We Sing
+        WeChat
+        WeSing
+        Weibo Music
+        Weishi
+        Weltbild DE
+        Whales
+        Wo Music
+        Wxduoduo
+        Xiaomi Music
+        Xiaoying
+        Xigua Video
+        Xinhua Zhiyun Technology Co.,Ltd.
+        Xinpianchang
+        Xinxun
+        Xiquduoduo
+        Xiumi
+        Xiutang
+        Xplore Music Stores
+        Yandex
+        Yingyintonghua
+        Yiqixiu
+        YouTube Music
+        Youku&Tudou
+        Zvooq
+        aiyinsitanFM
+        babubabu
+        babytree
+        baotu
+        dajiang
+        doubleTwist
+        eMusic
+        epub360
+        fizy
+        friDay
+        gaoding
+        hidooro
+        hmv PLAY (Soliton)
+        iFeng
+        iHeart
+        iMusica
+        iQiyi & PPS
+        iSHEJI
+        iTunes
+        iam+ Dial
+        kelakela
+        kuaijianji
+        kugouzhibobanlv
+        lrts
+        mangguofm
+        mobilcom-debitel
+        mylafe
+        nMusic
+        ooopic
+        tingxi
+        wondershare
+        xiaohongshu
+        yesoul
+        yunting
+        `
+            .split('\n')
+            .map(value => value.trim())
+            .filter(Boolean);
+
+
+        // Create Audiory-compatible objects.
+        //
+        // We generate an internal ID while preserving the exact
+        // Too Lost value separately.
+        const MASTER_DSP_LIST = TOO_LOST_PLATFORM_VALUES.map(
+            (platform, index) => ({
+                id:
+                    `tl-platform-${index}-${platform
+                        .toLowerCase()
+                        .replace(/[^a-z0-9]+/g, '-')
+                        .replace(/^-|-$/g, '')}`,
+
+                name: platform,
+
+                tooLostValue: platform,
+
+                icon: 'fa-solid fa-store text-cyan-400'
+            })
+        );
+
+        // =========================================================
+// TOO LOST TERRITORIES
+// =========================================================
+//
+// Too Lost requires EXACTLY 2 territories.
+// "Worldwide" is intentionally NOT included.
+// =========================================================
+
+const TOO_LOST_TERRITORY_CODES = `
+AF
+AX
+AL
+DZ
+AS
+AD
+AO
+AI
+AQ
+AG
+AR
+AM
+AW
+AU
+AT
+AZ
+BS
+BH
+BD
+BB
+BY
+BE
+BZ
+BJ
+BM
+BT
+BO
+BA
+BW
+BV
+BR
+BQ
+IO
+BN
+BG
+BF
+BI
+KH
+CM
+CA
+CV
+KY
+CF
+TD
+CL
+CN
+CX
+CC
+CO
+CW
+KM
+CG
+CD
+CK
+CR
+CI
+HR
+CU
+CY
+CZ
+DK
+DJ
+DM
+DO
+EC
+EG
+SV
+GQ
+ER
+EE
+ET
+FK
+FO
+FJ
+FI
+FR
+GF
+PF
+TF
+GA
+GM
+GE
+DE
+GH
+GI
+GR
+GL
+GD
+GP
+GU
+GT
+GG
+GN
+GW
+GY
+HT
+HM
+VA
+HN
+HK
+HU
+IS
+IN
+ID
+IR
+IQ
+IE
+IM
+IL
+IT
+JM
+JP
+JE
+JO
+XK
+KZ
+KE
+KI
+KP
+KR
+KW
+KG
+LA
+LV
+LB
+LS
+LR
+LY
+LI
+LT
+LU
+MO
+MK
+MG
+MW
+MY
+MV
+ML
+MT
+MH
+MQ
+MR
+MU
+YT
+MX
+FM
+MD
+MC
+MN
+ME
+MS
+MA
+MZ
+MM
+NA
+NR
+NP
+NL
+AN
+NC
+NZ
+NI
+NE
+NG
+NU
+NF
+MP
+NO
+OM
+PK
+PW
+PS
+PA
+PG
+PY
+PE
+PH
+PN
+PL
+PT
+PR
+QA
+RE
+RO
+RU
+RW
+BL
+SH
+KN
+LC
+MF
+PM
+VC
+WS
+SM
+ST
+SA
+SX
+SS
+SN
+RS
+SC
+SL
+SG
+SK
+SI
+SB
+SO
+ZA
+GS
+ES
+LK
+SD
+SR
+SJ
+SZ
+SE
+CH
+SY
+TW
+TJ
+TZ
+TH
+TL
+TG
+TK
+TO
+TT
+TN
+TR
+TM
+TC
+TV
+UG
+UA
+AE
+GB
+US
+UM
+UY
+UZ
+VU
+VE
+VN
+VG
+VI
+WF
+EH
+YE
+ZM
+ZW
+`
+    .split('\n')
+    .map(code => code.trim())
+    .filter(Boolean);
+
+
+// Friendly country/territory names.
+//
+// Intl.DisplayNames handles the normal ISO country names.
+// For special/legacy codes such as XK and AN, we provide
+// explicit names.
+const TOO_LOST_TERRITORY_NAMES = {
+    XK: 'Kosovo',
+    AN: 'Netherlands Antilles'
 };
-})();
 
 // Initial Release State with expanded tracks and delivery structure
 window.releaseState = window.releaseState || {
@@ -440,7 +1230,10 @@ window.removeArtistFromState = function(idx) {
     window.renderArtistInputs();
 };
         
+// =========================================================
 // STEP 2 CONTENT
+// =========================================================
+
 function renderStep2Content() {
 
     const s = window.releaseState;
@@ -472,7 +1265,7 @@ function renderStep2Content() {
 
 
     s.applePreorder.enabled =
-        !!s.applePreorder.enabled;
+        Boolean(s.applePreorder.enabled);
 
     s.applePreorder.date =
         s.applePreorder.date || '';
@@ -495,15 +1288,46 @@ function renderStep2Content() {
         s.delivery || {};
 
 
-    // Delivery defaults
-    if (!Array.isArray(s.delivery.platforms)) {
-        s.delivery.platforms = [];
+    // =========================================================
+    // PLATFORM STATE
+    // =========================================================
+
+    if (!Array.isArray(s.dsps)) {
+        s.dsps = [];
     }
+
+
+    // =========================================================
+    // TERRITORY STATE
+    // =========================================================
 
     if (!Array.isArray(s.delivery.territories)) {
-        s.delivery.territories = ['Worldwide'];
+        s.delivery.territories = [];
     }
 
+    // Remove the old unsupported Worldwide value from
+    // any previously saved state.
+    s.delivery.territories =
+        s.delivery.territories.filter(
+            territory =>
+                territory &&
+                territory !== 'Worldwide' &&
+                TOO_LOST_TERRITORY_CODES.includes(territory)
+        );
+
+
+    // Too Lost allows exactly 2.
+    // If old state somehow contains more than 2, keep
+    // only the first two valid values.
+    if (s.delivery.territories.length > 2) {
+        s.delivery.territories =
+            s.delivery.territories.slice(0, 2);
+    }
+
+
+    // =========================================================
+    // BEATPORT
+    // =========================================================
 
     if (typeof s.delivery.beatPort !== 'boolean') {
         s.delivery.beatPort = false;
@@ -519,6 +1343,10 @@ function renderStep2Content() {
     s.delivery.beatPortLabelLogo =
         s.delivery.beatPortLabelLogo || '';
 
+
+    // =========================================================
+    // DELIVERY SERVICES
+    // =========================================================
 
     if (typeof s.delivery.youtube !== 'boolean') {
         s.delivery.youtube = true;
@@ -554,13 +1382,14 @@ function renderStep2Content() {
 
 
     // =========================================================
-    // SELECTED DSP COUNT
+    // SELECTED COUNTS
     // =========================================================
 
-    const selectedCount =
-        Array.isArray(s.dsps)
-            ? s.dsps.length
-            : MASTER_DSP_LIST.length;
+    const selectedPlatformCount =
+        s.dsps.length;
+
+    const selectedTerritoryCount =
+        s.delivery.territories.length;
 
 
     // =========================================================
@@ -569,6 +1398,7 @@ function renderStep2Content() {
 
     return `
         <div class="space-y-6">
+
 
             <!-- =================================================
                  RELEASE DATES & TIMING
@@ -589,9 +1419,11 @@ function renderStep2Content() {
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
+
                     <!-- DIGITAL RELEASE DATE -->
 
                     <div>
+
                         <label class="too-lost-form-label">
                             Digital Release Date *
                         </label>
@@ -606,12 +1438,14 @@ function renderStep2Content() {
                             class="too-lost-input"
                             required
                         >
+
                     </div>
 
 
                     <!-- ORIGINAL RELEASE DATE -->
 
                     <div>
+
                         <label class="too-lost-form-label">
                             Original Release Date
                         </label>
@@ -629,12 +1463,14 @@ function renderStep2Content() {
                         <p class="text-[10px] text-gray-500 mt-1">
                             Leave blank if this is a brand-new release.
                         </p>
+
                     </div>
 
 
                     <!-- RELEASE TIME -->
 
                     <div>
+
                         <label class="too-lost-form-label">
                             Release Time *
                         </label>
@@ -649,12 +1485,14 @@ function renderStep2Content() {
                             class="too-lost-input"
                             required
                         >
+
                     </div>
 
 
                     <!-- TIMEZONE -->
 
                     <div>
+
                         <label class="too-lost-form-label">
                             Release Timezone *
                         </label>
@@ -677,7 +1515,6 @@ function renderStep2Content() {
                                 Africa/Nairobi (EAT)
                             </option>
 
-
                             <option
                                 value="UTC"
                                 ${s.dates.timezone === 'UTC'
@@ -687,7 +1524,6 @@ function renderStep2Content() {
                                 UTC
                             </option>
 
-
                             <option
                                 value="America/New_York"
                                 ${s.dates.timezone === 'America/New_York'
@@ -696,7 +1532,6 @@ function renderStep2Content() {
                             >
                                 America/New York
                             </option>
-
 
                             <option
                                 value="Europe/London"
@@ -708,6 +1543,7 @@ function renderStep2Content() {
                             </option>
 
                         </select>
+
                     </div>
 
                 </div>
@@ -724,6 +1560,7 @@ function renderStep2Content() {
                 <div class="flex items-center justify-between gap-4">
 
                     <div>
+
                         <h3 class="text-sm font-bold text-white">
                             Apple Pre-order
                         </h3>
@@ -731,6 +1568,7 @@ function renderStep2Content() {
                         <p class="text-xs text-gray-500 mt-1">
                             Enable Apple pre-order for this release.
                         </p>
+
                     </div>
 
 
@@ -812,6 +1650,7 @@ function renderStep2Content() {
             <div class="p-5 rounded-2xl bg-brand-dark border border-brand-border space-y-4">
 
                 <div>
+
                     <h3 class="text-sm font-bold text-white">
                         Rights & Licensing
                     </h3>
@@ -819,14 +1658,15 @@ function renderStep2Content() {
                     <p class="text-xs text-gray-500 mt-1">
                         Define the licensing information for this release.
                     </p>
+
                 </div>
 
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
-                    <!-- LICENSE TYPE -->
 
                     <div>
+
                         <label class="too-lost-form-label">
                             License Type
                         </label>
@@ -854,7 +1694,6 @@ function renderStep2Content() {
                                 Copyright
                             </option>
 
-
                             <option
                                 value="Creative Commons"
                                 ${s.license.type === 'Creative Commons'
@@ -863,7 +1702,6 @@ function renderStep2Content() {
                             >
                                 Creative Commons
                             </option>
-
 
                             <option
                                 value="CreativeCommons"
@@ -875,12 +1713,12 @@ function renderStep2Content() {
                             </option>
 
                         </select>
+
                     </div>
 
 
-                    <!-- LICENSE INFORMATION -->
-
                     <div>
+
                         <label class="too-lost-form-label">
                             License Information
                         </label>
@@ -905,6 +1743,7 @@ function renderStep2Content() {
                         <p class="text-[10px] text-gray-500 mt-1">
                             Maximum 500 characters.
                         </p>
+
                     </div>
 
                 </div>
@@ -919,6 +1758,7 @@ function renderStep2Content() {
             <div class="p-5 rounded-2xl bg-brand-dark border border-brand-border space-y-4">
 
                 <div>
+
                     <h3 class="text-sm font-bold text-white">
                         Platform Delivery Enhancements
                     </h3>
@@ -926,12 +1766,12 @@ function renderStep2Content() {
                     <p class="text-xs text-gray-500 mt-1">
                         Select additional platforms and delivery services for this release.
                     </p>
+
                 </div>
 
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
 
-                    <!-- YOUTUBE -->
 
                     <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between cursor-pointer">
 
@@ -952,8 +1792,6 @@ function renderStep2Content() {
                     </label>
 
 
-                    <!-- FACEBOOK / INSTAGRAM -->
-
                     <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between cursor-pointer">
 
                         <span class="text-xs text-gray-200">
@@ -972,8 +1810,6 @@ function renderStep2Content() {
 
                     </label>
 
-
-                    <!-- SOUNDCLOUD -->
 
                     <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between cursor-pointer">
 
@@ -994,8 +1830,6 @@ function renderStep2Content() {
                     </label>
 
 
-                    <!-- SOUNDEXCHANGE -->
-
                     <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between cursor-pointer">
 
                         <span class="text-xs text-gray-200">
@@ -1014,8 +1848,6 @@ function renderStep2Content() {
 
                     </label>
 
-
-                    <!-- BEATPORT -->
 
                     <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between cursor-pointer">
 
@@ -1044,8 +1876,6 @@ function renderStep2Content() {
                     </label>
 
 
-                    <!-- TRACKLIB -->
-
                     <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between cursor-pointer">
 
                         <span class="text-xs text-gray-200">
@@ -1064,8 +1894,6 @@ function renderStep2Content() {
 
                     </label>
 
-
-                    <!-- HOOK -->
 
                     <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between cursor-pointer">
 
@@ -1086,8 +1914,6 @@ function renderStep2Content() {
                     </label>
 
 
-                    <!-- LYRICFIND -->
-
                     <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between cursor-pointer">
 
                         <span class="text-xs text-gray-200">
@@ -1106,8 +1932,6 @@ function renderStep2Content() {
 
                     </label>
 
-
-                    <!-- EVEN -->
 
                     <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between cursor-pointer">
 
@@ -1136,21 +1960,17 @@ function renderStep2Content() {
                  BEATPORT DETAILS
             ================================================== -->
 
-            <div
-                class="p-5 rounded-2xl bg-brand-dark border border-brand-border space-y-4"
-            >
+            <div class="p-5 rounded-2xl bg-brand-dark border border-brand-border space-y-4">
 
-                <div class="flex items-center justify-between">
+                <div>
 
-                    <div>
-                        <h3 class="text-sm font-bold text-white">
-                            Beatport Details
-                        </h3>
+                    <h3 class="text-sm font-bold text-white">
+                        Beatport Details
+                    </h3>
 
-                        <p class="text-xs text-gray-500 mt-1">
-                            Enable Beatport delivery and provide the required label information.
-                        </p>
-                    </div>
+                    <p class="text-xs text-gray-500 mt-1">
+                        Enable Beatport delivery and provide the required label information.
+                    </p>
 
                 </div>
 
@@ -1160,8 +1980,6 @@ function renderStep2Content() {
                     style="display:${s.delivery.beatPort ? 'block' : 'none'}"
                     class="space-y-4"
                 >
-
-                    <!-- BEATPORT ACCOUNT -->
 
                     <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between cursor-pointer">
 
@@ -1185,9 +2003,8 @@ function renderStep2Content() {
                     </label>
 
 
-                    <!-- BEATPORT LABEL LINK -->
-
                     <div>
+
                         <label class="too-lost-form-label">
                             Beatport Label Link
                         </label>
@@ -1202,12 +2019,12 @@ function renderStep2Content() {
                             class="too-lost-input"
                             placeholder="https://www.beatport.com/label/..."
                         >
+
                     </div>
 
 
-                    <!-- BEATPORT LABEL LOGO -->
-
                     <div>
+
                         <label class="too-lost-form-label">
                             Beatport Label Logo URL
                         </label>
@@ -1222,6 +2039,7 @@ function renderStep2Content() {
                             class="too-lost-input"
                             placeholder="https://..."
                         >
+
                     </div>
 
                 </div>
@@ -1238,13 +2056,15 @@ function renderStep2Content() {
                 <div class="flex items-center justify-between gap-4">
 
                     <div>
+
                         <h3 class="text-sm font-bold text-white">
                             Target DSP Digital Storefronts
                         </h3>
 
                         <p class="text-xs text-gray-400 mt-1">
-                            ${selectedCount} of ${MASTER_DSP_LIST.length} platforms selected
+                            ${selectedPlatformCount} of ${MASTER_DSP_LIST.length} platforms selected
                         </p>
+
                     </div>
 
 
@@ -1253,38 +2073,53 @@ function renderStep2Content() {
                         onclick="openDspModal()"
                         class="px-4 py-2 rounded-xl bg-brand-card border border-brand-border text-cyan-400 font-bold text-xs hover:border-cyan-400 transition"
                     >
+
                         <i class="fa-solid fa-sliders mr-1.5"></i>
-                        Select Platforms (${selectedCount})
+
+                        Select Platforms (${selectedPlatformCount})
+
                     </button>
 
                 </div>
 
 
-                <!-- SELECTED DSP PREVIEW -->
-
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
 
-                    ${MASTER_DSP_LIST
-                        .filter(dsp =>
-                            !Array.isArray(s.dsps) ||
-                            s.dsps.includes(dsp.id)
-                        )
-                        .map(dsp => `
-                            <div
-                                class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center gap-3"
-                            >
+                    ${
+                        MASTER_DSP_LIST
+                            .filter(dsp =>
+                                s.dsps.includes(dsp.id)
+                            )
+                            .slice(0, 16)
+                            .map(dsp => `
+                                <div
+                                    class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center gap-3"
+                                >
 
-                                <i class="${escapeHtml(dsp.icon || '')} text-lg"></i>
+                                    <i class="${escapeHtml(dsp.icon || '')} text-lg"></i>
 
-                                <span class="text-xs font-semibold text-gray-200 truncate">
-                                    ${escapeHtml(dsp.name || '')}
-                                </span>
+                                    <span class="text-xs font-semibold text-gray-200 truncate">
+                                        ${escapeHtml(dsp.name || '')}
+                                    </span>
 
-                            </div>
-                        `)
-                        .join('')}
+                                </div>
+                            `)
+                            .join('')
+                    }
 
                 </div>
+
+
+                ${
+                    selectedPlatformCount > 16
+                        ? `
+                            <p class="text-[10px] text-gray-500">
+                                Showing the first 16 selected platforms.
+                                ${selectedPlatformCount - 16} more selected.
+                            </p>
+                        `
+                        : ''
+                }
 
             </div>
 
@@ -1295,203 +2130,783 @@ function renderStep2Content() {
 
             <div class="p-5 rounded-2xl bg-brand-dark border border-brand-border space-y-4">
 
-                <div>
-                    <h3 class="text-sm font-bold text-white">
-                        Distribution Territories
-                    </h3>
+                <div class="flex items-center justify-between gap-4">
 
-                    <p class="text-xs text-gray-500 mt-1">
-                        Choose where this release can be distributed.
-                    </p>
+                    <div>
+
+                        <h3 class="text-sm font-bold text-white">
+                            Distribution Territories
+                        </h3>
+
+                        <p class="text-xs text-gray-500 mt-1">
+                            Select exactly 2 territories for this release.
+                        </p>
+
+                    </div>
+
+
+                    <div
+                        data-territory-counter
+                        class="px-3 py-1.5 rounded-lg bg-brand-card border border-brand-border text-xs font-bold ${
+                            selectedTerritoryCount === 2
+                                ? 'text-green-400'
+                                : 'text-cyan-400'
+                            }"
+                    >
+                        ${selectedTerritoryCount} / 2
+                    </div>
+
                 </div>
 
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div
+                    class="flex items-center gap-3"
+                >
 
-                    <!-- WORLDWIDE -->
+                    <div class="relative flex-1">
 
-                    <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center gap-3 cursor-pointer">
-
-                        <input
-                            type="checkbox"
-                            ${s.delivery.territories.includes('Worldwide')
-                                ? 'checked'
-                                : ''}
-                            onchange="
-                                if (this.checked) {
-
-                                    window.releaseState.delivery.territories =
-                                        ['Worldwide'];
-
-                                } else {
-
-                                    window.releaseState.delivery.territories =
-                                        [];
-
-                                }
-                            "
-                            class="rounded bg-brand-dark border-brand-border text-cyan-400"
-                        >
-
-                        <span class="text-xs text-gray-200">
-                            Worldwide
-                        </span>
-
-                    </label>
-
-
-                    <!-- UNITED STATES -->
-
-                    <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center gap-3 cursor-pointer">
+                        <i
+                            class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs"
+                        ></i>
 
                         <input
-                            type="checkbox"
-                            ${s.delivery.territories.includes('US')
-                                ? 'checked'
-                                : ''}
-                            onchange="
-                                window.releaseState.delivery.territories =
-                                    Array.isArray(
-                                        window.releaseState.delivery.territories
-                                    )
-                                        ? window.releaseState.delivery.territories
-                                            .filter(x => x !== 'Worldwide')
-                                        : [];
-
-                                if (this.checked) {
-
-                                    if (
-                                        !window.releaseState.delivery.territories.includes('US')
-                                    ) {
-                                        window.releaseState.delivery.territories.push('US');
-                                    }
-
-                                }
-                            "
-                            class="rounded bg-brand-dark border-brand-border text-cyan-400"
+                            id="territorySearchInput"
+                            type="text"
+                            placeholder="Search countries or territories..."
+                            oninput="filterTerritories(this.value)"
+                            class="too-lost-input pl-9"
                         >
 
-                        <span class="text-xs text-gray-200">
-                            United States
-                        </span>
+                    </div>
 
-                    </label>
+                    <button
+                        type="button"
+                        onclick="clearTerritories()"
+                        class="px-4 py-2 rounded-xl bg-brand-card border border-brand-border text-gray-400 text-xs font-bold hover:text-white transition"
+                    >
+                        Clear
+                    </button>
+
+                </div>
 
 
-                    <!-- CANADA -->
+                <div
+                    id="territoryList"
+                    class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[420px] overflow-y-auto pr-1"
+                >
 
-                    <label class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center gap-3 cursor-pointer">
-
-                        <input
-                            type="checkbox"
-                            ${s.delivery.territories.includes('CA')
-                                ? 'checked'
-                                : ''}
-                            onchange="
-                                window.releaseState.delivery.territories =
-                                    Array.isArray(
-                                        window.releaseState.delivery.territories
-                                    )
-                                        ? window.releaseState.delivery.territories
-                                            .filter(x => x !== 'Worldwide')
-                                        : [];
-
-                                if (this.checked) {
-
-                                    if (
-                                        !window.releaseState.delivery.territories.includes('CA')
-                                    ) {
-                                        window.releaseState.delivery.territories.push('CA');
-                                    }
-
-                                }
-                            "
-                            class="rounded bg-brand-dark border-brand-border text-cyan-400"
-                        >
-
-                        <span class="text-xs text-gray-200">
-                            Canada
-                        </span>
-
-                    </label>
+                    ${renderTerritoryOptions('')}
 
                 </div>
 
 
                 <p class="text-[10px] text-gray-500">
-                    Territories use distribution codes such as US and CA.
+                    Too Lost requires exactly 2 territory codes. For example:
+                    US + CA or KE + US.
                 </p>
 
             </div>
 
+
         </div>
     `;
 }
+        
+// =========================================================
+// DSP MODAL
+// =========================================================
 
-window.openDspModal = function() {
-    if (!window.releaseState.dsps) {
+window.openDspModal = function(searchTerm = '') {
+
+    if (!Array.isArray(window.releaseState.dsps)) {
         window.releaseState.dsps = [];
     }
 
+
     const modalHtml = `
-        <div id="dspModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
-            <div class="bg-brand-card border border-brand-border rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
-                <div class="p-5 border-b border-brand-border flex items-center justify-between">
-                    <h3 class="text-base font-bold text-white">Select Distribution Stores</h3>
-                    <div class="flex gap-2">
-                        <button type="button" onclick="toggleAllDsps(true)" class="text-xs text-cyan-400 hover:underline">Select All</button>
-                        <span class="text-gray-600">•</span>
-                        <button type="button" onclick="toggleAllDsps(false)" class="text-xs text-gray-400 hover:underline">Deselect All</button>
+
+        <div
+            id="dspModal"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4"
+        >
+
+            <div
+                class="bg-brand-card border border-brand-border rounded-2xl w-full max-w-4xl max-h-[88vh] flex flex-col shadow-2xl"
+            >
+
+
+                <!-- HEADER -->
+
+                <div class="p-5 border-b border-brand-border">
+
+                    <div class="flex items-center justify-between gap-4">
+
+                        <div>
+
+                            <h3 class="text-base font-bold text-white">
+                                Select Distribution Stores
+                            </h3>
+
+                            <p class="text-[10px] text-gray-500 mt-1">
+                                ${window.releaseState.dsps.length}
+                                of ${MASTER_DSP_LIST.length}
+                                selected · Maximum 120 per release
+                            </p>
+
+                        </div>
+
+
+                        <button
+                            type="button"
+                            onclick="closeDspModal()"
+                            class="w-8 h-8 rounded-lg bg-brand-dark text-gray-400 hover:text-white"
+                        >
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+
                     </div>
+
+
+                    <div class="flex items-center gap-3 mt-4">
+
+                        <div class="relative flex-1">
+
+                            <i
+                                class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs"
+                            ></i>
+
+                            <input
+                                id="dspSearchInput"
+                                type="text"
+                                value="${escapeHtml(searchTerm || '')}"
+                                placeholder="Search platforms..."
+                                oninput="filterDspPlatforms(this.value)"
+                                class="too-lost-input pl-9"
+                            >
+
+                        </div>
+
+
+                        <button
+                            type="button"
+                            onclick="toggleAllDsps(true)"
+                            class="text-xs text-cyan-400 hover:underline whitespace-nowrap"
+                        >
+                            Select Max 120
+                        </button>
+
+
+                        <button
+                            type="button"
+                            onclick="toggleAllDsps(false)"
+                            class="text-xs text-gray-400 hover:underline whitespace-nowrap"
+                        >
+                            Deselect All
+                        </button>
+
+                    </div>
+
                 </div>
 
-                <div class="p-5 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    ${MASTER_DSP_LIST.map(dsp => {
-                        const isChecked = window.releaseState.dsps.includes(dsp.id);
-                        return `
-                            <label class="p-3 rounded-xl bg-brand-dark border border-brand-border flex items-center justify-between cursor-pointer hover:border-cyan-500/50 transition">
-                                <div class="flex items-center gap-3">
-                                    <i class="${dsp.icon} text-xl w-6 text-center"></i>
-                                    <span class="text-xs font-medium text-white">${dsp.name}</span>
-                                </div>
-                                <input type="checkbox" value="${dsp.id}" ${isChecked ? 'checked' : ''} 
-                                       onchange="toggleSingleDsp('${dsp.id}', this.checked)" class="rounded bg-brand-card border-brand-border text-brand-accent focus:ring-0">
-                            </label>
-                        `;
-                    }).join('')}
+
+                <!-- PLATFORM LIST -->
+
+                <div
+                    id="dspPlatformList"
+                    class="p-5 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+                >
+
+                    ${renderDspOptions(searchTerm || '')}
+
                 </div>
 
-                <div class="p-4 border-t border-brand-border flex justify-end">
-                    <button type="button" onclick="closeDspModal()" class="px-5 py-2 rounded-xl bg-brand-accent text-brand-dark font-bold text-xs">Done</button>
+
+                <!-- FOOTER -->
+
+                <div
+                    class="p-4 border-t border-brand-border flex items-center justify-between"
+                >
+
+                    <span
+                        id="dspSelectedCount"
+                        class="text-xs text-gray-500"
+                    >
+                        ${window.releaseState.dsps.length} selected
+                    </span>
+
+
+                    <button
+                        type="button"
+                        onclick="closeDspModal()"
+                        class="px-5 py-2 rounded-xl bg-brand-accent text-brand-dark font-bold text-xs"
+                    >
+                        Done
+                    </button>
+
                 </div>
+
             </div>
+
         </div>
     `;
 
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    document.body.insertAdjacentHTML(
+        'beforeend',
+        modalHtml
+    );
 };
+
+
+// =========================================================
+// RENDER DSP OPTIONS
+// =========================================================
+
+window.renderDspOptions = function(searchTerm = '') {
+
+    const query =
+        String(searchTerm || '')
+            .trim()
+            .toLowerCase();
+
+
+    const filtered =
+        MASTER_DSP_LIST.filter(dsp =>
+            !query ||
+            dsp.name.toLowerCase().includes(query)
+        );
+
+
+    if (!filtered.length) {
+
+        return `
+            <div class="col-span-full text-center py-10 text-gray-500 text-sm">
+                No platforms found.
+            </div>
+        `;
+
+    }
+
+
+    return filtered.map(dsp => {
+
+        const isChecked =
+            window.releaseState.dsps.includes(dsp.id);
+
+        const maxReached =
+            window.releaseState.dsps.length >= 120 &&
+            !isChecked;
+
+
+        return `
+
+            <label
+                class="p-3 rounded-xl bg-brand-dark border border-brand-border flex items-center justify-between gap-3 ${
+                    maxReached
+                        ? 'opacity-40 cursor-not-allowed'
+                        : 'cursor-pointer hover:border-cyan-500/50'
+                } transition"
+            >
+
+                <div class="flex items-center gap-3 min-w-0">
+
+                    <i
+                        class="${escapeHtml(dsp.icon || '')} text-lg w-6 text-center"
+                    ></i>
+
+                    <span
+                        class="text-xs font-medium text-white truncate"
+                        title="${escapeHtml(dsp.name)}"
+                    >
+                        ${escapeHtml(dsp.name)}
+                    </span>
+
+                </div>
+
+
+                <input
+                    type="checkbox"
+                    value="${escapeHtml(dsp.id)}"
+                    ${isChecked ? 'checked' : ''}
+                    ${maxReached ? 'disabled' : ''}
+                    onchange="toggleSingleDsp('${escapeHtml(dsp.id)}', this.checked)"
+                    class="rounded bg-brand-card border-brand-border text-brand-accent focus:ring-0"
+                >
+
+            </label>
+
+        `;
+
+    }).join('');
+};
+
+
+// =========================================================
+// FILTER DSP PLATFORMS
+// =========================================================
+
+window.filterDspPlatforms = function(searchTerm) {
+
+    const list =
+        document.getElementById(
+            'dspPlatformList'
+        );
+
+    if (!list) {
+        return;
+    }
+
+
+    list.innerHTML =
+        renderDspOptions(searchTerm);
+};
+
+
+// =========================================================
+// CLOSE DSP MODAL
+// =========================================================
 
 window.closeDspModal = function() {
-    const modal = document.getElementById('dspModal');
-    if (modal) modal.remove();
-    const container = document.getElementById('wizardStepContainer');
-    if (container && window.currentStep === 2) container.innerHTML = renderStep2Content();
-};
 
-window.toggleSingleDsp = function(id, isChecked) {
-    if (isChecked) {
-        if (!window.releaseState.dsps.includes(id)) window.releaseState.dsps.push(id);
-    } else {
-        window.releaseState.dsps = window.releaseState.dsps.filter(d => d != id);
+    const modal =
+        document.getElementById('dspModal');
+
+    if (modal) {
+        modal.remove();
     }
+
+
+    const container =
+        document.getElementById(
+            'wizardStepContainer'
+        );
+
+    if (
+        container &&
+        window.currentStep === 2
+    ) {
+
+        container.innerHTML =
+            renderStep2Content();
+
+    }
+
 };
 
-window.toggleAllDsps = function(selectAll) {
-    window.releaseState.dsps = selectAll ? MASTER_DSP_LIST.map(d => d.id) : [];
-    closeDspModal();
-    openDspModal();
+
+// =========================================================
+// TOGGLE SINGLE DSP
+// =========================================================
+
+window.toggleSingleDsp = function(
+    id,
+    isChecked
+) {
+
+    if (!Array.isArray(window.releaseState.dsps)) {
+        window.releaseState.dsps = [];
+    }
+
+
+    if (isChecked) {
+
+        if (
+            window.releaseState.dsps.length >= 120
+        ) {
+
+            alert(
+                'Too Lost allows a maximum of 120 platforms per release.'
+            );
+
+            return;
+        }
+
+
+        if (
+            !window.releaseState.dsps.includes(id)
+        ) {
+
+            window.releaseState.dsps.push(id);
+
+        }
+
+    } else {
+
+        window.releaseState.dsps =
+            window.releaseState.dsps.filter(
+                dspId => dspId !== id
+            );
+
+    }
+
+
+    // Refresh only the modal list.
+    const searchInput =
+        document.getElementById(
+            'dspSearchInput'
+        );
+
+    const searchTerm =
+        searchInput?.value || '';
+
+
+    const list =
+        document.getElementById(
+            'dspPlatformList'
+        );
+
+    if (list) {
+
+        list.innerHTML =
+            renderDspOptions(searchTerm);
+
+    }
+
+
+    const count =
+        document.getElementById(
+            'dspSelectedCount'
+        );
+
+    if (count) {
+
+        count.textContent =
+            `${window.releaseState.dsps.length} selected`;
+
+    }
+
 };
 
+
+// =========================================================
+// SELECT / DESELECT PLATFORMS
+// =========================================================
+
+window.toggleAllDsps = function(
+    selectAll
+) {
+
+    if (selectAll) {
+
+        // Too Lost maximum = 120.
+        window.releaseState.dsps =
+            MASTER_DSP_LIST
+                .slice(0, 120)
+                .map(dsp => dsp.id);
+
+    } else {
+
+        window.releaseState.dsps = [];
+
+    }
+
+
+    const searchInput =
+        document.getElementById(
+            'dspSearchInput'
+        );
+
+    const searchTerm =
+        searchInput?.value || '';
+
+
+    const list =
+        document.getElementById(
+            'dspPlatformList'
+        );
+
+    if (list) {
+
+        list.innerHTML =
+            renderDspOptions(searchTerm);
+
+    }
+
+
+    const count =
+        document.getElementById(
+            'dspSelectedCount'
+        );
+
+    if (count) {
+
+        count.textContent =
+            `${window.releaseState.dsps.length} selected`;
+
+    }
+
+};
+
+// =========================================================
+// TERRITORY OPTIONS
+// =========================================================
+
+window.renderTerritoryOptions = function(
+    searchTerm = ''
+) {
+
+    const query =
+        String(searchTerm || '')
+            .trim()
+            .toLowerCase();
+
+
+    const selected =
+        Array.isArray(
+            window.releaseState.delivery?.territories
+        )
+            ? window.releaseState.delivery.territories
+            : [];
+
+
+    const filtered =
+        TOO_LOST_TERRITORIES.filter(
+            territory =>
+                !query ||
+                territory.code.toLowerCase().includes(query) ||
+                territory.name.toLowerCase().includes(query)
+        );
+
+
+    if (!filtered.length) {
+
+        return `
+            <div class="col-span-full text-center py-10 text-gray-500 text-sm">
+                No territories found.
+            </div>
+        `;
+
+    }
+
+
+    return filtered.map(territory => {
+
+        const isChecked =
+            selected.includes(
+                territory.code
+            );
+
+
+        const maxReached =
+            selected.length >= 2 &&
+            !isChecked;
+
+
+        return `
+
+            <label
+                class="p-3 rounded-xl bg-brand-card border border-brand-border flex items-center justify-between gap-3 ${
+                    maxReached
+                        ? 'opacity-40 cursor-not-allowed'
+                        : 'cursor-pointer hover:border-cyan-500/50'
+                } transition"
+            >
+
+                <div class="flex items-center gap-3 min-w-0">
+
+                    <div
+                        class="w-8 h-8 rounded-lg bg-brand-dark border border-brand-border flex items-center justify-center shrink-0"
+                    >
+
+                        <span
+                            class="text-[10px] font-bold text-cyan-400"
+                        >
+                            ${escapeHtml(territory.code)}
+                        </span>
+
+                    </div>
+
+
+                    <span
+                        class="text-xs font-medium text-white truncate"
+                        title="${escapeHtml(territory.name)}"
+                    >
+                        ${escapeHtml(territory.name)}
+                    </span>
+
+                </div>
+
+
+                <input
+                    type="checkbox"
+                    value="${escapeHtml(territory.code)}"
+                    ${isChecked ? 'checked' : ''}
+                    ${maxReached ? 'disabled' : ''}
+                    onchange="toggleTerritory('${escapeHtml(territory.code)}', this.checked)"
+                    class="rounded bg-brand-dark border-brand-border text-cyan-400 focus:ring-0"
+                >
+
+            </label>
+
+        `;
+
+    }).join('');
+};
+
+
+// =========================================================
+// FILTER TERRITORIES
+// =========================================================
+
+window.filterTerritories = function(
+    searchTerm
+) {
+
+    const list =
+        document.getElementById(
+            'territoryList'
+        );
+
+    if (!list) {
+        return;
+    }
+
+
+    list.innerHTML =
+        renderTerritoryOptions(
+            searchTerm
+        );
+
+};
+
+
+// =========================================================
+// TOGGLE TERRITORY
+// =========================================================
+
+window.toggleTerritory = function(
+    code,
+    isChecked
+) {
+
+    window.releaseState.delivery =
+        window.releaseState.delivery || {};
+
+
+    if (
+        !Array.isArray(
+            window.releaseState.delivery.territories
+        )
+    ) {
+
+        window.releaseState.delivery.territories =
+            [];
+
+    }
+
+
+    if (isChecked) {
+
+        if (
+            window.releaseState.delivery.territories.length >= 2
+        ) {
+
+            alert(
+                'Too Lost allows exactly 2 distribution territories.'
+            );
+
+            return;
+
+        }
+
+
+        if (
+            !window.releaseState.delivery.territories.includes(code)
+        ) {
+
+            window.releaseState.delivery.territories.push(code);
+
+        }
+
+    } else {
+
+        window.releaseState.delivery.territories =
+            window.releaseState.delivery.territories.filter(
+                territory => territory !== code
+            );
+
+    }
+
+
+    const searchInput =
+        document.getElementById(
+            'territorySearchInput'
+        );
+
+    const searchTerm =
+        searchInput?.value || '';
+
+
+    const list =
+        document.getElementById(
+            'territoryList'
+        );
+
+    if (list) {
+
+        list.innerHTML =
+            renderTerritoryOptions(
+                searchTerm
+            );
+
+    }
+
+
+    // Update the counter without rerendering
+    // the whole Step 2 screen.
+    const counter =
+        document.querySelector(
+            '[data-territory-counter]'
+        );
+
+    if (counter) {
+
+        counter.textContent =
+            `${window.releaseState.delivery.territories.length} / 2`;
+
+    }
+
+};
+
+
+// =========================================================
+// CLEAR TERRITORIES
+// =========================================================
+
+window.clearTerritories = function() {
+
+    window.releaseState.delivery =
+        window.releaseState.delivery || {};
+
+
+    window.releaseState.delivery.territories =
+        [];
+
+
+    const searchInput =
+        document.getElementById(
+            'territorySearchInput'
+        );
+
+    const searchTerm =
+        searchInput?.value || '';
+
+
+    const list =
+        document.getElementById(
+            'territoryList'
+        );
+
+    if (list) {
+
+        list.innerHTML =
+            renderTerritoryOptions(
+                searchTerm
+            );
+
+    }
+
+};
 // STEP 3 CONTENT
 function renderStep3Content() {
     return `
@@ -3338,83 +4753,167 @@ updateProgress(
     'Saving distribution stores and territories...'
 );
 
+// =========================================================
+// RESOLVE SELECTED PLATFORMS
+// =========================================================
+//
+// window.releaseState.dsps contains Audiory internal IDs.
+// Too Lost requires its exact platform names.
+//
+// Example:
+// Audiory ID -> tl-platform-123-spotify
+// Too Lost   -> Spotify
+// =========================================================
+
 const selectedPlatforms =
-    Array.isArray(window.releaseState.dsps)
-        ? window.releaseState.dsps
-        : [];
+    (
+        Array.isArray(window.releaseState.dsps)
+            ? window.releaseState.dsps
+            : []
+    )
+    .map(id => {
+
+        const platform =
+            MASTER_DSP_LIST.find(
+                dsp => dsp.id === id
+            );
+
+        return platform?.tooLostValue || null;
+
+    })
+    .filter(Boolean);
+
+
+// =========================================================
+// RESOLVE SELECTED TERRITORIES
+// =========================================================
 
 const selectedTerritories =
-    Array.isArray(window.releaseState.delivery?.territories)
-        ? window.releaseState.delivery.territories
-            .filter(t => t && t !== 'Worldwide')
-        : [];
+    (
+        Array.isArray(
+            window.releaseState.delivery?.territories
+        )
+            ? window.releaseState.delivery.territories
+            : []
+    )
+    .filter(code =>
+        TOO_LOST_TERRITORY_CODES.includes(code)
+    );
 
-// Too Lost requires at least one store/platform.
+
+// =========================================================
+// VALIDATE PLATFORM SELECTION
+// =========================================================
+
 if (!selectedPlatforms.length) {
+
     throw new Error(
-        'Please select at least one distribution store before submitting.'
+        'Please select at least one distribution platform before submitting.'
     );
+
 }
 
-// Too Lost requires territories.
-// Worldwide is an Audiory convenience option, so do not send
-// "Worldwide" as a Too Lost territory code.
-if (!selectedTerritories.length) {
+
+if (selectedPlatforms.length > 120) {
+
     throw new Error(
-        'Please select at least one distribution territory before submitting.'
+        'Too Lost allows a maximum of 120 distribution platforms per release.'
     );
+
 }
+
+
+// =========================================================
+// VALIDATE TERRITORIES
+// =========================================================
+
+if (selectedTerritories.length !== 2) {
+
+    throw new Error(
+        'Please select exactly 2 distribution territories before submitting.'
+    );
+
+}
+
+
+// =========================================================
+// DELIVERY PAYLOAD
+// =========================================================
 
 const deliveryPayload = {
+
     delivery: {
+
         platforms: selectedPlatforms,
+
         territories: selectedTerritories,
+
         additional: {
-            youtube: Boolean(
-                window.releaseState.delivery?.youtube
-            ),
 
-            facebook: Boolean(
-                window.releaseState.delivery?.facebook
-            ),
+            youtube:
+                Boolean(
+                    window.releaseState.delivery?.youtube
+                ),
 
-            soundcloud: Boolean(
-                window.releaseState.delivery?.soundcloud
-            ),
+            facebook:
+                Boolean(
+                    window.releaseState.delivery?.facebook
+                ),
 
-            soundExchange: Boolean(
-                window.releaseState.delivery?.soundExchange
-            ),
+            soundcloud:
+                Boolean(
+                    window.releaseState.delivery?.soundcloud
+                ),
 
-            trackLibs: Boolean(
-                window.releaseState.delivery?.trackLibs
-            ),
+            soundExchange:
+                Boolean(
+                    window.releaseState.delivery?.soundExchange
+                ),
 
-            lyricfind: Boolean(
-                window.releaseState.delivery?.lyricfind
-            ),
+            trackLibs:
+                Boolean(
+                    window.releaseState.delivery?.trackLibs
+                ),
 
-            even: Boolean(
-                window.releaseState.delivery?.even
-            )
+            lyricfind:
+                Boolean(
+                    window.releaseState.delivery?.lyricfind
+                )
+
         },
 
-        beatPort: Boolean(
-            window.releaseState.delivery?.beatPort
-        )
+        beatPort:
+            Boolean(
+                window.releaseState.delivery?.beatPort
+            )
+
     },
 
+    // Keep these aliases because your Worker currently
+    // accepts them and resolves them into the Too Lost body.
     platforms: selectedPlatforms,
+
     territories: selectedTerritories,
+
     dsps: selectedPlatforms
+
 };
 
-// Beatport information, only when Beatport is enabled.
-if (window.releaseState.delivery?.beatPort) {
+
+// =========================================================
+// BEATPORT FORM
+// =========================================================
+
+if (
+    window.releaseState.delivery?.beatPort
+) {
+
     deliveryPayload.delivery.beatPortForm = {
-        hasAccount: Boolean(
-            window.releaseState.delivery?.beatPortHasAccount
-        ),
+
+        hasAccount:
+            Boolean(
+                window.releaseState.delivery?.beatPortHasAccount
+            ),
 
         link:
             window.releaseState.delivery?.beatPortLink ||
@@ -3424,8 +4923,11 @@ if (window.releaseState.delivery?.beatPort) {
             window.releaseState.delivery?.beatPortLabelLogo ||
             null,
 
-        removeImg: false
+        removeImg:
+            false
+
     };
+
 }
 
 const deliveryEndpoint =
@@ -3621,9 +5123,7 @@ console.log(
     }
 };
 
-
-WORKERS
-
+2. workers
 
 // =============================================================
 // RELEASE API ROUTES
