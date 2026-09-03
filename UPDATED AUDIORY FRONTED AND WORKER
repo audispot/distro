@@ -1,4 +1,7 @@
-1. FRONTED
+FRONTED
+
+};
+})();
 
 // Initial Release State with expanded tracks and delivery structure
 window.releaseState = window.releaseState || {
@@ -2159,13 +2162,24 @@ window.syncTrackArtistsFromReleaseArtists = function() {
 window.syncTrackArtistsFromReleaseArtists();
 
 window.validateAudioFile = function(file, label = 'Audio') {
-    if (!file) throw new Error(`${label} file is required.`);
-    const validExtension = /\.(wav|flac)$/i.test(file.name);
-    const validMime = ['audio/wav', 'audio/x-wav', 'audio/flac', 'audio/x-flac'].includes(file.type);
-
-    if (!validExtension && !validMime) {
-        throw new Error(`${label} must be a WAV or FLAC file.`);
+    if (!file) {
+        throw new Error(`${label} file is required.`);
     }
+
+    const isFlacExtension =
+        /\.flac$/i.test(file.name || '');
+
+    const isFlacMime =
+        ['audio/flac', 'audio/x-flac'].includes(
+            file.type
+        );
+
+    if (!isFlacExtension && !isFlacMime) {
+        throw new Error(
+            `${label} must be a FLAC (.flac) file.`
+        );
+    }
+
     return true;
 };
 
@@ -2363,7 +2377,7 @@ function renderStep6Content() {
     const validationHtml = validationErrors.length === 0
         ? `
             <div class="text-emerald-400 font-bold">
-                ✓ Release is ready for Too Lost submission.
+                ✓ Release is ready for submission.
             </div>
           `
         : `
@@ -2608,7 +2622,7 @@ window.handleFormSubmission = async function(event) {
     }
 
     if (progressCard) progressCard.style.display = 'block';
-    updateProgress(5, 'Initializing submission pipeline...');
+    updateProgress(5, 'Initializing submission...');
 
     try {
         const totalTracks = window.releaseState.tracks?.length || 0;
@@ -2633,27 +2647,88 @@ window.handleFormSubmission = async function(event) {
         }
 
         for (let i = 0; i < totalTracks; i++) {
-            const track = window.releaseState.tracks[i];
-            if (track.audioFile) {
-                updateProgress(
-                    20 + Math.floor((completedSteps / (totalUploadSteps || 1)) * 60), 
-                    `Uploading Track ${i + 1} of ${totalTracks}: "${track.metadata?.title || 'Master Audio'}"...`
+
+    const track = window.releaseState.tracks[i];
+
+    // =========================================================
+    // MASTER AUDIO → AUDIORY R2
+    // =========================================================
+
+    if (track.audioFile) {
+
+        updateProgress(
+            20 +
+            Math.floor(
+                (completedSteps /
+                (totalUploadSteps || 1)) * 60
+            ),
+            `Uploading Track ${i + 1} of ${totalTracks}: "${track.metadata?.title || 'Master Audio'}"...`
+        );
+
+        const trackRes =
+            await uploadFileToR2(
+                track.audioFile,
+                'audio'
+            );
+
+        const trackUrl =
+            typeof trackRes === 'string'
+                ? trackRes
+                : (
+                    trackRes?.url ||
+                    trackRes?.location ||
+                    ''
                 );
-                const trackRes = await uploadFileToR2(track.audioFile, 'audio');
-                const trackUrl = typeof trackRes === 'string' ? trackRes : (trackRes?.url || trackRes?.location || '');
-                window.releaseState.tracks[i].audioUrl = trackUrl;
-            }
 
-            if (track.instrumentalFile) {
-                updateProgress(40, `Uploading Track ${i + 1} Instrumental...`);
-                const instrumentalRes = await uploadFileToR2(track.instrumentalFile, 'instrumental');
-                const instrumentalUrl = typeof instrumentalRes === 'string' ? instrumentalRes : (instrumentalRes?.url || instrumentalRes?.location || instrumentalRes?.path || '');
-
-                if (!instrumentalUrl) throw new Error(`Track ${i + 1} instrumental upload returned no URL.`);
-                window.releaseState.tracks[i].instrumentalUrl = instrumentalUrl;
-            }
-            completedSteps++;
+        if (!trackUrl) {
+            throw new Error(
+                `Track ${i + 1} R2 upload returned no URL.`
+            );
         }
+
+        window.releaseState.tracks[i].audioUrl =
+            trackUrl;
+    }
+
+    // =========================================================
+    // INSTRUMENTAL → AUDIORY R2
+    // =========================================================
+
+    if (track.instrumentalFile) {
+
+        updateProgress(
+            50,
+            `Uploading Track ${i + 1} Instrumental...`
+        );
+
+        const instrumentalRes =
+            await uploadFileToR2(
+                track.instrumentalFile,
+                'instrumental'
+            );
+
+        const instrumentalUrl =
+            typeof instrumentalRes === 'string'
+                ? instrumentalRes
+                : (
+                    instrumentalRes?.url ||
+                    instrumentalRes?.location ||
+                    instrumentalRes?.path ||
+                    ''
+                );
+
+        if (!instrumentalUrl) {
+            throw new Error(
+                `Track ${i + 1} instrumental upload returned no URL.`
+            );
+        }
+
+        window.releaseState.tracks[i].instrumentalUrl =
+            instrumentalUrl;
+    }
+
+    completedSteps++;
+}
 
         updateProgress(80, 'Formatting release metadata & participant roles...');
 
@@ -2831,16 +2906,586 @@ window.handleFormSubmission = async function(event) {
             throw new Error(apiErrMessage);
         }
 
-        releaseId = serverResponse?.id || serverResponse?.data?.id || releaseId;
+        releaseId =
+            serverResponse?.releaseId ||
+            serverResponse?.id ||
+            serverResponse?.data?.id ||
+            serverResponse?.createResponse?.data?.id ||
+            serverResponse?.metadataResponse?.data?.id ||
+            releaseId;
 
         if (!releaseId) {
-            throw new Error('Release was created but the server did not return a release ID.');
+            throw new Error(
+                'Release was created but the server did not return a release ID.'
+            );
         }
 
-        // SUBMIT RELEASE TO TOO LOST API
-        updateProgress(95, 'Submitting release package to Too Lost...');
+        // =============================================================
+// UPLOAD TRACK AUDIO FILES TO TOO LOST
+// NOW THAT releaseId EXISTS
+// =============================================================
 
-        const submitEndpoint = `${WORKER_BASE_URL}/api/releases/${releaseId}/submit`;
+for (let i = 0; i < totalTracks; i++) {
+
+    const track = window.releaseState.tracks[i];
+
+    // =========================================================
+    // MASTER AUDIO → TOO LOST
+    // =========================================================
+
+    if (track.audioFile) {
+
+        updateProgress(
+            82,
+            `Sending Track ${i + 1} to Too Lost...`
+        );
+
+        const tooLostForm = new FormData();
+
+        tooLostForm.append(
+            'file',
+            track.audioFile,
+            track.audioFile.name
+        );
+
+        tooLostForm.append(
+            'kind',
+            'audio'
+        );
+
+        const tooLostUploadResponse =
+            await fetch(
+                `${WORKER_BASE_URL}/api/releases/${releaseId}/tracks/upload`,
+                {
+                    method: 'POST',
+
+                    headers: {
+                        'Authorization':
+                            `Bearer ${token}`
+                    },
+
+                    body: tooLostForm
+                }
+            );
+
+        const tooLostUploadText =
+            await tooLostUploadResponse.text();
+
+        let tooLostUploadData = {};
+
+        try {
+            tooLostUploadData =
+                JSON.parse(
+                    tooLostUploadText || "{}"
+                );
+        } catch (e) {
+            tooLostUploadData = {
+                raw: tooLostUploadText
+            };
+        }
+
+        if (!tooLostUploadResponse.ok) {
+            throw new Error(
+                `Too Lost master audio upload failed (${tooLostUploadResponse.status}): ${
+                    tooLostUploadData?.error ||
+                    tooLostUploadData?.details ||
+                    tooLostUploadText
+                }`
+            );
+        }
+
+        const audioFileKey =
+            tooLostUploadData?.fileKey;
+
+        if (!audioFileKey) {
+            throw new Error(
+                `Too Lost did not return an audio fileKey for Track ${i + 1}.`
+            );
+        }
+
+        window.releaseState.tracks[i].audioFileKey =
+            audioFileKey;
+    }
+
+    // =========================================================
+    // INSTRUMENTAL → TOO LOST
+    // =========================================================
+
+    if (track.instrumentalFile) {
+
+        updateProgress(
+            86,
+            `Sending Track ${i + 1} instrumental...`
+        );
+
+        const instrumentalForm =
+            new FormData();
+
+        instrumentalForm.append(
+            'file',
+            track.instrumentalFile,
+            track.instrumentalFile.name
+        );
+
+        instrumentalForm.append(
+            'kind',
+            'instrumental'
+        );
+
+        const instrumentalTooLostResponse =
+            await fetch(
+                `${WORKER_BASE_URL}/api/releases/${releaseId}/tracks/upload`,
+                {
+                    method: 'POST',
+
+                    headers: {
+                        'Authorization':
+                            `Bearer ${token}`
+                    },
+
+                    body: instrumentalForm
+                }
+            );
+
+        const instrumentalTooLostText =
+            await instrumentalTooLostResponse.text();
+
+        let instrumentalTooLostData = {};
+
+        try {
+            instrumentalTooLostData =
+                JSON.parse(
+                    instrumentalTooLostText || "{}"
+                );
+        } catch (e) {
+            instrumentalTooLostData = {
+                raw: instrumentalTooLostText
+            };
+        }
+
+        if (!instrumentalTooLostResponse.ok) {
+            throw new Error(
+                `Too Lost instrumental upload failed (${instrumentalTooLostResponse.status}): ${
+                    instrumentalTooLostData?.error ||
+                    instrumentalTooLostData?.details ||
+                    instrumentalTooLostText
+                }`
+            );
+        }
+
+        const instrumentalFileKey =
+            instrumentalTooLostData?.fileKey;
+
+        if (!instrumentalFileKey) {
+            throw new Error(
+                `Too Lost did not return an instrumental fileKey for Track ${i + 1}.`
+            );
+        }
+
+        window.releaseState.tracks[i].instrumentalFileKey =
+            instrumentalFileKey;
+    }
+}
+
+        // =============================================================
+        // ATTACH TRACKS TO TOO LOST RELEASE
+        // =============================================================
+
+        updateProgress(
+            88,
+            'Saving release tracks...'
+        );
+
+        const tooLostTracks =
+            (window.releaseState.tracks || []).map(
+                (track) => {
+
+                    const artists =
+                        (track.artists || [])
+                            .filter(
+                                artist =>
+                                    artist?.name?.trim()
+                            )
+                            .map(
+                                (artist) => ({
+                                    name:
+                                        artist.name.trim(),
+
+                                    role:
+                                        Array.isArray(artist.role)
+                                            ? artist.role
+                                            : [
+                                                String(
+                                                    artist.role ||
+                                                    'primary'
+                                                ).toLowerCase()
+                                            ],
+
+                                    ...(artist.default !== undefined
+                                        ? {
+                                            default:
+                                                Boolean(
+                                                    artist.default
+                                                )
+                                        }
+                                        : {})
+                                })
+                            );
+
+                    const writers = [];
+
+                    for (const writer of (track.writers || [])) {
+                        const name = writer?.name?.trim();
+
+                        if (!name) {
+                            continue;
+                        }
+
+                        const roles = Array.isArray(writer.role)
+                            ? writer.role
+                            : [
+                                String(
+                                    writer.role || 'instrumentalist'
+                                ).toLowerCase()
+                            ];
+
+                        const existingWriter = writers.find(
+                            existing =>
+                                existing.name.toLowerCase() === name.toLowerCase()
+                        );
+
+                        if (existingWriter) {
+                            // Same writer already exists.
+                            // Merge any additional roles instead of
+                            // sending a duplicate writer object.
+                            for (const role of roles) {
+                                if (!existingWriter.role.includes(role)) {
+                                    existingWriter.role.push(role);
+                                }
+                            }
+                        } else {
+                            writers.push({
+                                name,
+                                role: roles
+                            });
+                        }
+                    }
+
+                    if (!track.audioFileKey) {
+                        throw new Error(
+                            `Track "${track.metadata?.title || 'Untitled'}" is missing its audio fileKey.`
+                        );
+                    }
+
+                    if (!artists.length) {
+                        throw new Error(
+                            `Track "${track.metadata?.title || 'Untitled'}" has no artists.`
+                        );
+                    }
+
+                    if (!writers.length) {
+                        throw new Error(
+                            `Track "${track.metadata?.title || 'Untitled'}" has no writers.`
+                        );
+                    }
+
+                    const trackBody = {
+                        title:
+                            track.metadata?.title?.trim() ||
+                            '',
+
+                        language:
+                            window.releaseState.metadata?.language ||
+                            'en',
+
+                        audioFileKey:
+                            track.audioFileKey,
+
+                        artists,
+
+                        writers
+                    };
+
+                    // Optional fields
+                    if (
+                        track.instrumentalFileKey
+                    ) {
+                        trackBody.instrumentalFileKey =
+                            track.instrumentalFileKey;
+                    }
+
+                    if (
+                        track.dolbyFileKey
+                    ) {
+                        trackBody.dolbyFileKey =
+                            track.dolbyFileKey;
+                    }
+
+                    if (
+                        track.isrc?.trim()
+                    ) {
+                        trackBody.isrc =
+                            track.isrc.trim();
+                    }
+
+                    if (
+                        track.iswc?.trim()
+                    ) {
+                        trackBody.iswc =
+                            track.iswc.trim();
+                    }
+
+                    if (
+                        track.metadata?.version?.trim()
+                    ) {
+                        trackBody.version =
+                            track.metadata.version.trim();
+                    }
+
+                    if (
+                        track.tiktokStartTime?.trim()
+                    ) {
+                        trackBody.tiktokStartTime =
+                            track.tiktokStartTime.trim();
+                    }
+
+                    if (
+                        track.lyrics?.content?.trim()
+                    ) {
+                        trackBody.lyrics = {
+                            content:
+                                track.lyrics.content.trim(),
+
+                            explicit:
+                                Boolean(
+                                    track.lyrics.explicit
+                                ),
+
+                            cleanVersion:
+                                Boolean(
+                                    track.lyrics.cleanVersion
+                                )
+                        };    
+                    }
+
+                    return trackBody;
+                }
+            );
+
+        const tracksResponse =
+            await fetch(
+                `${WORKER_BASE_URL}/api/releases/${releaseId}/tracks`,
+                {
+                    method: 'PUT',
+
+                    headers: {
+                        'Content-Type':
+                            'application/json',
+
+                        'Accept':
+                            'application/json',
+
+                        'Authorization':
+                            `Bearer ${token}`
+                    },
+
+                    body: JSON.stringify({
+                        tracks:
+                            tooLostTracks
+                    })
+                }
+            );
+
+        const tracksResponseText =
+            await tracksResponse.text();
+
+        let tracksResponseData = {};
+
+        try {
+            tracksResponseData =
+                JSON.parse(
+                    tracksResponseText || "{}"
+                );
+        } catch (e) {
+            tracksResponseData = {
+                raw: tracksResponseText
+            };
+        }
+
+        if (!tracksResponse.ok) {
+
+            throw new Error(
+                `Too Lost track save failed (${tracksResponse.status}): ${
+                    tracksResponseData?.message ||
+                    tracksResponseData?.error ||
+                    tracksResponseData?.detail ||
+                    tracksResponseText
+                }`
+            );
+        }
+
+        console.log(
+            'TOO LOST TRACKS SAVED:',
+            tracksResponseData
+        );
+
+        // ============================================================
+// SAVE DELIVERY / STORE SELECTIONS TO TOO LOST
+// ============================================================
+
+updateProgress(
+    92,
+    'Saving distribution stores and territories...'
+);
+
+const selectedPlatforms =
+    Array.isArray(window.releaseState.dsps)
+        ? window.releaseState.dsps
+        : [];
+
+const selectedTerritories =
+    Array.isArray(window.releaseState.delivery?.territories)
+        ? window.releaseState.delivery.territories
+            .filter(t => t && t !== 'Worldwide')
+        : [];
+
+// Too Lost requires at least one store/platform.
+if (!selectedPlatforms.length) {
+    throw new Error(
+        'Please select at least one distribution store before submitting.'
+    );
+}
+
+// Too Lost requires territories.
+// Worldwide is an Audiory convenience option, so do not send
+// "Worldwide" as a Too Lost territory code.
+if (!selectedTerritories.length) {
+    throw new Error(
+        'Please select at least one distribution territory before submitting.'
+    );
+}
+
+const deliveryPayload = {
+    delivery: {
+        platforms: selectedPlatforms,
+        territories: selectedTerritories,
+        additional: {
+            youtube: Boolean(
+                window.releaseState.delivery?.youtube
+            ),
+
+            facebook: Boolean(
+                window.releaseState.delivery?.facebook
+            ),
+
+            soundcloud: Boolean(
+                window.releaseState.delivery?.soundcloud
+            ),
+
+            soundExchange: Boolean(
+                window.releaseState.delivery?.soundExchange
+            ),
+
+            trackLibs: Boolean(
+                window.releaseState.delivery?.trackLibs
+            ),
+
+            lyricfind: Boolean(
+                window.releaseState.delivery?.lyricfind
+            ),
+
+            even: Boolean(
+                window.releaseState.delivery?.even
+            )
+        },
+
+        beatPort: Boolean(
+            window.releaseState.delivery?.beatPort
+        )
+    },
+
+    platforms: selectedPlatforms,
+    territories: selectedTerritories,
+    dsps: selectedPlatforms
+};
+
+// Beatport information, only when Beatport is enabled.
+if (window.releaseState.delivery?.beatPort) {
+    deliveryPayload.delivery.beatPortForm = {
+        hasAccount: Boolean(
+            window.releaseState.delivery?.beatPortHasAccount
+        ),
+
+        link:
+            window.releaseState.delivery?.beatPortLink ||
+            null,
+
+        newLogo:
+            window.releaseState.delivery?.beatPortLabelLogo ||
+            null,
+
+        removeImg: false
+    };
+}
+
+const deliveryEndpoint =
+    `${WORKER_BASE_URL}/api/releases/${releaseId}/delivery`;
+
+const deliveryRes = await fetch(
+    deliveryEndpoint,
+    {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(deliveryPayload)
+    }
+);
+
+const deliveryResponseText =
+    await deliveryRes.text();
+
+let deliveryResponseData = {};
+
+try {
+    deliveryResponseData =
+        JSON.parse(
+            deliveryResponseText || '{}'
+        );
+} catch (e) {
+    deliveryResponseData = {
+        raw: deliveryResponseText
+    };
+}
+
+if (!deliveryRes.ok) {
+    throw new Error(
+        `Too Lost delivery configuration failed (${deliveryRes.status}): ${
+            deliveryResponseData?.message ||
+            deliveryResponseData?.error ||
+            deliveryResponseText
+        }`
+    );
+}
+
+console.log(
+    'Too Lost delivery configuration saved:',
+    deliveryResponseData
+);
+
+        // =============================================================
+        // NOW SUBMIT RELEASE TO TOO LOST
+        // =============================================================
+
+        updateProgress(
+            95,
+            'Submitting release...'
+        );
+
+        const submitEndpoint =
+            `${WORKER_BASE_URL}/api/releases/${releaseId}/submit`;
 
         const submitPayload = {
             ...payload,
@@ -2977,7 +3622,8 @@ window.handleFormSubmission = async function(event) {
 };
 
 
-2. WORKERS
+WORKERS
+
 
 // =============================================================
 // RELEASE API ROUTES
@@ -4057,7 +4703,450 @@ const canonicalSecondaryGenre =
   );
 }
 
-  // =============================================================
+// =============================================================
+// ROUTE 2A: UPLOAD TRACK FILE TO TOO LOST
+//
+// POST /api/releases/:id/tracks/upload
+//
+// Audiory frontend sends the actual FLAC file as multipart/form-data.
+//
+// Worker:
+//   1. Requests a Too Lost upload URL
+//   2. Uploads the FLAC to that URL
+//   3. Returns the Too Lost fileKey
+//
+// Supported kinds:
+//   audio
+//   instrumental
+//   dolby
+// =============================================================
+
+const trackUploadMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)\/tracks\/upload$/
+  );
+
+if (
+  trackUploadMatch &&
+  request.method === "POST"
+) {
+
+  const releaseId =
+    trackUploadMatch[1];
+
+  try {
+
+    // -----------------------------------------------------------
+    // Read multipart form
+    // -----------------------------------------------------------
+
+    const formData =
+      await request.formData();
+
+    const file =
+      formData.get("file");
+
+    const kind =
+      String(
+        formData.get("kind") || "audio"
+      ).trim();
+
+    // -----------------------------------------------------------
+    // Validate file
+    // -----------------------------------------------------------
+
+    if (!file || typeof file.arrayBuffer !== "function") {
+      return new Response(
+        JSON.stringify({
+          error: "No audio file was supplied."
+        }),
+        {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    if (
+      !["audio", "instrumental", "dolby"].includes(kind)
+    ) {
+      return new Response(
+        JSON.stringify({
+          error: "Invalid Too Lost track file kind.",
+          allowed: [
+            "audio",
+            "instrumental",
+            "dolby"
+          ]
+        }),
+        {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    // Too Lost requires FLAC for this upload operation.
+    const originalFileName =
+      String(
+        file.name ||
+        `track-${Date.now()}.flac`
+      ).trim();
+
+    if (!/\.flac$/i.test(originalFileName)) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "Too Lost requires FLAC audio files. Please upload a .flac file."
+        }),
+        {
+          status: 422,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    const fileName =
+      originalFileName
+        .replace(/[^A-Za-z0-9._-]/g, "_")
+        .slice(0, 255);
+
+    // -----------------------------------------------------------
+    // 1. REQUEST TOO LOST UPLOAD URL
+    // -----------------------------------------------------------
+
+    const uploadUrlResponse =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}/tracks/upload-url`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({
+            contentType: "audio/flac",
+            fileName,
+            kind
+          })
+        }
+      );
+
+    const uploadUrlText =
+      await uploadUrlResponse.text();
+
+    let uploadUrlJson = {};
+
+    try {
+      uploadUrlJson =
+        JSON.parse(
+          uploadUrlText || "{}"
+        );
+    } catch (e) {
+      uploadUrlJson = {
+        raw: uploadUrlText
+      };
+    }
+
+    if (!uploadUrlResponse.ok) {
+
+      console.error(
+        "TOO LOST TRACK UPLOAD URL ERROR:",
+        uploadUrlResponse.status,
+        uploadUrlText
+      );
+
+      return new Response(
+        JSON.stringify({
+          error:
+            "Too Lost rejected the track upload URL request.",
+          status:
+            uploadUrlResponse.status,
+          details:
+            uploadUrlJson
+        }),
+        {
+          status: uploadUrlResponse.status,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    const uploadData =
+      uploadUrlJson?.data ||
+      {};
+
+    const uploadUrl =
+      uploadData.uploadUrl;
+
+    const fileKey =
+      uploadData.fileKey;
+
+    const uploadMethod =
+      uploadData.method ||
+      "PUT";
+
+    const uploadHeaders =
+      uploadData.headers ||
+      {};
+
+    if (!uploadUrl || !fileKey) {
+
+      return new Response(
+        JSON.stringify({
+          error:
+            "Too Lost returned an invalid track upload URL response.",
+          response:
+            uploadUrlJson
+        }),
+        {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    // -----------------------------------------------------------
+    // 2. UPLOAD ACTUAL FLAC TO TOO LOST
+    // -----------------------------------------------------------
+
+    const fileBytes =
+      await file.arrayBuffer();
+
+    const tooLostFileResponse =
+      await fetch(
+        uploadUrl,
+        {
+          method: uploadMethod,
+          headers: uploadHeaders,
+          body: fileBytes
+        }
+      );
+
+    const tooLostFileText =
+      await tooLostFileResponse.text();
+
+    if (!tooLostFileResponse.ok) {
+
+      console.error(
+        "TOO LOST TRACK FILE UPLOAD ERROR:",
+        tooLostFileResponse.status,
+        tooLostFileText
+      );
+
+      return new Response(
+        JSON.stringify({
+          error:
+            "The audio file could not be uploaded to Too Lost.",
+          status:
+            tooLostFileResponse.status,
+          details:
+            tooLostFileText,
+          fileKey
+        }),
+        {
+          status: tooLostFileResponse.status,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    // -----------------------------------------------------------
+    // SUCCESS
+    // -----------------------------------------------------------
+
+    console.log(
+      "TOO LOST TRACK FILE UPLOADED",
+      {
+        releaseId,
+        kind,
+        fileName,
+        fileKey
+      }
+    );
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        releaseId,
+        kind,
+        fileName,
+        fileKey,
+        expiresIn:
+          uploadData.expiresIn ||
+          null
+      }),
+      {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+  } catch (error) {
+
+    console.error(
+      "Audiory Too Lost track upload error:",
+      error
+    );
+
+    return new Response(
+      JSON.stringify({
+        error:
+          "Audiory could not upload the track to Too Lost.",
+        details:
+          error?.message ||
+          String(error)
+      }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+}
+
+// =============================================================
+// ROUTE 2B: REPLACE RELEASE TRACKS
+//
+// PUT /api/releases/:id/tracks
+//
+// Audiory -> Too Lost
+// PUT /releases/{releaseId}/tracks
+// =============================================================
+
+const releaseTracksMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)\/tracks$/
+  );
+
+if (
+  releaseTracksMatch &&
+  request.method === "PUT"
+) {
+
+  const releaseId =
+    releaseTracksMatch[1];
+
+  const payloadText =
+    await request.text();
+
+  let payloadObj = {};
+
+  try {
+    payloadObj =
+      JSON.parse(
+        payloadText || "{}"
+      );
+  } catch (e) {
+
+    return new Response(
+      JSON.stringify({
+        error:
+          "Invalid JSON request body."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  if (
+    !Array.isArray(payloadObj.tracks) ||
+    payloadObj.tracks.length === 0
+  ) {
+
+    return new Response(
+      JSON.stringify({
+        error:
+          "At least one release track is required."
+      }),
+      {
+        status: 422,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  console.log(
+    "AUDIORY -> TOO LOST PUT RELEASE TRACKS",
+    JSON.stringify({
+      releaseId,
+      trackCount:
+        payloadObj.tracks.length
+    })
+  );
+
+  const response =
+    await fetch(
+      `${baseUrl}/releases/${releaseId}/tracks`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          tracks:
+            payloadObj.tracks
+        })
+      }
+    );
+
+  const responseText =
+    await response.text();
+
+  console.log(
+    "TOO LOST RELEASE TRACKS RESPONSE",
+    response.status,
+    responseText
+  );
+
+  return new Response(
+    responseText,
+    {
+      status: response.status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+// =============================================================
 // ROUTE 2: SUBMIT RELEASE
 //
 // POST /api/releases/:id/submit
