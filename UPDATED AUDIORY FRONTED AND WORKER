@@ -4795,7 +4795,15 @@ updateProgress(
 const selectedPlatformIds =
     Array.isArray(window.releaseState.dsps)
         ? window.releaseState.dsps
+            .filter(id =>
+                MASTER_DSP_LIST.some(
+                    dsp => dsp.id === id
+                )
+            )
+            .slice(0, 120)
         : [];
+
+window.releaseState.dsps = selectedPlatformIds;
 
 // Convert Audiory internal IDs -> exact Too Lost platform names.
 const resolvedPlatforms = selectedPlatformIds
