@@ -236,6 +236,217 @@ if (
   }
 }
 
+// =============================================================
+// TOO LOST GENRE LOOKUP
+//
+// Audiory
+//   GET /api/toolost/genres
+//
+// Too Lost
+//   GET /v1/lookup/genres
+//
+// Too Lost returns:
+//
+// {
+//   "data": [
+//     "Alternative",
+//     "World/Afro-Beat",
+//     ...
+//   ]
+// }
+// =============================================================
+
+if (
+  request.method === "GET" &&
+  url.pathname === "/api/toolost/genres"
+) {
+  try {
+
+    const response = await fetch(
+      `${baseUrl}/lookup/genres`,
+      {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    const responseText =
+      await response.text();
+
+    console.log(
+      "TOO LOST GENRE RAW RESPONSE:",
+      {
+        status: response.status,
+        body: responseText
+      }
+    );
+
+    let data;
+
+    try {
+      data = JSON.parse(
+        responseText || "{}"
+      );
+    } catch (error) {
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message:
+            "Too Lost returned an invalid genre response.",
+          raw: responseText
+        }),
+        {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            "Content-Type":
+              "application/json"
+          }
+        }
+      );
+    }
+
+    if (!response.ok) {
+
+      console.error(
+        "TOO LOST GENRE LOOKUP FAILED:",
+        data
+      );
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message:
+            data?.message ||
+            data?.error ||
+            `Too Lost genre lookup failed (${response.status})`,
+          tooLostResponse: data
+        }),
+        {
+          status: response.status,
+          headers: {
+            ...corsHeaders,
+            "Content-Type":
+              "application/json"
+          }
+        }
+      );
+    }
+
+    let genres = [];
+
+    if (Array.isArray(data?.data)) {
+
+      genres =
+        data.data;
+
+    } else if (
+      Array.isArray(data?.data?.genres)
+    ) {
+
+      genres =
+        data.data.genres;
+
+    } else if (
+      Array.isArray(data?.genres)
+    ) {
+
+      genres =
+        data.genres;
+
+    } else if (Array.isArray(data)) {
+
+      genres =
+        data;
+    }
+
+    genres = [
+      ...new Set(
+        genres
+          .map(genre =>
+            String(
+              genre || ""
+            ).trim()
+          )
+          .filter(Boolean)
+      )
+    ];
+
+    console.log(
+      "TOO LOST GENRE NORMALIZATION:",
+      {
+        count: genres.length,
+        genres
+      }
+    );
+
+    if (!genres.length) {
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message:
+            "Too Lost returned no available genres.",
+          tooLostResponse: data
+        }),
+        {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            "Content-Type":
+              "application/json"
+          }
+        }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: {
+          genres
+        }
+      }),
+      {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type":
+            "application/json"
+        }
+      }
+    );
+
+  } catch (error) {
+
+    console.error(
+      "TOO LOST GENRE LOOKUP ERROR:",
+      error
+    );
+
+    return new Response(
+      JSON.stringify({
+        success: false,
+        message:
+          error?.message ||
+          "Unable to retrieve Too Lost genres."
+      }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type":
+            "application/json"
+        }
+      }
+    );
+  }
+}
+
 if (isReleasePath) {
 
   if (!userId) {
@@ -575,14 +786,22 @@ if (typeof payloadObj.releaseTime === "string") {
 
 
   // =============================================================
-// TOO LOST GENRE NORMALIZATION
+// TOO LOST GENRE RESOLUTION
 //
-// Audiory may use friendly/display names.
-// Too Lost requires its exact supported enum values.
+// Audiory has its own display names.
 //
-// IMPORTANT:
-// We only map known Audiory aliases to values that actually
-// exist in the Too Lost schema.
+// Too Lost exposes the authoritative accepted genre list through:
+//
+// GET /lookup/genres
+//
+// We therefore:
+//   1. Keep explicit aliases for known Audiory names.
+//   2. Match exact Too Lost values.
+//   3. Match normalized values.
+//   4. Reject anything that cannot be matched.
+//
+// This prevents invalid genre values from ever being sent
+// blindly to Too Lost.
 // =============================================================
 
 const TOO_LOST_GENRE_ALIASES = {
@@ -607,7 +826,7 @@ const TOO_LOST_GENRE_ALIASES = {
     "World/Afro-Pop",
 
   // -----------------------------------------------------------
-  // DIRECT TOO LOST VALUES
+  // KNOWN DIRECT VALUES
   // -----------------------------------------------------------
 
   "African":
@@ -657,22 +876,38 @@ const TOO_LOST_GENRE_ALIASES = {
 
   "Pop":
     "Dance / Pop"
-
 };
 
 
 // =============================================================
-// NORMALIZE GENRE
+// NORMALIZE GENRE TEXT FOR COMPARISON
 // =============================================================
 
-const normalizeGenre = (value) => {
+const normalizeGenreComparison = (value) => {
 
-  if (!value) {
-    return null;
-  }
+  return String(value || "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\u202F/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/[–—−]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s*-\s*/g, "-");
+};
+
+
+// =============================================================
+// RESOLVE GENRE AGAINST LIVE TOO LOST LIST
+// =============================================================
+
+const resolveTooLostGenre = (
+  value,
+  availableGenres
+) => {
 
   const cleaned =
-    String(value)
+    String(value || "")
       .replace(/\u00A0/g, " ")
       .replace(/\u202F/g, " ")
       .trim();
@@ -681,27 +916,284 @@ const normalizeGenre = (value) => {
     return null;
   }
 
-  // Exact known Audiory -> Too Lost mapping
-  if (
-    Object.prototype.hasOwnProperty.call(
-      TOO_LOST_GENRE_ALIASES,
-      cleaned
-    )
-  ) {
-    return TOO_LOST_GENRE_ALIASES[cleaned];
+  const genres =
+    Array.isArray(availableGenres)
+      ? availableGenres
+      : [];
+
+  // -----------------------------------------------------------
+  // 1. EXPLICIT AUDIORY ALIAS
+  // -----------------------------------------------------------
+
+  const explicitAlias =
+    TOO_LOST_GENRE_ALIASES[cleaned];
+
+  if (explicitAlias) {
+
+    const explicitMatch =
+      genres.find(
+        genre =>
+          String(genre).trim() ===
+          explicitAlias
+      );
+
+    if (explicitMatch) {
+      return explicitMatch;
+    }
+
+    // If Too Lost ever returns the alias itself
+    // exactly as configured, accept it.
+    return explicitAlias;
   }
 
-  // Otherwise assume the value is already a Too Lost
-  // enum value and pass it through unchanged.
-  return cleaned;
+
+  // -----------------------------------------------------------
+  // 2. EXACT CASE-INSENSITIVE MATCH
+  // -----------------------------------------------------------
+
+  const exactMatch =
+    genres.find(
+      genre =>
+        String(genre)
+          .trim()
+          .toLowerCase() ===
+        cleaned.toLowerCase()
+    );
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+
+  // -----------------------------------------------------------
+  // 3. NORMALIZED MATCH
+  //
+  // Handles things such as:
+  //
+  // Hip Hop
+  // Hip-Hop
+  //
+  // and harmless spacing differences.
+  // -----------------------------------------------------------
+
+  const normalizedInput =
+    normalizeGenreComparison(cleaned);
+
+  const normalizedMatch =
+    genres.find(
+      genre =>
+        normalizeGenreComparison(
+          genre
+        ) === normalizedInput
+    );
+
+  if (normalizedMatch) {
+    return normalizedMatch;
+  }
+
+
+  // -----------------------------------------------------------
+  // 4. NO SAFE MATCH
+  // -----------------------------------------------------------
+
+  return null;
 };
 
 
+// =============================================================
+// FETCH LIVE TOO LOST GENRES
+// =============================================================
+
+const getTooLostGenres = async () => {
+
+  const response =
+    await fetch(
+      `${baseUrl}/lookup/genres`,
+      {
+        method: "GET",
+        headers: {
+          "Accept":
+            "application/json",
+          "Authorization":
+            `Bearer ${accessToken}`
+        }
+      }
+    );
+
+  const responseText =
+    await response.text();
+
+  let data = {};
+
+  try {
+    data =
+      JSON.parse(
+        responseText || "{}"
+      );
+  } catch (error) {
+    throw new Error(
+      "Too Lost returned invalid genre lookup JSON."
+    );
+  }
+
+  if (!response.ok) {
+
+    throw new Error(
+      data?.message ||
+      data?.error ||
+      `Too Lost genre lookup failed (${response.status})`
+    );
+  }
+
+  let genres = [];
+
+  if (Array.isArray(data?.data)) {
+
+    genres =
+      data.data;
+
+  } else if (
+    Array.isArray(data?.data?.genres)
+  ) {
+
+    genres =
+      data.data.genres;
+
+  } else if (
+    Array.isArray(data?.genres)
+  ) {
+
+    genres =
+      data.genres;
+
+  } else if (Array.isArray(data)) {
+
+    genres =
+      data;
+  }
+
+  return [
+    ...new Set(
+      genres
+        .map(
+          genre =>
+            String(
+              genre || ""
+            ).trim()
+        )
+        .filter(Boolean)
+    )
+  ];
+};
+
+
+// =============================================================
+// GET AUTHORITATIVE TOO LOST GENRE LIST
+// =============================================================
+
+let tooLostGenres = [];
+
+try {
+
+  tooLostGenres =
+    await getTooLostGenres();
+
+} catch (genreLookupError) {
+
+  console.error(
+    "TOO LOST GENRE LOOKUP FAILED:",
+    genreLookupError
+  );
+
+  return new Response(
+    JSON.stringify({
+      error:
+        "Unable to retrieve the current Too Lost genre list.",
+      details:
+        genreLookupError?.message ||
+        String(genreLookupError)
+    }),
+    {
+      status: 502,
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}
+
+
+// =============================================================
+// RESOLVE PRIMARY + SECONDARY GENRES
+// =============================================================
+
 const canonicalPrimaryGenre =
-  normalizeGenre(primaryGenre);
+  resolveTooLostGenre(
+    primaryGenre,
+    tooLostGenres
+  );
 
 const canonicalSecondaryGenre =
-  normalizeGenre(secondaryGenre);
+  resolveTooLostGenre(
+    secondaryGenre,
+    tooLostGenres
+  );
+
+
+// =============================================================
+// FAIL EARLY IF AUDIORY SENT AN UNKNOWN GENRE
+// =============================================================
+
+if (
+  primaryGenre &&
+  !canonicalPrimaryGenre
+) {
+
+  return new Response(
+    JSON.stringify({
+      error:
+        "Audiory primary genre is not supported by the current Too Lost genre list.",
+      primaryGenre,
+      availableGenres:
+        tooLostGenres
+    }),
+    {
+      status: 400,
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}
+
+
+if (
+  secondaryGenre &&
+  !canonicalSecondaryGenre
+) {
+
+  return new Response(
+    JSON.stringify({
+      error:
+        "Audiory secondary genre is not supported by the current Too Lost genre list.",
+      secondaryGenre,
+      availableGenres:
+        tooLostGenres
+    }),
+    {
+      status: 400,
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}
 
 
   // =============================================================
