@@ -1,0 +1,1346 @@
+// ============================================================
+// CATALOG ACTIONS - EDIT RELEASE
+// ============================================================
+
+window.editReleaseCatalog = async function(index) {
+    const item = window.releasesCatalog?.[index];
+
+    if (!item) {
+        console.error('Audiory: release not found for editing', index);
+        return;
+    }
+
+    const releaseId = item.id || item.releaseId;
+
+    if (!releaseId) {
+        window.showToast('This release does not have a valid release ID.', true);
+        return;
+    }
+
+    console.log(
+        'Audiory: loading release for editing',
+        {
+            index,
+            releaseId,
+            title: item.title
+        }
+    );
+
+    try {
+
+        // --------------------------------------------------------
+        // 1. LOAD TOO LOST PLATFORMS IF NECESSARY
+        // --------------------------------------------------------
+
+        if (
+            typeof TOO_LOST_PLATFORMS_LOADED !== 'undefined' &&
+            !TOO_LOST_PLATFORMS_LOADED &&
+            typeof loadTooLostPlatforms === 'function'
+        ) {
+            try {
+                await loadTooLostPlatforms();
+            } catch (platformError) {
+                console.warn(
+                    'Audiory: platform lookup failed while opening edit mode.',
+                    platformError
+                );
+            }
+        }
+
+        // --------------------------------------------------------
+        // 2. NORMALIZE RELEASE-LEVEL ARTISTS
+        // --------------------------------------------------------
+
+        const participantSource =
+            Array.isArray(item.participants) &&
+            item.participants.length
+                ? item.participants
+                : (
+                    Array.isArray(item.artists)
+                        ? item.artists
+                        : []
+                );
+
+        let extractedArtists =
+            participantSource
+                .map(artist => {
+
+                    const name =
+                        typeof artist === 'string'
+                            ? artist
+                            : (
+                                artist?.name ||
+                                ''
+                            );
+
+                    const roleValue =
+                        typeof artist === 'string'
+                            ? 'primary'
+                            : artist?.role;
+
+                    const role =
+                        Array.isArray(roleValue)
+                            ? (
+                                roleValue[0] ||
+                                'primary'
+                            )
+                            : (
+                                roleValue ||
+                                'primary'
+                            );
+
+                    return {
+                        name: String(name).trim(),
+                        role: String(role).toLowerCase()
+                    };
+                })
+                .filter(artist => artist.name);
+
+        if (!extractedArtists.length) {
+            extractedArtists = [
+                {
+                    name: '',
+                    role: 'primary'
+                }
+            ];
+        }
+
+        // --------------------------------------------------------
+        // 3. LABEL
+        // --------------------------------------------------------
+
+        const labelObject =
+            item.label &&
+            typeof item.label === 'object'
+                ? item.label
+                : null;
+
+        const labelName =
+            labelObject?.name ||
+            labelObject?.label ||
+            (
+                typeof item.label === 'string'
+                    ? item.label
+                    : ''
+            ) ||
+            '';
+
+        const cLine =
+            item.cLine ||
+            item.c_line ||
+            labelObject?.cLine ||
+            labelObject?.c_line ||
+            '';
+
+        const pLine =
+            item.pLine ||
+            item.p_line ||
+            labelObject?.pLine ||
+            labelObject?.p_line ||
+            '';
+
+        const cYear =
+            item.cYear ||
+            item.c_year ||
+            labelObject?.cYear ||
+            labelObject?.c_year ||
+            (
+                String(cLine)
+                    .match(/\b(19|20)\d{2}\b/)?.[0]
+            ) ||
+            new Date().getFullYear().toString();
+
+        const pYear =
+            item.pYear ||
+            item.p_year ||
+            labelObject?.pYear ||
+            labelObject?.p_year ||
+            (
+                String(pLine)
+                    .match(/\b(19|20)\d{2}\b/)?.[0]
+            ) ||
+            new Date().getFullYear().toString();
+
+        // --------------------------------------------------------
+        // 4. RELEASE DATES / TIME
+        // --------------------------------------------------------
+
+        const releaseTimeObject =
+            item.releaseTime &&
+            typeof item.releaseTime === 'object'
+                ? item.releaseTime
+                : null;
+
+        const releaseTime =
+            releaseTimeObject?.time ||
+            (
+                typeof item.releaseTime === 'string'
+                    ? item.releaseTime
+                    : ''
+            ) ||
+            '';
+
+        const timezone =
+            releaseTimeObject?.timeZone ||
+            releaseTimeObject?.timezone ||
+            item.timeZone ||
+            item.timezone ||
+            item.releaseTimezone ||
+            'Africa/Nairobi';
+
+        // --------------------------------------------------------
+        // 5. APPLE PREORDER
+        // --------------------------------------------------------
+
+        const applePreorderEnabled =
+            item.applePreorder === true ||
+            item.applePreorder?.enabled === true;
+
+        const applePreorderDate =
+            item.applePreorderDate ||
+            (
+                item.applePreorder &&
+                typeof item.applePreorder === 'object'
+                    ? item.applePreorder.date
+                    : ''
+            ) ||
+            '';
+
+        // --------------------------------------------------------
+        // 6. DELIVERY PLATFORM VALUES
+        //
+        // Too Lost returns actual platform names.
+        // Audiory UI uses internal IDs.
+        // Convert:
+        //
+        // "Spotify"
+        //     ↓
+        // "tl-platform-..."
+        // --------------------------------------------------------
+
+        const returnedPlatformValues =
+            Array.isArray(item.platforms)
+                ? item.platforms
+                : (
+                    Array.isArray(item.dsps)
+                        ? item.dsps
+                        : (
+                            Array.isArray(item.delivery?.platforms)
+                                ? item.delivery.platforms
+                                : []
+                        )
+                );
+
+        let selectedDspIds = [];
+
+        if (
+            Array.isArray(
+                typeof MASTER_DSP_LIST !== 'undefined'
+                    ? MASTER_DSP_LIST
+                    : []
+            )
+        ) {
+            selectedDspIds =
+                returnedPlatformValues
+                    .map(platformValue => {
+
+                        const value =
+                            String(platformValue || '').trim();
+
+                        const match =
+                            MASTER_DSP_LIST.find(
+                                dsp =>
+                                    dsp?.tooLostValue === value ||
+                                    dsp?.name === value ||
+                                    dsp?.id === value
+                            );
+
+                        return match?.id || null;
+                    })
+                    .filter(Boolean);
+        }
+
+        // If the release already contains Audiory IDs,
+        // preserve them as well.
+        if (!selectedDspIds.length) {
+            selectedDspIds =
+                returnedPlatformValues
+                    .filter(value =>
+                        typeof value === 'string'
+                    )
+                    .filter(value =>
+                        MASTER_DSP_LIST?.some(
+                            dsp => dsp.id === value
+                        )
+                    );
+        }
+
+        // --------------------------------------------------------
+        // 7. DELIVERY SETTINGS
+        // --------------------------------------------------------
+
+        const deliverySource =
+            item.delivery &&
+            typeof item.delivery === 'object'
+                ? item.delivery
+                : {};
+
+        const additionalDelivery =
+            deliverySource.additional &&
+            typeof deliverySource.additional === 'object'
+                ? deliverySource.additional
+                : {};
+
+        const territories =
+            Array.isArray(item.territories)
+                ? item.territories
+                : (
+                    Array.isArray(deliverySource.territories)
+                        ? deliverySource.territories
+                        : []
+                );
+
+        // --------------------------------------------------------
+        // 8. TRACKS
+        // --------------------------------------------------------
+
+        const sourceTracks =
+            Array.isArray(item.tracks)
+                ? item.tracks
+                : [];
+
+        const extractedTracks =
+            sourceTracks.length
+                ? sourceTracks.map((t, trackIndex) => {
+
+                    // -----------------------------
+                    // TRACK ARTISTS
+                    // -----------------------------
+
+                    const trackArtists =
+                        Array.isArray(t.artists)
+                            ? t.artists
+                                .map(artist => {
+
+                                    const name =
+                                        typeof artist === 'string'
+                                            ? artist
+                                            : (
+                                                artist?.name ||
+                                                ''
+                                            );
+
+                                    const roleValue =
+                                        typeof artist === 'string'
+                                            ? 'primary'
+                                            : artist?.role;
+
+                                    const role =
+                                        Array.isArray(roleValue)
+                                            ? (
+                                                roleValue[0] ||
+                                                'primary'
+                                            )
+                                            : (
+                                                roleValue ||
+                                                'primary'
+                                            );
+
+                                    return {
+                                        name:
+                                            String(name).trim(),
+                                        role:
+                                            String(role).toLowerCase(),
+                                        ...(artist?.default !== undefined
+                                            ? {
+                                                default:
+                                                    Boolean(
+                                                        artist.default
+                                                    )
+                                            }
+                                            : {})
+                                    };
+                                })
+                                .filter(
+                                    artist => artist.name
+                                )
+                            : [];
+
+                    // -----------------------------
+                    // TRACK WRITERS
+                    // -----------------------------
+
+                    const trackWriters =
+                        Array.isArray(t.writers)
+                            ? t.writers
+                                .map(writer => {
+
+                                    const name =
+                                        typeof writer === 'string'
+                                            ? writer
+                                            : (
+                                                writer?.name ||
+                                                ''
+                                            );
+
+                                    const roleValue =
+                                        typeof writer === 'string'
+                                            ? 'instrumentalist'
+                                            : writer?.role;
+
+                                    const roles =
+                                        Array.isArray(roleValue)
+                                            ? roleValue
+                                            : [
+                                                roleValue ||
+                                                'instrumentalist'
+                                            ];
+
+                                    return {
+                                        name:
+                                            String(name).trim(),
+
+                                        role:
+                                            roles.map(
+                                                role =>
+                                                    String(role)
+                                                        .toLowerCase()
+                                            )
+                                    };
+                                })
+                                .filter(
+                                    writer => writer.name
+                                )
+                            : [];
+
+                    // -----------------------------
+                    // CREDITS
+                    //
+                    // Editor currently stores credits
+                    // as:
+                    //
+                    // "John Doe: Producer; Jane: Mixing Engineer"
+                    //
+                    // Too Lost may return an array.
+                    // Convert it back to the format
+                    // parseCreditsToRows() expects.
+                    // -----------------------------
+
+                    let credits = '';
+
+                    if (Array.isArray(t.credits)) {
+
+                        credits =
+                            t.credits
+                                .map(credit => {
+
+                                    const name =
+                                        credit?.name ||
+                                        credit?.contributor ||
+                                        '';
+
+                                    const role =
+                                        credit?.role ||
+                                        credit?.type ||
+                                        'Producer';
+
+                                    if (!String(name).trim()) {
+                                        return '';
+                                    }
+
+                                    return `${String(name).trim()}: ${String(role).trim()}`;
+                                })
+                                .filter(Boolean)
+                                .join('; ');
+
+                    } else if (
+                        typeof t.credits === 'string'
+                    ) {
+
+                        credits =
+                            t.credits.trim();
+
+                    }
+
+                    // -----------------------------
+                    // LYRICS
+                    // -----------------------------
+
+                    const lyricsObject =
+                        t.lyrics &&
+                        typeof t.lyrics === 'object'
+                            ? t.lyrics
+                            : {};
+
+                    // -----------------------------
+                    // AUDIO
+                    //
+                    // CRITICAL:
+                    //
+                    // Keep audioFileKey even though
+                    // there is no File object.
+                    //
+                    // This allows edit mode to reuse
+                    // the existing Too Lost audio
+                    // without forcing the artist to
+                    // upload it again.
+                    // -----------------------------
+
+                    const audioUrl =
+                        t.audioUrl ||
+                        t.audio_url ||
+                        '';
+
+                    const instrumentalUrl =
+                        t.instrumentalUrl ||
+                        t.instrumental_url ||
+                        '';
+
+                    return {
+
+                        id:
+                            t.id ||
+                            null,
+
+                        metadata: {
+
+                            title:
+                                t.title ||
+                                t.metadata?.title ||
+                                '',
+
+                            version:
+                                t.version ||
+                                t.metadata?.version ||
+                                '',
+
+                            genre:
+                                t.genre ||
+                                t.metadata?.genre ||
+                                t.primaryGenre ||
+                                '',
+
+                            subgenre:
+                                t.subgenre ||
+                                t.metadata?.subgenre ||
+                                t.secondaryGenre ||
+                                '',
+
+                            explicit:
+                                Boolean(
+                                    t.explicit ??
+                                    t.metadata?.explicit
+                                )
+                        },
+
+                        discNumber:
+                            Number(
+                                t.discNumber ||
+                                t.disc_number ||
+                                1
+                            ),
+
+                        isrc:
+                            t.isrc ||
+                            '',
+
+                        // EXISTING TOO LOST MASTER
+                        audioFile:
+                            null,
+
+                        audioFileKey:
+                            t.audioFileKey ||
+                            t.audio_file_key ||
+                            null,
+
+                        audioUrl:
+                            audioUrl,
+
+                        previewUrl:
+                            audioUrl,
+
+                        // EXISTING TOO LOST INSTRUMENTAL
+                        instrumentalFile:
+                            null,
+
+                        instrumentalFileKey:
+                            t.instrumentalFileKey ||
+                            t.instrumental_file_key ||
+                            null,
+
+                        instrumentalUrl:
+                            instrumentalUrl,
+
+                        instrumentalPreviewUrl:
+                            instrumentalUrl,
+
+                        tiktokStartTime:
+                            t.tiktokStartTime ||
+                            t.tiktok_start_time ||
+                            '00:30',
+
+                        lyrics: {
+
+                            content:
+                                lyricsObject.content ||
+                                lyricsObject.plain ||
+                                (
+                                    typeof t.lyrics === 'string'
+                                        ? t.lyrics
+                                        : ''
+                                ) ||
+                                '',
+
+                            explicit:
+                                Boolean(
+                                    lyricsObject.explicit
+                                ),
+
+                            cleanVersion:
+                                Boolean(
+                                    lyricsObject.cleanVersion ??
+                                    lyricsObject.clean_version
+                                )
+                        },
+
+                        artists:
+                            trackArtists,
+
+                        writers:
+                            trackWriters,
+
+                        credits:
+                            credits
+                    };
+                })
+                : [
+                    {
+                        metadata: {
+                            title:
+                                item.title || '',
+                            version: '',
+                            genre:
+                                item.primaryGenre ||
+                                '',
+                            subgenre:
+                                item.secondaryGenre ||
+                                '',
+                            explicit:
+                                Boolean(item.explicit)
+                        },
+
+                        discNumber: 1,
+
+                        isrc: '',
+
+                        audioFile: null,
+
+                        audioFileKey: null,
+
+                        audioUrl: '',
+
+                        previewUrl: '',
+
+                        instrumentalFile: null,
+
+                        instrumentalFileKey: null,
+
+                        instrumentalUrl: '',
+
+                        instrumentalPreviewUrl: '',
+
+                        tiktokStartTime: '00:30',
+
+                        lyrics: {
+                            content: '',
+                            explicit: false,
+                            cleanVersion: false
+                        },
+
+                        artists: [],
+
+                        writers: [
+                            {
+                                name: '',
+                                role: [
+                                    'instrumentalist'
+                                ]
+                            }
+                        ],
+
+                        credits: ''
+                    }
+                ];
+
+        // --------------------------------------------------------
+        // 9. AGREEMENTS
+        //
+        // Editing should not erase them.
+        // For already submitted releases, preserve them
+        // as accepted.
+        // --------------------------------------------------------
+
+        const existingAgreements =
+            item.agreements &&
+            typeof item.agreements === 'object'
+                ? item.agreements
+                : {};
+
+        const isAlreadySubmitted =
+            String(
+                item.status || ''
+            ).toLowerCase() === 'in_review' ||
+            Boolean(item.submittedAt);
+
+        function tooLostGenreToAudioryGenre(value) {
+            const raw = String(value || '').trim();
+
+            if (!raw) return '';
+
+            // Already an Audiory dropdown value
+            if (
+                typeof GENRE_MAP !== 'undefined' &&
+                Object.prototype.hasOwnProperty.call(GENRE_MAP, raw)
+            ) {
+                return raw;
+            }
+
+            // Convert Too Lost's canonical value back to Audiory's dropdown value
+            if (typeof TOO_LOST_GENRE_ALIASES !== 'undefined') {
+                const match = Object.entries(TOO_LOST_GENRE_ALIASES).find(
+                    ([audioryName, tooLostValue]) =>
+                        String(tooLostValue).trim().toLowerCase() === raw.toLowerCase()
+                );
+
+                if (match) return match[0];
+            }
+
+            // Important fallback: preserve the value instead of making it blank
+            return raw;
+        }
+
+        const rawPrimaryGenre =
+            item.primaryGenre ||
+            item.primary_genre ||
+            item.genre ||
+            item.metadata?.primaryGenre ||
+            '';
+
+        const rawSecondaryGenre =
+            item.secondaryGenre ||
+            item.secondary_genre ||
+            item.subgenre ||
+            item.metadata?.secondaryGenre ||
+            '';
+
+        const audioryPrimaryGenre =
+            tooLostGenreToAudioryGenre(rawPrimaryGenre);
+
+        const audiorySecondaryGenre =
+            tooLostGenreToAudioryGenre(rawSecondaryGenre);
+
+        const returnedTerritories =
+            Array.isArray(deliverySource.territories)
+                ? deliverySource.territories
+                : (
+                    Array.isArray(item.territories)
+                        ? item.territories
+                        : []
+                );
+
+        const restoredTerritories =
+            returnedTerritories
+                .map(value => String(value || '').trim().toUpperCase())
+                .filter(code =>
+                    code !== 'WORLDWIDE' &&
+                    typeof TOO_LOST_TERRITORY_CODES !== 'undefined' &&
+                    TOO_LOST_TERRITORY_CODES.includes(code)
+                )
+                .slice(0, 2);
+
+        // --------------------------------------------------------
+        // 10. BUILD COMPLETE EDIT STATE
+        // --------------------------------------------------------
+
+        window.releaseState = {
+
+            editingId:
+                releaseId,
+
+            // Useful for Release Details later
+            status:
+                item.status ||
+                'draft',
+
+            catalogNumber:
+                item.catalogNumber ||
+                null,
+
+            upc:
+                item.upc ||
+                null,
+
+            metadata: {
+
+                title:
+                    item.title ||
+                    item.metadata?.title ||
+                    '',
+
+                type:
+                    item.type ||
+                    item.metadata?.type ||
+                    'Single',
+
+                language:
+                    item.language ||
+                    item.metadata?.language ||
+                    'English',
+
+                explicit:
+                    Boolean(
+                        item.explicit ??
+                        item.metadata?.explicit
+                    ),
+
+                primaryGenre:
+                    audioryPrimaryGenre || '',
+
+                secondaryGenre:
+                    audiorySecondaryGenre || '',
+
+                version:
+                    item.version ||
+                    item.metadata?.version ||
+                    '',
+
+                remixTitle:
+                    item.remixTitle ||
+                    item.remix_title ||
+                    ''
+            },
+
+            dates: {
+
+                releaseDate:
+                    item.releaseDate ||
+                    item.release_date ||
+                    '',
+
+                originalReleaseDate:
+                    item.originalReleaseDate ||
+                    item.original_release_date ||
+                    '',
+
+                releaseTime:
+                    releaseTime,
+
+                timezone:
+                    timezone
+            },
+
+            applePreorder: {
+
+                enabled:
+                    applePreorderEnabled,
+
+                date:
+                    applePreorderDate
+            },
+
+            license: {
+
+                type:
+                    item.licenseType ||
+                    item.license_type ||
+                    'Copyright',
+
+                info:
+                    item.licenseInfo ||
+                    item.license_info ||
+                    ''
+            },
+
+            label: {
+
+                name:
+                    labelName,
+
+                cLine:
+                    cLine,
+
+                pLine:
+                    pLine,
+
+                cYear:
+                    String(cYear),
+
+                pYear:
+                    String(pYear)
+            },
+
+            artwork: {
+
+                file:
+                    null,
+
+                url:
+                    item.coverUrl ||
+                    item.cover_url ||
+                    item.cover_art ||
+                    item.artwork ||
+                    item.compressedArtwork ||
+                    item.compressed_artwork ||
+                    '',
+
+                inspected:
+                    null
+            },
+
+            artists:
+                extractedArtists,
+
+            dsps:
+                selectedDspIds,
+
+            delivery: {
+
+                platforms:
+                    returnedPlatformValues,
+
+                territories:
+                    restoredTerritories,
+
+                youtube:
+                    additionalDelivery.youtube !== undefined
+                        ? Boolean(additionalDelivery.youtube)
+                        : true,
+
+                facebook:
+                    additionalDelivery.facebook !== undefined
+                        ? Boolean(additionalDelivery.facebook)
+                        : true,
+
+                soundcloud:
+                    additionalDelivery.soundcloud !== undefined
+                        ? Boolean(additionalDelivery.soundcloud)
+                        : true,
+
+                soundExchange:
+                    additionalDelivery.soundExchange !== undefined
+                        ? Boolean(additionalDelivery.soundExchange)
+                        : true,
+
+                trackLibs:
+                    additionalDelivery.trackLibs !== undefined
+                        ? Boolean(additionalDelivery.trackLibs)
+                        : false,
+
+                lyricfind:
+                    additionalDelivery.lyricfind !== undefined
+                        ? Boolean(additionalDelivery.lyricfind)
+                        : false,
+
+                beatPort:
+                    deliverySource.beatPort !== undefined
+                        ? Boolean(deliverySource.beatPort)
+                        : Boolean(item.beatPort),
+
+                beatPortHasAccount:
+                    Boolean(
+                        deliverySource.beatPortForm?.hasAccount
+                    ),
+
+                beatPortLink:
+                    deliverySource.beatPortForm?.link ||
+                    '',
+
+                beatPortLabelLogo:
+                    deliverySource.beatPortForm?.newLogo ||
+                    '',
+
+                hook:
+                    Boolean(
+                        additionalDelivery.hook
+                    ),
+
+                even:
+                    Boolean(
+                        additionalDelivery.even
+                    ),
+
+                video: {
+
+                    appleMusic:
+                        Boolean(
+                            additionalDelivery.video?.appleMusic
+                        ),
+
+                    vevo:
+                        Boolean(
+                            additionalDelivery.video?.vevo
+                        )
+                }
+            },
+
+            tracks:
+                extractedTracks,
+
+            agreements: {
+
+                termsAccepted:
+                    existingAgreements.termsAccepted !== undefined
+                        ? Boolean(
+                            existingAgreements.termsAccepted
+                        )
+                        : isAlreadySubmitted,
+
+                rightsConfirmed:
+                    existingAgreements.rightsConfirmed !== undefined
+                        ? Boolean(
+                            existingAgreements.rightsConfirmed
+                        )
+                        : isAlreadySubmitted,
+
+                youtubeRightsConfirmed:
+                    existingAgreements.youtubeRightsConfirmed !== undefined
+                        ? Boolean(
+                            existingAgreements.youtubeRightsConfirmed
+                        )
+                        : isAlreadySubmitted
+            }
+        };
+
+        // --------------------------------------------------------
+        // 11. DEBUG - SHOW WHAT WAS RESTORED
+        // --------------------------------------------------------
+
+        console.log(
+            'AUDIORY EDIT STATE RESTORED:',
+            {
+                releaseId:
+                    window.releaseState.editingId,
+
+                title:
+                    window.releaseState.metadata.title,
+
+                status:
+                    window.releaseState.status,
+
+                artists:
+                    window.releaseState.artists,
+
+                trackCount:
+                    window.releaseState.tracks.length,
+
+                tracks:
+                    window.releaseState.tracks.map(
+                        track => ({
+                            title:
+                                track.metadata?.title,
+
+                            audioFileKey:
+                                track.audioFileKey,
+
+                            audioUrl:
+                                track.audioUrl,
+
+                            instrumentalFileKey:
+                                track.instrumentalFileKey,
+
+                            instrumentalUrl:
+                                track.instrumentalUrl,
+
+                            artists:
+                                track.artists,
+
+                            writers:
+                                track.writers,
+
+                            credits:
+                                track.credits
+                        })
+                    ),
+
+                platforms:
+                    window.releaseState.dsps,
+
+                territories:
+                    window.releaseState.delivery.territories
+            }
+        );
+
+        // --------------------------------------------------------
+        // 12. OPEN CREATE / EDIT VIEW
+        // --------------------------------------------------------
+
+        switchView('create');
+
+        // Render the first step.
+        if (
+            typeof window.renderStepContent === 'function'
+        ) {
+            window.renderStepContent(1);
+        }
+
+        // Give the DOM a moment to exist before syncing
+        // any inputs that are not populated directly by
+        // renderStepContent().
+        setTimeout(() => {
+
+            try {
+                populateFormFromState();
+            } catch (populateError) {
+                console.warn(
+                    'Audiory: form population warning:',
+                    populateError
+                );
+            }
+
+        }, 100);
+
+        window.showToast(
+            'Release loaded for editing',
+            false
+        );
+
+    } catch (error) {
+
+        console.error(
+            'Audiory: failed to load release for editing:',
+            error
+        );
+
+        window.showToast(
+            error?.message ||
+            'Unable to load this release for editing.',
+            true
+        );
+    }
+};
+
+
+// ============================================================
+// SYNC EDIT STATE → FORM INPUTS
+// ============================================================
+
+function populateFormFromState() {
+
+    const state =
+        window.releaseState;
+
+    if (!state) {
+        return;
+    }
+
+    // --------------------------------------------------------
+    // Helper
+    // --------------------------------------------------------
+
+    function setValue(selectors, value) {
+
+        if (!Array.isArray(selectors)) {
+            selectors = [selectors];
+        }
+
+        for (const selector of selectors) {
+
+            const element =
+                document.querySelector(selector);
+
+            if (!element) {
+                continue;
+            }
+
+            if (
+                element.tagName === 'SELECT' &&
+                value !== undefined &&
+                value !== null &&
+                value !== ''
+            ) {
+                const optionExists =
+                    Array.from(
+                        element.options
+                    ).some(
+                        option =>
+                            String(option.value) ===
+                            String(value)
+                    );
+
+                if (optionExists) {
+                    element.value = value;
+                }
+            } else if (
+                value !== undefined &&
+                value !== null
+            ) {
+                element.value = value;
+            }
+
+            break;
+        }
+    }
+
+    // --------------------------------------------------------
+    // RELEASE TITLE
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'input[name="title"]',
+            '#release-title'
+        ],
+        state.metadata?.title || ''
+    );
+
+    // --------------------------------------------------------
+    // RELEASE TYPE
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'select[name="type"]',
+            '#release-type'
+        ],
+        state.metadata?.type || 'Single'
+    );
+
+    // --------------------------------------------------------
+    // LANGUAGE
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'select[name="language"]',
+            '#release-language'
+        ],
+        state.metadata?.language || ''
+    );
+
+    // --------------------------------------------------------
+    // PRIMARY GENRE
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'select[name="primaryGenre"]',
+            '#primary-genre'
+        ],
+        state.metadata?.primaryGenre || ''
+    );
+
+    // --------------------------------------------------------
+    // SECONDARY GENRE
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'select[name="secondaryGenre"]',
+            '#secondary-genre'
+        ],
+        state.metadata?.secondaryGenre || ''
+    );
+
+    // --------------------------------------------------------
+    // LABEL
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'input[name="label"]',
+            '#record-label'
+        ],
+        state.label?.name || ''
+    );
+
+    // --------------------------------------------------------
+    // RELEASE DATE
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'input[name="releaseDate"]',
+            '#release-date'
+        ],
+        state.dates?.releaseDate || ''
+    );
+
+    // --------------------------------------------------------
+    // ORIGINAL RELEASE DATE
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'input[name="originalReleaseDate"]',
+            '#original-release-date'
+        ],
+        state.dates?.originalReleaseDate || ''
+    );
+
+    // --------------------------------------------------------
+    // RELEASE TIME
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'input[name="releaseTime"]',
+            '#release-time'
+        ],
+        state.dates?.releaseTime || ''
+    );
+
+    // --------------------------------------------------------
+    // C-LINE
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'input[name="cLine"]',
+            '#c-line'
+        ],
+        state.label?.cLine || ''
+    );
+
+    // --------------------------------------------------------
+    // P-LINE
+    // --------------------------------------------------------
+
+    setValue(
+        [
+            'input[name="pLine"]',
+            '#p-line'
+        ],
+        state.label?.pLine || ''
+    );
+
+    // --------------------------------------------------------
+    // ARTISTS
+    // --------------------------------------------------------
+
+    if (
+        typeof window.renderArtistInputs === 'function'
+    ) {
+        window.renderArtistInputs();
+    }
+
+    // --------------------------------------------------------
+    // ARTWORK PREVIEW
+    // --------------------------------------------------------
+
+    const artworkPreview =
+        document.querySelector(
+            '#artwork-preview'
+        );
+
+    if (
+        artworkPreview &&
+        state.artwork?.url
+    ) {
+        artworkPreview.src =
+            state.artwork.url;
+    }
+
+    console.log(
+        'Audiory: edit form synchronized from releaseState.'
+    );
+}
