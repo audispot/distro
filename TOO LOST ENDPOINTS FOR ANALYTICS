@@ -1,0 +1,608 @@
+get
+/analytics/overview
+get
+/analytics/tracks
+get
+/analytics/tracks/charts
+get
+/analytics/tracks/{isrc}
+get
+/analytics/platforms
+get
+/analytics/platforms/data
+get
+/analytics/platforms/total-streams
+get
+/analytics/platforms/additional
+get
+/analytics/platforms/additional/info
+get
+/analytics/usage-discovery/overview
+get
+/analytics/usage-discovery/top-songs
+get
+/analytics/usage-discovery/track-matches
+get
+/analytics/release-links/top-releases
+
+
+1.GET ANALYTICS OVERVIEW
+
+Auth Required
+Returns overall chart and totals for the authenticated user and period. Requires scope: read:analytics
+
+Query Parameters
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+Responses
+200 link to 200
+Type:object
+data link to data
+Type:object
+required
+Hide Child Attributesfor data
+chart
+Type:array object[]
+required
+Hide Child Attributesfor chart
+date
+Type:string
+required
+totalStreams
+Type:integer
+required
+Integer numbers.
+
+dateRange
+Type:object | null
+required
+Hide Child Attributesfor dateRange
+from
+Type:string
+required
+to
+Type:string
+required
+engagement
+Type:number
+required
+period
+Type:string
+required
+totalSaves
+Type:integer
+required
+Integer numbers.
+
+totalSkips
+Type:integer
+required
+Integer numbers.
+
+totalStreams
+Type:integer
+required
+Integer numbers.
+
+2.LIST ANALYTICS TRACKS
+
+Returns paginated per-track analytics totals for the authenticated user. Requires scope: read:analytics.
+
+Query Parameters
+
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+page integer min:  1 required Example 1
+Integer numbers.
+
+perPage integer min:  1 max:  100 required Example 20
+Integer numbers.
+
+Responses
+200 object
+currentPage integer
+required
+Integer numbers.
+
+data array object[] · AnalyticsTrackCollection
+required
+
+engagement string required Example 97.44
+isrc string required Example USUG12400012
+release string required
+totalSaves string required Example 9412
+totalSkips string required Example 3301
+totalStreams string required Example 128991
+track string required
+perPage integer required
+Integer numbers.
+
+totalItems integerrequired
+Integer numbers.
+
+totalPages integer required
+Integer numbers.
+
+
+3. GET TRACK CHARTS
+
+Returns date-level stream charts grouped by track ISRC for the authenticated user. Requires scope: read:analytics.
+
+Query Parameters
+
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+Responses
+200 object
+data array object[] required
+
+chart array object[] required
+
+date string required
+
+totalStreams integerrequired
+Integer numbers.
+
+isrc string required
+
+release object | null required
+
+coverUrl string | null required
+
+id integer required
+Integer numbers.
+
+releaseDate string | null required
+
+status string required
+title string required
+type stringrequired
+track object | null required
+
+id integer required
+Integer numbers.
+
+isrc string required
+order integer required
+Integer numbers.
+
+title string required
+
+
+4.GET TRACKS ANALYTICS
+
+Returns chart and totals for a single track ISRC owned by the authenticated user. Requires scope: read:analytics.
+
+Path Parameters
+isrc string required Example USUG12400012
+Track ISRC.
+
+Query Parameters
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+Responses
+200 object
+data object required
+
+chart array object[] required
+
+date string required
+totalStreams integer required
+Integer numbers.
+
+dateRange object | null required
+
+from string required
+
+to string required
+engagement number required
+isrc string required
+period string required
+release object | null required
+
+coverUrl string | null required
+id integer required
+Integer numbers.
+
+releaseDate string | null required
+status string required
+title string required
+type string required
+totalSaves integer required
+Integer numbers.
+
+totalSkips integer required
+Integer numbers.
+
+totalStreams integer required
+Integer numbers.
+
+track object | null required
+
+id integer required
+Integer numbers.
+
+isrc string required
+order integer required
+Integer numbers.
+
+title string required
+
+
+5. LIST ANALYTICS PLATFORMS
+
+Returns supported analytics platforms and available period/release filter options. Requires scope: read:analytics.
+
+Responses
+200 object
+data object required
+
+filters object required
+
+period array string[] required
+release array string[] required
+platforms array object[] required
+
+additionalTypes array string[] required
+platform string required
+supportsOverview boolean required
+supportsTotalStreams boolean required
+
+
+6. GET PLATFORMS OVERVIEW ANALYTICS
+
+Returns total streams timeline, top tracks, and country totals for the selected platform. Supports period and release filters. Requires scope: read:analytics.
+
+Query Parameters
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+release integer | null min:  1
+Integer numbers.
+
+platform string required Example vevo
+
+Responses
+200 object
+data object required
+
+countryTotal required
+streamsTotal integer required
+Integer numbers.
+
+totalStreams required
+tracksTotal required
+
+
+7. GET PLATFORM TOTAL STREAMS
+
+Returns platform total streams timeline and top tracks without country breakdown. Supports period and release filters. Requires scope: read:analytics.
+
+Query Parameters
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+release integer | null min:  1
+Integer numbers.
+
+platform string required Example vevo
+
+Responses
+200 object
+data object required
+
+streamsTotal integer required
+Integer numbers.
+
+totalStreams required
+tracksTotal required
+
+
+8. GET PLATFORM ADDITIONAL ANALYTICS
+
+Returns grouped platform analytics by a selected type (for example service tier, device, gender). Supports period and release filters. Requires scope: read:analytics.
+
+Query Parameters
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+release integer | null min:  1
+Integer numbers.
+
+platform string required Example vevo
+type string required Example service_tier
+
+Responses
+200 object
+data required
+
+
+9. GET PLATFORM ADDITIONAL INFO TOTALS
+
+Returns summed additional metrics for a selected platform type that supports info totals. Supports period and release filters. Requires scope: read:analytics.
+
+Query Parameters
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+release integer | null min:  1
+Integer numbers.
+
+platform string required Example vevo
+type string required Example service_tier
+
+Responses
+200 object
+data required
+
+
+10. GET USAGE DISCOVERY OVERVIEW
+
+Returns usage discovery totals, platform breakdown, and aggregated engagement metrics. Supports period and release filters. Requires scope: read:analytics.
+
+Query Parameters
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+release integer | null min:  1
+Integer numbers.
+
+Responses
+200 object
+data object required
+
+additional object required
+
+comments integer required
+Integer numbers.
+
+likes integer required
+Integer numbers.
+
+shares integer required
+Integer numbers.
+
+views integer required
+Integer numbers.
+
+period string required
+platforms array object[] required
+
+matches integer required Integer numbers.
+
+platform string required
+release integer | null required
+Integer numbers.
+
+total array object[] required
+
+date string required
+matches integer required
+Integer numbers.
+
+
+11. LIST USAGE DISCOVERY TOP SONGS
+
+Returns paginated top songs from usage discovery analytics. Supports period, release, and search filters. Requires scope: read:analytics.
+
+Query Parameters
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+release integer | null min:  1
+Integer numbers
+
+search string | null max length:  120 Example nova
+page integer min:  1 required Example 1
+Integer numbers.
+
+perPage integer min:  1 max:  100 required Example 10
+Integer numbers.
+
+Responses
+200 object
+currentPage integer required
+Integer numbers.
+
+data array object[] · UsageDiscoveryTopSongCollection required
+
+assetDuration string required
+assetId string required
+assetTitle string required
+averagePercentOfSongUsed string required
+coverUrl string required
+isrc string required
+matches string required
+release string required
+track string required
+perPage integer required
+Integer numbers.
+
+totalItems integer required
+Integer numbers.
+
+totalPages integer required
+Integer numbers.
+
+
+12. LIST USAGE DISCOVERY TRACK MATCHES
+
+Returns paginated track match rows from usage discovery analytics. Supports period, release, and search filters. Requires scope: read:analytics.
+
+Query Parameters
+period string enum required Example lastThirtyDays
+
+values
+allTime
+lastSevenDays
+lastThirtyDays
+lastMonth
+lastThreeMonths
+lastSixMonths
+lastYear
+
+release integer | null min:  1
+Integer numbers
+
+search string | null max length:  120 Example nova
+page integer min:  1 required Example 1
+Integer numbers.
+
+perPage integer min:  1 max:  100 required Example 10
+Integer numbers.
+
+Responses
+200 object
+current integer required
+Integer numbers.
+
+data array object[] · UsageDiscoveryTrackMatchCollection required
+
+assetId string required
+assetTitle string required
+channelName string required
+comments string required
+coverUrl string required
+creatorName string required
+dataDate string required
+isrc string required
+likes string required
+release string required
+shares string required
+track string required
+url string required
+videoTitle string required
+views string required
+perPage integer required
+Integer numbers.
+
+totalItems integer required
+Integer numbers.
+
+totalPages integer required
+Integer numbers.
+
+
+13. LIST TOP RELEASE LINKS
+
+Returns paginated release link analytics ordered by clicks. Supports optional search and release filters. Requires scope: read:analytics.
+
+Query Parameters
+search string | null max length:  120 Example Nova
+release integer | null min:  1 Example
+Integer numbers.
+
+page integer min:  1 required Example 1
+Integer numbers. 
+
+perPage integer min:  1 max:  100 required Example 10
+Integer numbers.
+
+Responses
+200 object
+currentPage integer required
+Integer numbers.
+
+data array object[] · ReleaseLinkAnalyticsCollection required
+
+clicks string required Example 12345
+clicksToService string required Example 870
+coverUrl string required Example https://cdn.example.com/cover.jpg
+link string | null required Example https://too.fm/abc123
+releaseId string required Example 73518
+shortId string | null required Example abc123
+songPreviews string required Example 1100
+title string required Example Sunrise EP
+uniqueUsers string required Example 980
+perPage integer required
+Integer numbers.
+
+totalItems integer required
+Integer numbers.
+
+totalPages integer required
+Integer numbers.
