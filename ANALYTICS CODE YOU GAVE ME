@@ -1,0 +1,5310 @@
+/* =============================================================
+   AUDIORY ANALYTICS FRONTEND
+   PHASES 1–5
+
+   Replace ONLY the existing Analytics frontend code.
+
+   This code does NOT modify:
+   - Catalog
+   - Create Release
+   - Edit Release
+   - Release Details
+   - Settings
+   - Earnings
+   - Smart Links
+   - Transfer
+   - Upgrade
+   - Preferences
+
+   ============================================================= */
+
+(function () {
+
+    "use strict";
+
+
+    // =========================================================
+    // STATE
+    // =========================================================
+
+    let currentAnalyticsPeriod =
+        "lastThirtyDays";
+
+    let activeAnalyticsTab =
+        "overview";
+
+    let selectedAnalyticsPlatform =
+        "";
+
+    let selectedAnalyticsType =
+        "";
+
+    let selectedAnalyticsRelease =
+        "";
+
+    let analyticsChartInstance =
+        null;
+
+    let platformChartInstance =
+        null;
+
+    let trackChartInstance =
+        null;
+
+    let usageChartInstance =
+        null;
+
+    let tracksPage =
+        1;
+
+    let usageSongsPage =
+        1;
+
+    let usageMatchesPage =
+        1;
+
+    let releaseLinksPage =
+        1;
+
+    const ANALYTICS_PER_PAGE =
+        10;
+
+
+    // =========================================================
+    // TOO LOST PERIODS
+    // =========================================================
+
+    const ANALYTICS_PERIODS = [
+
+        {
+            value: "lastSevenDays",
+            label: "Last 7 Days"
+        },
+
+        {
+            value: "lastThirtyDays",
+            label: "Last 30 Days"
+        },
+
+        {
+            value: "lastMonth",
+            label: "Last Month"
+        },
+
+        {
+            value: "lastThreeMonths",
+            label: "Last 3 Months"
+        },
+
+        {
+            value: "lastSixMonths",
+            label: "Last 6 Months"
+        },
+
+        {
+            value: "lastYear",
+            label: "Last Year"
+        },
+
+        {
+            value: "allTime",
+            label: "All Time"
+        }
+
+    ];
+
+
+    // =========================================================
+    // HELPERS
+    // =========================================================
+
+    function analyticsWorkerUrl() {
+
+        return (
+            window.WORKER_BASE_URL ||
+            "https://audiorydistribution.dandredurkofficial.workers.dev"
+        ).replace(/\/$/, "");
+
+    }
+
+
+    function escapeHtml(value) {
+
+        return String(
+            value ??
+            ""
+        )
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+
+    }
+
+
+    function numberValue(value) {
+
+        const n =
+            Number(value);
+
+        return Number.isFinite(n)
+            ? n
+            : 0;
+
+    }
+
+
+    function formatNumber(value) {
+
+        return numberValue(
+            value
+        ).toLocaleString();
+
+    }
+
+
+    function formatPercentage(value) {
+
+        if (
+            value === null ||
+            value === undefined ||
+            value === ""
+        ) {
+
+            return "-";
+
+        }
+
+        const n =
+            Number(value);
+
+        if (
+            !Number.isFinite(n)
+        ) {
+
+            return escapeHtml(
+                value
+            );
+
+        }
+
+        return `${n.toFixed(2)}%`;
+
+    }
+
+
+    function unwrapAnalyticsResponse(json) {
+
+        if (
+            json &&
+            json.data !== undefined
+        ) {
+
+            return json.data;
+
+        }
+
+        return json || {};
+
+    }
+
+
+    function buildQuery(params) {
+
+        const query =
+            new URLSearchParams();
+
+        Object.entries(
+            params || {}
+        ).forEach(
+            ([key, value]) => {
+
+                if (
+                    value !== undefined &&
+                    value !== null &&
+                    value !== ""
+                ) {
+
+                    query.set(
+                        key,
+                        value
+                    );
+
+                }
+
+            }
+        );
+
+        const result =
+            query.toString();
+
+        return result
+            ? `?${result}`
+            : "";
+
+    }
+
+
+    async function getAnalyticsToken() {
+
+        if (
+            !window.currentUser
+        ) {
+
+            throw new Error(
+                "You are not signed in."
+            );
+
+        }
+
+        if (
+            typeof window.currentUser.getIdToken ===
+            "function"
+        ) {
+
+            return await window.currentUser.getIdToken(
+                true
+            );
+
+        }
+
+        if (
+            window.currentUser.accessToken
+        ) {
+
+            return window.currentUser.accessToken;
+
+        }
+
+        throw new Error(
+            "Authentication token unavailable."
+        );
+
+    }
+
+
+    async function analyticsApi(
+        endpoint,
+        options = {}
+    ) {
+
+        const token =
+            await getAnalyticsToken();
+
+        const response =
+            await fetch(
+                `${analyticsWorkerUrl()}${endpoint}`,
+                {
+                    ...options,
+
+                    headers: {
+
+                        ...(options.headers || {}),
+
+                        "Authorization":
+                            `Bearer ${token}`,
+
+                        "Accept":
+                            "application/json"
+
+                    }
+
+                }
+            );
+
+
+        const text =
+            await response.text();
+
+
+        let json = {};
+
+        try {
+
+            json =
+                text
+                    ? JSON.parse(text)
+                    : {};
+
+        } catch {
+
+            json = {
+                raw: text
+            };
+
+        }
+
+
+        if (
+            !response.ok
+        ) {
+
+            throw new Error(
+                json?.message ||
+                json?.error ||
+                json?.details ||
+                `Analytics request failed (${response.status})`
+            );
+
+        }
+
+
+        return json;
+
+    }
+
+
+    function getCatalogReleases() {
+
+        if (
+            !Array.isArray(
+                window.releasesCatalog
+            )
+        ) {
+
+            return [];
+
+        }
+
+
+        return window.releasesCatalog
+            .map(
+                release => ({
+
+                    id:
+                        release?.id ??
+                        release?.releaseId,
+
+                    title:
+                        release?.title ||
+                        release?.releaseTitle ||
+                        "Untitled Release",
+
+                    artist:
+                        release?.artist ||
+                        release?.artistName ||
+                        ""
+
+                })
+            )
+            .filter(
+                release =>
+                    release.id !==
+                    undefined &&
+                    release.id !==
+                    null &&
+                    release.id !== ""
+            );
+
+    }
+
+
+    function releaseFilterOptions() {
+
+        const releases =
+            getCatalogReleases();
+
+
+        return [
+
+            `<option value="">All Releases</option>`,
+
+            ...releases.map(
+                release => `
+
+                    <option
+                        value="${escapeHtml(release.id)}"
+                        ${
+                            String(
+                                release.id
+                            ) ===
+                            String(
+                                selectedAnalyticsRelease
+                            )
+                                ? "selected"
+                                : ""
+                        }
+                    >
+
+                        ${escapeHtml(
+                            release.title
+                        )}
+
+                        ${
+                            release.artist
+                                ? ` — ${escapeHtml(
+                                    release.artist
+                                )}`
+                                : ""
+                        }
+
+                    </option>
+
+                `
+            )
+
+        ].join("");
+
+    }
+
+
+    // =========================================================
+    // MAIN VIEW
+    // =========================================================
+
+    function renderAnalyticsView() {
+
+        return `
+
+            <div class="max-w-7xl mx-auto space-y-6">
+
+                <div class="
+                    flex
+                    flex-col
+                    xl:flex-row
+                    xl:items-center
+                    xl:justify-between
+                    gap-4
+                ">
+
+                    <div>
+
+                        <h1 class="
+                            text-2xl
+                            font-bold
+                            text-white
+                        ">
+                            Analytics & Performance
+                        </h1>
+
+                        <p class="
+                            text-xs
+                            text-gray-400
+                            mt-1
+                        ">
+                            Streaming and usage analytics
+                            supplied by Too Lost.
+                        </p>
+
+                    </div>
+
+
+                    <div class="
+                        flex
+                        flex-wrap
+                        gap-2
+                    ">
+
+                        <select
+                            id="analytics-period-select"
+                            class="
+                                bg-brand-card
+                                border
+                                border-brand-border
+                                text-white
+                                text-xs
+                                rounded-xl
+                                px-3
+                                py-2
+                                outline-none
+                            "
+                        >
+
+                            ${ANALYTICS_PERIODS.map(
+                                period => `
+
+                                    <option
+                                        value="${period.value}"
+                                        ${
+                                            period.value ===
+                                            currentAnalyticsPeriod
+                                                ? "selected"
+                                                : ""
+                                        }
+                                    >
+
+                                        ${period.label}
+
+                                    </option>
+
+                                `
+                            ).join("")}
+
+                        </select>
+
+
+                        <select
+                            id="analytics-release-select"
+                            class="
+                                bg-brand-card
+                                border
+                                border-brand-border
+                                text-white
+                                text-xs
+                                rounded-xl
+                                px-3
+                                py-2
+                                outline-none
+                            "
+                            onchange="
+                                window.analyticsSetRelease(
+                                    this.value
+                                )
+                            "
+                        >
+
+                            ${releaseFilterOptions()}
+
+                        </select>
+
+                    </div>
+
+                </div>
+
+
+                <!-- TABS -->
+
+                <div class="
+                    flex
+                    gap-2
+                    overflow-x-auto
+                    border-b
+                    border-brand-border
+                    pb-2
+                ">
+
+                    ${[
+                        ["overview", "Overview"],
+                        ["platforms", "Platforms"],
+                        ["tracks", "Tracks"],
+                        ["demographics", "Demographics"],
+                        ["usage", "Usage Discovery"],
+                        ["release-links", "Release Links"]
+                    ].map(
+                        tab => `
+
+                            <button
+                                id="analytics-tab-${tab[0]}"
+                                onclick="
+                                    switchAnalyticsTab(
+                                        '${tab[0]}'
+                                    )
+                                "
+                                class="
+                                    whitespace-nowrap
+                                    px-4
+                                    py-2
+                                    rounded-lg
+                                    text-xs
+                                    font-semibold
+                                    ${
+                                        activeAnalyticsTab ===
+                                        tab[0]
+                                            ? "bg-brand-primary text-white"
+                                            : "text-gray-400 hover:text-white hover:bg-white/5"
+                                    }
+                                "
+                            >
+
+                                ${tab[1]}
+
+                            </button>
+
+                        `
+                    ).join("")}
+
+                </div>
+
+
+                <div
+                    id="analytics-alert-area"
+                    class="hidden"
+                ></div>
+
+
+                <div
+                    id="analytics-tab-viewport"
+                ></div>
+
+            </div>
+
+        `;
+
+    }
+
+
+    // =========================================================
+    // INITIALIZE
+    // =========================================================
+
+    async function initAnalyticsDashboard(
+        period =
+            currentAnalyticsPeriod
+    ) {
+
+        if (
+            ANALYTICS_PERIODS.some(
+                p =>
+                    p.value ===
+                    period
+            )
+        ) {
+
+            currentAnalyticsPeriod =
+                period;
+
+        }
+
+
+        const periodSelect =
+            document.getElementById(
+                "analytics-period-select"
+            );
+
+
+        if (
+            periodSelect &&
+            !periodSelect.dataset.analyticsBound
+        ) {
+
+            periodSelect.dataset.analyticsBound =
+                "true";
+
+
+            periodSelect.addEventListener(
+                "change",
+                () => {
+
+                    currentAnalyticsPeriod =
+                        periodSelect.value;
+
+                    tracksPage = 1;
+                    usageSongsPage = 1;
+                    usageMatchesPage = 1;
+                    releaseLinksPage = 1;
+
+                    renderAnalyticsTab();
+
+                }
+            );
+
+        }
+
+
+        renderAnalyticsTab();
+
+    }
+
+
+    // =========================================================
+    // TAB SWITCH
+    // =========================================================
+
+    function switchAnalyticsTab(
+        tab
+    ) {
+
+        activeAnalyticsTab =
+            tab;
+
+
+        document
+            .querySelectorAll(
+                "[id^='analytics-tab-']"
+            )
+            .forEach(
+                button => {
+
+                    button.classList.remove(
+                        "bg-brand-primary",
+                        "text-white"
+                    );
+
+                    button.classList.add(
+                        "text-gray-400"
+                    );
+
+                }
+            );
+
+
+        const active =
+            document.getElementById(
+                `analytics-tab-${tab}`
+            );
+
+
+        if (active) {
+
+            active.classList.add(
+                "bg-brand-primary",
+                "text-white"
+            );
+
+            active.classList.remove(
+                "text-gray-400"
+            );
+
+        }
+
+
+        renderAnalyticsTab();
+
+    }
+
+
+    async function renderAnalyticsTab() {
+
+        const viewport =
+            document.getElementById(
+                "analytics-tab-viewport"
+            );
+
+
+        if (!viewport) {
+
+            return;
+
+        }
+
+
+        if (
+            activeAnalyticsTab ===
+            "overview"
+        ) {
+
+            renderOverviewLoading();
+
+            await fetchOverviewData();
+
+            return;
+
+        }
+
+
+        if (
+            activeAnalyticsTab ===
+            "platforms"
+        ) {
+
+            await renderPlatformsView();
+
+            return;
+
+        }
+
+
+        if (
+            activeAnalyticsTab ===
+            "tracks"
+        ) {
+
+            await renderTracksView();
+
+            return;
+
+        }
+
+
+        if (
+            activeAnalyticsTab ===
+            "demographics"
+        ) {
+
+            await renderDemographicsView();
+
+            return;
+
+        }
+
+
+        if (
+            activeAnalyticsTab ===
+            "usage"
+        ) {
+
+            await renderUsageDiscoveryView();
+
+            return;
+
+        }
+
+
+        if (
+            activeAnalyticsTab ===
+            "release-links"
+        ) {
+
+            await renderReleaseLinksView();
+
+            return;
+
+        }
+
+    }
+
+
+    // =========================================================
+    // PHASE 1
+    // OVERVIEW
+    // =========================================================
+
+    function renderOverviewLoading() {
+
+        const viewport =
+            document.getElementById(
+                "analytics-tab-viewport"
+            );
+
+
+        viewport.innerHTML = `
+
+            <div class="space-y-6">
+
+                <div
+                    id="analytics-kpi-container"
+                    class="
+                        grid
+                        grid-cols-1
+                        sm:grid-cols-2
+                        lg:grid-cols-4
+                        gap-4
+                    "
+                >
+
+                    ${[1,2,3,4].map(
+                        () => `
+
+                            <div class="
+                                h-28
+                                rounded-2xl
+                                bg-brand-card
+                                border
+                                border-brand-border
+                                animate-pulse
+                            "></div>
+
+                        `
+                    ).join("")}
+
+                </div>
+
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-6
+                ">
+
+                    <div class="
+                        flex
+                        items-center
+                        justify-between
+                        mb-4
+                    ">
+
+                        <h2 class="
+                            text-sm
+                            font-semibold
+                            text-white
+                        ">
+                            Streams Over Time
+                        </h2>
+
+                        <span
+                            id="overview-date-range"
+                            class="
+                                text-[10px]
+                                text-gray-500
+                            "
+                        ></span>
+
+                    </div>
+
+
+                    <div class="
+                        relative
+                        h-72
+                    ">
+
+                        <canvas
+                            id="analyticsOverviewChart"
+                        ></canvas>
+
+                    </div>
+
+                </div>
+
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-6
+                ">
+
+                    <div class="
+                        flex
+                        items-center
+                        justify-between
+                        mb-4
+                    ">
+
+                        <h2 class="
+                            text-sm
+                            font-semibold
+                            text-white
+                        ">
+                            Top Tracks
+                        </h2>
+
+                        <button
+                            onclick="
+                                switchAnalyticsTab(
+                                    'tracks'
+                                )
+                            "
+                            class="
+                                text-[10px]
+                                text-brand-accent
+                            "
+                        >
+                            View all →
+                        </button>
+
+                    </div>
+
+
+                    <div class="overflow-x-auto">
+
+                        <table class="
+                            w-full
+                            text-left
+                            text-xs
+                        ">
+
+                            <thead
+                                class="
+                                    border-b
+                                    border-brand-border
+                                    text-gray-400
+                                "
+                            >
+
+                                <tr>
+
+                                    <th class="pb-3 px-2">
+                                        Track
+                                    </th>
+
+                                    <th class="pb-3 px-2">
+                                        ISRC
+                                    </th>
+
+                                    <th class="pb-3 px-2 text-right">
+                                        Streams
+                                    </th>
+
+                                    <th class="pb-3 px-2 text-right">
+                                        Saves
+                                    </th>
+
+                                    <th class="pb-3 px-2 text-right">
+                                        Skips
+                                    </th>
+
+                                    <th class="pb-3 px-2 text-right">
+                                        Engagement
+                                    </th>
+
+                                </tr>
+
+                            </thead>
+
+                            <tbody
+                                id="analytics-tracks-tbody"
+                            >
+
+                                <tr>
+
+                                    <td
+                                        colspan="6"
+                                        class="
+                                            py-8
+                                            text-center
+                                            text-gray-500
+                                        "
+                                    >
+                                        Loading...
+                                    </td>
+
+                                </tr>
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        `;
+
+    }
+
+
+    async function fetchOverviewData() {
+
+        try {
+
+            const query =
+                buildQuery({
+                    period:
+                        currentAnalyticsPeriod
+                });
+
+
+            const [
+                overviewResponse,
+                tracksResponse
+            ] = await Promise.all([
+
+                analyticsApi(
+                    `/api/analytics/overview${query}`
+                ),
+
+                analyticsApi(
+                    `/api/analytics/tracks${buildQuery({
+                        period:
+                            currentAnalyticsPeriod,
+
+                        page:
+                            1,
+
+                        perPage:
+                            10
+                    })}`
+                )
+
+            ]);
+
+
+            const overview =
+                unwrapAnalyticsResponse(
+                    overviewResponse
+                );
+
+
+            const tracks =
+                Array.isArray(
+                    tracksResponse?.data
+                )
+                    ? tracksResponse.data
+                    : [];
+
+
+            renderOverviewKPIs(
+                overview
+            );
+
+
+            renderOverviewChart(
+                Array.isArray(
+                    overview?.chart
+                )
+                    ? overview.chart
+                    : []
+            );
+
+
+            const dateRange =
+                document.getElementById(
+                    "overview-date-range"
+                );
+
+
+            if (
+                dateRange &&
+                overview?.dateRange
+            ) {
+
+                dateRange.textContent =
+                    `${overview.dateRange.from || ""} → ${overview.dateRange.to || ""}`;
+
+            }
+
+
+            renderTracksTable(
+                tracks,
+                "analytics-tracks-tbody"
+            );
+
+
+        } catch (error) {
+
+            showAnalyticsAlert(
+                `Failed to load analytics overview: ${error.message}`,
+                "error"
+            );
+
+        }
+
+    }
+
+
+    function renderOverviewKPIs(
+        data
+    ) {
+
+        const container =
+            document.getElementById(
+                "analytics-kpi-container"
+            );
+
+
+        if (!container) {
+
+            return;
+
+        }
+
+
+        container.innerHTML = `
+
+            <div class="
+                bg-brand-card
+                border
+                border-brand-border
+                rounded-2xl
+                p-5
+            ">
+
+                <span class="
+                    text-xs
+                    text-gray-400
+                ">
+                    Total Streams
+                </span>
+
+                <div class="
+                    text-2xl
+                    font-bold
+                    text-white
+                    mt-1
+                ">
+                    ${formatNumber(
+                        data?.totalStreams
+                    )}
+                </div>
+
+            </div>
+
+
+            <div class="
+                bg-brand-card
+                border
+                border-brand-border
+                rounded-2xl
+                p-5
+            ">
+
+                <span class="
+                    text-xs
+                    text-gray-400
+                ">
+                    Total Saves
+                </span>
+
+                <div class="
+                    text-2xl
+                    font-bold
+                    text-emerald-400
+                    mt-1
+                ">
+                    ${formatNumber(
+                        data?.totalSaves
+                    )}
+                </div>
+
+            </div>
+
+
+            <div class="
+                bg-brand-card
+                border
+                border-brand-border
+                rounded-2xl
+                p-5
+            ">
+
+                <span class="
+                    text-xs
+                    text-gray-400
+                ">
+                    Total Skips
+                </span>
+
+                <div class="
+                    text-2xl
+                    font-bold
+                    text-rose-400
+                    mt-1
+                ">
+                    ${formatNumber(
+                        data?.totalSkips
+                    )}
+                </div>
+
+            </div>
+
+
+            <div class="
+                bg-brand-card
+                border
+                border-brand-border
+                rounded-2xl
+                p-5
+            ">
+
+                <span class="
+                    text-xs
+                    text-gray-400
+                ">
+                    Engagement
+                </span>
+
+                <div class="
+                    text-2xl
+                    font-bold
+                    text-indigo-400
+                    mt-1
+                ">
+                    ${formatPercentage(
+                        data?.engagement
+                    )}
+                </div>
+
+            </div>
+
+        `;
+
+    }
+
+
+    function createLineChart(
+        canvasId,
+        chartProperty,
+        data,
+        borderColor
+    ) {
+
+        const canvas =
+            document.getElementById(
+                canvasId
+            );
+
+
+        if (
+            !canvas ||
+            typeof Chart ===
+                "undefined"
+        ) {
+
+            return;
+
+        }
+
+
+        if (
+            window[
+                chartProperty
+            ]
+        ) {
+
+            window[
+                chartProperty
+            ].destroy();
+
+        }
+
+
+        window[
+            chartProperty
+        ] =
+            new Chart(
+                canvas.getContext(
+                    "2d"
+                ),
+                {
+
+                    type:
+                        "line",
+
+                    data: {
+
+                        labels:
+                            data.map(
+                                point =>
+                                    point.date
+                            ),
+
+                        datasets: [
+
+                            {
+
+                                label:
+                                    "Streams",
+
+                                data:
+                                    data.map(
+                                        point =>
+                                            numberValue(
+                                                point.totalStreams
+                                            )
+                                    ),
+
+                                borderColor:
+                                    borderColor,
+
+                                borderWidth:
+                                    2,
+
+                                backgroundColor:
+                                    `${borderColor}18`,
+
+                                fill:
+                                    true,
+
+                                tension:
+                                    0.35,
+
+                                pointRadius:
+                                    2
+
+                            }
+
+                        ]
+
+                    },
+
+                    options: {
+
+                        responsive:
+                            true,
+
+                        maintainAspectRatio:
+                            false,
+
+                        plugins: {
+
+                            legend: {
+                                display:
+                                    false
+                            }
+
+                        },
+
+                        scales: {
+
+                            x: {
+
+                                grid: {
+                                    color:
+                                        "rgba(255,255,255,.04)"
+                                },
+
+                                ticks: {
+                                    color:
+                                        "#9ca3af",
+
+                                    font: {
+                                        size:
+                                            10
+                                    }
+                                }
+
+                            },
+
+                            y: {
+
+                                beginAtZero:
+                                    true,
+
+                                grid: {
+                                    color:
+                                        "rgba(255,255,255,.04)"
+                                },
+
+                                ticks: {
+                                    color:
+                                        "#9ca3af",
+
+                                    font: {
+                                        size:
+                                            10
+                                    }
+                                }
+
+                            }
+
+                        }
+
+                    }
+
+                }
+            );
+
+    }
+
+
+    function renderOverviewChart(
+        data
+    ) {
+
+        createLineChart(
+            "analyticsOverviewChart",
+            "analyticsChartInstance",
+            data,
+            "#6366f1"
+        );
+
+    }
+
+
+    // =========================================================
+    // TRACK TABLE
+    // =========================================================
+
+    function renderTracksTable(
+        rows,
+        tbodyId
+    ) {
+
+        const tbody =
+            document.getElementById(
+                tbodyId
+            );
+
+
+        if (!tbody) {
+
+            return;
+
+        }
+
+
+        if (
+            !rows.length
+        ) {
+
+            tbody.innerHTML = `
+
+                <tr>
+
+                    <td
+                        colspan="6"
+                        class="
+                            py-8
+                            text-center
+                            text-gray-500
+                        "
+                    >
+                        No track analytics found.
+                    </td>
+
+                </tr>
+
+            `;
+
+            return;
+
+        }
+
+
+        tbody.innerHTML =
+            rows.map(
+                track => `
+
+                    <tr
+                        onclick="
+                            window.openAnalyticsTrack(
+                                '${escapeHtml(
+                                    track.isrc || ""
+                                )}'
+                            )
+                        "
+                        class="
+                            border-b
+                            border-brand-border/50
+                            hover:bg-white/5
+                            cursor-pointer
+                        "
+                    >
+
+                        <td class="
+                            py-3
+                            px-2
+                            text-white
+                            font-medium
+                        ">
+                            ${escapeHtml(
+                                track.track ||
+                                "Unknown"
+                            )}
+                        </td>
+
+
+                        <td class="
+                            py-3
+                            px-2
+                            text-gray-400
+                            font-mono
+                        ">
+                            ${escapeHtml(
+                                track.isrc ||
+                                "-"
+                            )}
+                        </td>
+
+
+                        <td class="
+                            py-3
+                            px-2
+                            text-right
+                        ">
+                            ${formatNumber(
+                                track.totalStreams
+                            )}
+                        </td>
+
+
+                        <td class="
+                            py-3
+                            px-2
+                            text-right
+                            text-emerald-400
+                        ">
+                            ${formatNumber(
+                                track.totalSaves
+                            )}
+                        </td>
+
+
+                        <td class="
+                            py-3
+                            px-2
+                            text-right
+                            text-rose-400
+                        ">
+                            ${formatNumber(
+                                track.totalSkips
+                            )}
+                        </td>
+
+
+                        <td class="
+                            py-3
+                            px-2
+                            text-right
+                            text-indigo-400
+                        ">
+                            ${formatPercentage(
+                                track.engagement
+                            )}
+                        </td>
+
+                    </tr>
+
+                `
+            ).join("");
+
+    }
+
+
+    // =========================================================
+    // PHASE 1
+    // PLATFORM DISCOVERY
+    //
+    // IMPORTANT:
+    //
+    // /analytics/platforms
+    //
+    // is NOT the selected platform analytics endpoint.
+    //
+    // It tells us which platforms and additional types
+    // Too Lost supports.
+    //
+    // =========================================================
+
+    async function loadAnalyticsPlatforms() {
+
+        const response =
+            await analyticsApi(
+                "/api/analytics/platforms"
+            );
+
+
+        const data =
+            unwrapAnalyticsResponse(
+                response
+            );
+
+
+        return {
+
+            platforms:
+                Array.isArray(
+                    data?.platforms
+                )
+                    ? data.platforms
+                    : [],
+
+            additionalTypes:
+                Array.isArray(
+                    data?.additionalTypes
+                )
+                    ? data.additionalTypes
+                    : [],
+
+            filters:
+                data?.filters ||
+                {}
+
+        };
+
+    }
+
+
+    // =========================================================
+    // PHASE 1
+    // PLATFORM ANALYTICS
+    //
+    // Actual selected platform endpoint:
+    //
+    // /analytics/platforms/data
+    //
+    // =========================================================
+
+    async function renderPlatformsView() {
+
+        const viewport =
+            document.getElementById(
+                "analytics-tab-viewport"
+            );
+
+
+        viewport.innerHTML = `
+
+            <div class="space-y-6">
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-5
+                ">
+
+                    <label class="
+                        block
+                        text-[10px]
+                        uppercase
+                        tracking-wider
+                        text-gray-500
+                        mb-2
+                    ">
+                        Analytics Platform
+                    </label>
+
+
+                    <select
+                        id="analytics-platform-select"
+                        class="
+                            w-full
+                            bg-[#12141d]
+                            border
+                            border-brand-border
+                            text-white
+                            text-xs
+                            rounded-xl
+                            px-3
+                            py-3
+                        "
+                        onchange="
+                            window.analyticsSelectPlatform(
+                                this.value
+                            )
+                        "
+                    >
+
+                        <option>
+                            Loading platforms...
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div
+                    id="platform-analytics-content"
+                >
+
+                    <div class="
+                        bg-brand-card
+                        border
+                        border-brand-border
+                        rounded-2xl
+                        p-8
+                        text-center
+                        text-xs
+                        text-gray-500
+                    ">
+                        Loading...
+                    </div>
+
+                </div>
+
+            </div>
+
+        `;
+
+
+        try {
+
+            const platformInfo =
+                await loadAnalyticsPlatforms();
+
+
+            const usablePlatforms =
+                platformInfo.platforms.filter(
+                    platform =>
+                        platform.supportsOverview ||
+                        platform.supportsTotalStreams
+                );
+
+
+            if (
+                !selectedAnalyticsPlatform &&
+                usablePlatforms.length
+            ) {
+
+                selectedAnalyticsPlatform =
+                    usablePlatforms[0].platform;
+
+            }
+
+
+            const select =
+                document.getElementById(
+                    "analytics-platform-select"
+                );
+
+
+            if (select) {
+
+                select.innerHTML =
+                    usablePlatforms.length
+                        ? usablePlatforms
+                            .map(
+                                platform => `
+
+                                    <option
+                                        value="${escapeHtml(
+                                            platform.platform
+                                        )}"
+                                        ${
+                                            platform.platform ===
+                                            selectedAnalyticsPlatform
+                                                ? "selected"
+                                                : ""
+                                        }
+                                    >
+
+                                        ${escapeHtml(
+                                            platform.platform
+                                        )}
+
+                                    </option>
+
+                                `
+                            )
+                            .join("")
+                        : `
+
+                            <option value="">
+                                No analytics platforms available
+                            </option>
+
+                        `;
+
+            }
+
+
+            await fetchPlatformData(
+                selectedAnalyticsPlatform
+            );
+
+
+        } catch (error) {
+
+            showAnalyticsAlert(
+                `Failed to load Too Lost platforms: ${error.message}`,
+                "error"
+            );
+
+        }
+
+    }
+
+
+    async function fetchPlatformData(
+        platform
+    ) {
+
+        if (!platform) {
+
+            return;
+
+        }
+
+
+        selectedAnalyticsPlatform =
+            platform;
+
+
+        const content =
+            document.getElementById(
+                "platform-analytics-content"
+            );
+
+
+        if (content) {
+
+            content.innerHTML = `
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-8
+                    text-center
+                    text-xs
+                    text-gray-500
+                ">
+                    Loading ${escapeHtml(
+                        platform
+                    )} analytics...
+                </div>
+
+            `;
+
+        }
+
+
+        try {
+
+            const query =
+                buildQuery({
+
+                    platform:
+                        platform,
+
+                    period:
+                        currentAnalyticsPeriod,
+
+                    release:
+                        selectedAnalyticsRelease ||
+                        undefined
+
+                });
+
+
+            /*
+             * THIS is the correct Too Lost selected-platform
+             * overview endpoint.
+             */
+
+            const overviewResponse =
+                await analyticsApi(
+                    `/api/analytics/platforms/data${query}`
+                );
+
+
+            const overview =
+                unwrapAnalyticsResponse(
+                    overviewResponse
+                );
+
+
+            /*
+             * Platform total-streams is separately documented.
+             *
+             * We request it as well, but the UI does not invent
+             * undocumented response properties.
+             */
+
+            let totalStreamsData =
+                null;
+
+
+            try {
+
+                const response =
+                    await analyticsApi(
+                        `/api/analytics/platforms/total-streams${query}`
+                    );
+
+                totalStreamsData =
+                    unwrapAnalyticsResponse(
+                        response
+                    );
+
+            } catch (error) {
+
+                console.warn(
+                    "Platform total-streams endpoint unavailable:",
+                    error
+                );
+
+            }
+
+
+            renderPlatformAnalytics(
+                platform,
+                overview,
+                totalStreamsData
+            );
+
+
+        } catch (error) {
+
+            if (content) {
+
+                content.innerHTML = `
+
+                    <div class="
+                        bg-brand-card
+                        border
+                        border-rose-500/20
+                        rounded-2xl
+                        p-8
+                        text-center
+                    ">
+
+                        <div class="
+                            text-sm
+                            font-semibold
+                            text-rose-400
+                        ">
+                            Platform analytics failed
+                        </div>
+
+                        <div class="
+                            text-xs
+                            text-gray-500
+                            mt-2
+                        ">
+                            ${escapeHtml(
+                                error.message
+                            )}
+                        </div>
+
+                    </div>
+
+                `;
+
+            }
+
+        }
+
+    }
+
+
+    function renderPlatformAnalytics(
+        platform,
+        data,
+        totalStreamsData
+    ) {
+
+        const content =
+            document.getElementById(
+                "platform-analytics-content"
+            );
+
+
+        if (!content) {
+
+            return;
+
+        }
+
+
+        /*
+         * Too Lost documents:
+         *
+         * countryTotal
+         * streamsTotal
+         * totalStreams
+         * tracksTotal
+         *
+         * for /analytics/platforms/data.
+         */
+
+        content.innerHTML = `
+
+            <div class="
+                grid
+                grid-cols-1
+                md:grid-cols-3
+                gap-4
+            ">
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-5
+                ">
+
+                    <span class="
+                        text-xs
+                        text-gray-400
+                    ">
+                        Total Streams
+                    </span>
+
+                    <div class="
+                        text-2xl
+                        font-bold
+                        text-white
+                        mt-1
+                    ">
+                        ${formatNumber(
+                            data?.totalStreams ??
+                            data?.streamsTotal
+                        )}
+                    </div>
+
+                </div>
+
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-5
+                ">
+
+                    <span class="
+                        text-xs
+                        text-gray-400
+                    ">
+                        Tracks
+                    </span>
+
+                    <div class="
+                        text-2xl
+                        font-bold
+                        text-indigo-400
+                        mt-1
+                    ">
+                        ${formatNumber(
+                            data?.tracksTotal
+                        )}
+                    </div>
+
+                </div>
+
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-5
+                ">
+
+                    <span class="
+                        text-xs
+                        text-gray-400
+                    ">
+                        Country Data
+                    </span>
+
+                    <div class="
+                        text-2xl
+                        font-bold
+                        text-emerald-400
+                        mt-1
+                    ">
+                        ${
+                            Array.isArray(
+                                data?.countryTotal
+                            )
+                                ? formatNumber(
+                                    data.countryTotal.length
+                                )
+                                : formatNumber(
+                                    data?.countryTotal
+                                )
+                        }
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <div class="
+                grid
+                grid-cols-1
+                lg:grid-cols-2
+                gap-6
+                mt-6
+            ">
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-6
+                ">
+
+                    <h2 class="
+                        text-sm
+                        font-semibold
+                        text-white
+                        mb-4
+                    ">
+                        ${escapeHtml(
+                            platform
+                        )} Platform Summary
+                    </h2>
+
+
+                    <div class="space-y-3">
+
+                        <div class="
+                            flex
+                            justify-between
+                            p-3
+                            rounded-xl
+                            bg-white/[.02]
+                        ">
+
+                            <span class="
+                                text-xs
+                                text-gray-400
+                            ">
+                                Streams Total
+                            </span>
+
+                            <span class="
+                                text-xs
+                                text-white
+                                font-semibold
+                            ">
+                                ${formatNumber(
+                                    data?.streamsTotal
+                                )}
+                            </span>
+
+                        </div>
+
+
+                        <div class="
+                            flex
+                            justify-between
+                            p-3
+                            rounded-xl
+                            bg-white/[.02]
+                        ">
+
+                            <span class="
+                                text-xs
+                                text-gray-400
+                            ">
+                                Total Streams
+                            </span>
+
+                            <span class="
+                                text-xs
+                                text-white
+                                font-semibold
+                            ">
+                                ${formatNumber(
+                                    data?.totalStreams
+                                )}
+                            </span>
+
+                        </div>
+
+
+                        <div class="
+                            flex
+                            justify-between
+                            p-3
+                            rounded-xl
+                            bg-white/[.02]
+                        ">
+
+                            <span class="
+                                text-xs
+                                text-gray-400
+                            ">
+                                Tracks Total
+                            </span>
+
+                            <span class="
+                                text-xs
+                                text-white
+                                font-semibold
+                            ">
+                                ${formatNumber(
+                                    data?.tracksTotal
+                                )}
+                            </span>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-6
+                ">
+
+                    <h2 class="
+                        text-sm
+                        font-semibold
+                        text-white
+                        mb-4
+                    ">
+                        Country Totals
+                    </h2>
+
+
+                    ${
+                        Array.isArray(
+                            data?.countryTotal
+                        )
+                            ? renderCountryRows(
+                                data.countryTotal
+                            )
+                            : `
+
+                                <div class="
+                                    py-8
+                                    text-center
+                                    text-xs
+                                    text-gray-500
+                                ">
+                                    Too Lost did not return
+                                    a country list for this platform.
+                                </div>
+
+                            `
+                    }
+
+                </div>
+
+            </div>
+
+        `;
+
+
+        /*
+         * If Too Lost returns chart/timeline fields from the
+         * total-streams endpoint, display them.
+         *
+         * We intentionally don't fabricate a chart when the
+         * endpoint doesn't return one.
+         */
+
+        const timeline =
+            findAnalyticsArray(
+                totalStreamsData,
+                [
+                    "chart",
+                    "timeline",
+                    "data"
+                ]
+            );
+
+
+        if (
+            timeline.length
+        ) {
+
+            content.insertAdjacentHTML(
+                "beforeend",
+                `
+
+                    <div class="
+                        bg-brand-card
+                        border
+                        border-brand-border
+                        rounded-2xl
+                        p-6
+                        mt-6
+                    ">
+
+                        <h2 class="
+                            text-sm
+                            font-semibold
+                            text-white
+                            mb-4
+                        ">
+                            ${escapeHtml(
+                                platform
+                            )} Streams Over Time
+                        </h2>
+
+                        <div class="
+                            relative
+                            h-72
+                        ">
+
+                            <canvas
+                                id="platformStreamsChart"
+                            ></canvas>
+
+                        </div>
+
+                    </div>
+
+                `
+            );
+
+
+            createLineChart(
+                "platformStreamsChart",
+                "platformChartInstance",
+                timeline,
+                "#8b5cf6"
+            );
+
+        }
+
+    }
+
+
+    function findAnalyticsArray(
+        object,
+        keys
+    ) {
+
+        if (
+            !object ||
+            typeof object !==
+                "object"
+        ) {
+
+            return [];
+
+        }
+
+
+        for (
+            const key of keys
+        ) {
+
+            if (
+                Array.isArray(
+                    object[key]
+                )
+            ) {
+
+                return object[key];
+
+            }
+
+        }
+
+
+        return [];
+
+    }
+
+
+    function renderCountryRows(
+        rows
+    ) {
+
+        if (
+            !rows.length
+        ) {
+
+            return `
+
+                <div class="
+                    py-8
+                    text-center
+                    text-xs
+                    text-gray-500
+                ">
+                    No country data returned.
+                </div>
+
+            `;
+
+        }
+
+
+        return rows
+            .slice(
+                0,
+                20
+            )
+            .map(
+                country => `
+
+                    <div class="
+                        flex
+                        items-center
+                        justify-between
+                        p-3
+                        rounded-xl
+                        bg-white/[.02]
+                        border
+                        border-brand-border/50
+                    ">
+
+                        <span class="
+                            text-xs
+                            text-white
+                        ">
+                            ${escapeHtml(
+                                country?.name ||
+                                country?.country ||
+                                country?.code ||
+                                "Unknown"
+                            )}
+                        </span>
+
+
+                        <span class="
+                            text-xs
+                            text-emerald-400
+                            font-semibold
+                        ">
+
+                            ${
+                                country?.percentage !==
+                                undefined
+                                    ? formatPercentage(
+                                        country.percentage
+                                    )
+                                    : formatNumber(
+                                        country?.total ??
+                                        country?.streams ??
+                                        country?.value
+                                    )
+                            }
+
+                        </span>
+
+                    </div>
+
+                `
+            )
+            .join("");
+
+    }
+
+
+    function analyticsSelectPlatform(
+        platform
+    ) {
+
+        selectedAnalyticsPlatform =
+            platform;
+
+        fetchPlatformData(
+            platform
+        );
+
+    }
+
+
+    // =========================================================
+    // PHASE 2
+    // TRACKS
+    // =========================================================
+
+    async function renderTracksView() {
+
+        const viewport =
+            document.getElementById(
+                "analytics-tab-viewport"
+            );
+
+
+        viewport.innerHTML = `
+
+            <div class="space-y-6">
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-5
+                ">
+
+                    <h2 class="
+                        text-sm
+                        font-semibold
+                        text-white
+                    ">
+                        Track Analytics
+                    </h2>
+
+                    <p class="
+                        text-[10px]
+                        text-gray-500
+                        mt-1
+                    ">
+                        Select a track to view its
+                        individual Too Lost analytics.
+                    </p>
+
+                </div>
+
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-6
+                ">
+
+                    <div class="overflow-x-auto">
+
+                        <table class="
+                            w-full
+                            text-left
+                            text-xs
+                        ">
+
+                            <thead class="
+                                border-b
+                                border-brand-border
+                                text-gray-400
+                                uppercase
+                            ">
+
+                                <tr>
+
+                                    <th class="pb-3 px-2">
+                                        Track
+                                    </th>
+
+                                    <th class="pb-3 px-2">
+                                        ISRC
+                                    </th>
+
+                                    <th class="pb-3 px-2 text-right">
+                                        Streams
+                                    </th>
+
+                                    <th class="pb-3 px-2 text-right">
+                                        Saves
+                                    </th>
+
+                                    <th class="pb-3 px-2 text-right">
+                                        Skips
+                                    </th>
+
+                                    <th class="pb-3 px-2 text-right">
+                                        Engagement
+                                    </th>
+
+                                </tr>
+
+                            </thead>
+
+
+                            <tbody
+                                id="full-tracks-tbody"
+                            >
+
+                                <tr>
+
+                                    <td
+                                        colspan="6"
+                                        class="
+                                            py-10
+                                            text-center
+                                            text-gray-500
+                                        "
+                                    >
+                                        Loading...
+                                    </td>
+
+                                </tr>
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+
+                    <div
+                        id="tracks-pagination"
+                        class="mt-5"
+                    ></div>
+
+                </div>
+
+
+                <div
+                    id="selected-track-analytics"
+                ></div>
+
+            </div>
+
+        `;
+
+
+        await fetchTracksPage();
+
+    }
+
+
+    async function fetchTracksPage() {
+
+        const tbody =
+            document.getElementById(
+                "full-tracks-tbody"
+            );
+
+
+        try {
+
+            const response =
+                await analyticsApi(
+                    `/api/analytics/tracks${buildQuery({
+
+                        period:
+                            currentAnalyticsPeriod,
+
+                        page:
+                            tracksPage,
+
+                        perPage:
+                            ANALYTICS_PER_PAGE
+
+                    })}`
+                );
+
+
+            const rows =
+                Array.isArray(
+                    response?.data
+                )
+                    ? response.data
+                    : [];
+
+
+            renderTracksTable(
+                rows,
+                "full-tracks-tbody"
+            );
+
+
+            renderPagination(
+                "tracks-pagination",
+                tracksPage,
+                numberValue(
+                    response?.totalPages
+                ) || 1,
+                page => {
+
+                    tracksPage =
+                        page;
+
+                    fetchTracksPage();
+
+                }
+            );
+
+
+        } catch (error) {
+
+            if (tbody) {
+
+                tbody.innerHTML = `
+
+                    <tr>
+
+                        <td
+                            colspan="6"
+                            class="
+                                py-10
+                                text-center
+                                text-rose-400
+                            "
+                        >
+                            ${escapeHtml(
+                                error.message
+                            )}
+                        </td>
+
+                    </tr>
+
+                `;
+
+            }
+
+        }
+
+    }
+
+
+    // =========================================================
+    // INDIVIDUAL TRACK
+    // GET /analytics/tracks/{isrc}
+    // =========================================================
+
+    async function openAnalyticsTrack(
+        isrc
+    ) {
+
+        if (!isrc) {
+
+            return;
+
+        }
+
+
+        const container =
+            document.getElementById(
+                "selected-track-analytics"
+            );
+
+
+        if (!container) {
+
+            return;
+
+        }
+
+
+        container.innerHTML = `
+
+            <div class="
+                bg-brand-card
+                border
+                border-brand-border
+                rounded-2xl
+                p-6
+                text-xs
+                text-gray-400
+            ">
+                Loading track analytics...
+            </div>
+
+        `;
+
+
+        try {
+
+            const response =
+                await analyticsApi(
+                    `/api/analytics/tracks/${encodeURIComponent(
+                        isrc
+                    )}${buildQuery({
+
+                        period:
+                            currentAnalyticsPeriod
+
+                    })}`
+                );
+
+
+            const data =
+                unwrapAnalyticsResponse(
+                    response
+                );
+
+
+            container.innerHTML = `
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-6
+                    space-y-6
+                ">
+
+                    <div>
+
+                        <h2 class="
+                            text-sm
+                            font-semibold
+                            text-white
+                        ">
+                            ${escapeHtml(
+                                data?.track?.title ||
+                                data?.isrc ||
+                                isrc
+                            )}
+                        </h2>
+
+                        <div class="
+                            text-[10px]
+                            text-gray-500
+                            font-mono
+                            mt-1
+                        ">
+                            ${escapeHtml(
+                                data?.isrc ||
+                                isrc
+                            )}
+                        </div>
+
+                    </div>
+
+
+                    <div class="
+                        grid
+                        grid-cols-2
+                        md:grid-cols-4
+                        gap-3
+                    ">
+
+                        ${[
+                            [
+                                "Streams",
+                                data?.totalStreams,
+                                "text-white"
+                            ],
+                            [
+                                "Saves",
+                                data?.totalSaves,
+                                "text-emerald-400"
+                            ],
+                            [
+                                "Skips",
+                                data?.totalSkips,
+                                "text-rose-400"
+                            ],
+                            [
+                                "Engagement",
+                                formatPercentage(
+                                    data?.engagement
+                                ),
+                                "text-indigo-400"
+                            ]
+                        ].map(
+                            metric => `
+
+                                <div class="
+                                    p-4
+                                    rounded-xl
+                                    bg-white/[.02]
+                                    border
+                                    border-brand-border
+                                ">
+
+                                    <span class="
+                                        text-[10px]
+                                        text-gray-500
+                                    ">
+                                        ${metric[0]}
+                                    </span>
+
+                                    <div class="
+                                        text-lg
+                                        font-bold
+                                        mt-1
+                                        ${metric[2]}
+                                    ">
+                                        ${
+                                            typeof metric[1] ===
+                                            "number"
+                                                ? formatNumber(
+                                                    metric[1]
+                                                )
+                                                : metric[1]
+                                        }
+                                    </div>
+
+                                </div>
+
+                            `
+                        ).join("")}
+
+                    </div>
+
+
+                    <div>
+
+                        <h3 class="
+                            text-xs
+                            font-semibold
+                            text-white
+                            mb-3
+                        ">
+                            Streams Over Time
+                        </h3>
+
+
+                        <div class="
+                            relative
+                            h-72
+                        ">
+
+                            <canvas
+                                id="individualTrackChart"
+                            ></canvas>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            `;
+
+
+            createLineChart(
+                "individualTrackChart",
+                "trackChartInstance",
+                Array.isArray(
+                    data?.chart
+                )
+                    ? data.chart
+                    : [],
+                "#06b6d4"
+            );
+
+
+        } catch (error) {
+
+            container.innerHTML = `
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-rose-500/20
+                    rounded-2xl
+                    p-6
+                    text-xs
+                    text-rose-400
+                ">
+                    ${escapeHtml(
+                        error.message
+                    )}
+                </div>
+
+            `;
+
+        }
+
+    }
+
+
+    // =========================================================
+    // TRACK CHARTS
+    //
+    // GET /analytics/tracks/charts
+    // =========================================================
+
+    async function loadTrackChartsSummary() {
+
+        return await analyticsApi(
+            `/api/analytics/tracks/charts${buildQuery({
+
+                period:
+                    currentAnalyticsPeriod
+
+            })}`
+        );
+
+    }
+
+
+    // =========================================================
+    // PHASE 3
+    // DEMOGRAPHICS / ADDITIONAL ANALYTICS
+    //
+    // IMPORTANT:
+    //
+    // The old implementation incorrectly requested:
+    //
+    // /analytics/platforms?platform=spotify
+    //
+    // That endpoint is platform discovery.
+    //
+    // Additional analytics must use:
+    //
+    // /analytics/platforms/additional
+    //
+    // =========================================================
+
+    async function renderDemographicsView() {
+
+        const viewport =
+            document.getElementById(
+                "analytics-tab-viewport"
+            );
+
+
+        viewport.innerHTML = `
+
+            <div class="space-y-6">
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-5
+                ">
+
+                    <div class="
+                        grid
+                        grid-cols-1
+                        md:grid-cols-2
+                        gap-4
+                    ">
+
+                        <div>
+
+                            <label class="
+                                block
+                                text-[10px]
+                                text-gray-500
+                                mb-2
+                            ">
+                                Platform
+                            </label>
+
+                            <select
+                                id="demographic-platform-select"
+                                class="
+                                    w-full
+                                    bg-[#12141d]
+                                    border
+                                    border-brand-border
+                                    text-white
+                                    text-xs
+                                    rounded-xl
+                                    px-3
+                                    py-3
+                                "
+                                onchange="
+                                    window.analyticsSetDemographicPlatform(
+                                        this.value
+                                    )
+                                "
+                            >
+
+                                <option>
+                                    Loading...
+                                </option>
+
+                            </select>
+
+                        </div>
+
+
+                        <div>
+
+                            <label class="
+                                block
+                                text-[10px]
+                                text-gray-500
+                                mb-2
+                            ">
+                                Analytics Type
+                            </label>
+
+                            <select
+                                id="demographic-type-select"
+                                class="
+                                    w-full
+                                    bg-[#12141d]
+                                    border
+                                    border-brand-border
+                                    text-white
+                                    text-xs
+                                    rounded-xl
+                                    px-3
+                                    py-3
+                                "
+                                onchange="
+                                    window.analyticsSetAdditionalType(
+                                        this.value
+                                    )
+                                "
+                            >
+
+                                <option>
+                                    Loading...
+                                </option>
+
+                            </select>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <div
+                    id="demographics-content-area"
+                ></div>
+
+            </div>
+
+        `;
+
+
+        try {
+
+            const info =
+                await loadAnalyticsPlatforms();
+
+
+            const platformSelect =
+                document.getElementById(
+                    "demographic-platform-select"
+                );
+
+
+            const typeSelect =
+                document.getElementById(
+                    "demographic-type-select"
+                );
+
+
+            if (
+                !selectedAnalyticsPlatform &&
+                info.platforms.length
+            ) {
+
+                selectedAnalyticsPlatform =
+                    info.platforms[0].platform;
+
+            }
+
+
+            if (
+                !selectedAnalyticsType &&
+                info.additionalTypes.length
+            ) {
+
+                selectedAnalyticsType =
+                    info.additionalTypes[0];
+
+            }
+
+
+            if (platformSelect) {
+
+                platformSelect.innerHTML =
+                    info.platforms
+                        .map(
+                            platform => `
+
+                                <option
+                                    value="${escapeHtml(
+                                        platform.platform
+                                    )}"
+                                    ${
+                                        platform.platform ===
+                                        selectedAnalyticsPlatform
+                                            ? "selected"
+                                            : ""
+                                    }
+                                >
+
+                                    ${escapeHtml(
+                                        platform.platform
+                                    )}
+
+                                </option>
+
+                            `
+                        )
+                        .join("");
+
+            }
+
+
+            if (typeSelect) {
+
+                typeSelect.innerHTML =
+                    info.additionalTypes
+                        .map(
+                            type => `
+
+                                <option
+                                    value="${escapeHtml(
+                                        type
+                                    )}"
+                                    ${
+                                        type ===
+                                        selectedAnalyticsType
+                                            ? "selected"
+                                            : ""
+                                    }
+                                >
+
+                                    ${escapeHtml(
+                                        type
+                                    )}
+
+                                </option>
+
+                            `
+                        )
+                        .join("");
+
+            }
+
+
+            await fetchDemographicData();
+
+
+        } catch (error) {
+
+            showAnalyticsAlert(
+                `Failed to load additional analytics: ${error.message}`,
+                "error"
+            );
+
+        }
+
+    }
+
+
+    async function fetchDemographicData() {
+
+        const container =
+            document.getElementById(
+                "demographics-content-area"
+            );
+
+
+        if (
+            !container ||
+            !selectedAnalyticsPlatform ||
+            !selectedAnalyticsType
+        ) {
+
+            return;
+
+        }
+
+
+        try {
+
+            const query =
+                buildQuery({
+
+                    platform:
+                        selectedAnalyticsPlatform,
+
+                    type:
+                        selectedAnalyticsType,
+
+                    period:
+                        currentAnalyticsPeriod,
+
+                    release:
+                        selectedAnalyticsRelease ||
+                        undefined
+
+                });
+
+
+            const [
+                additionalResponse,
+                infoResponse
+            ] = await Promise.all([
+
+                analyticsApi(
+                    `/api/analytics/platforms/additional${query}`
+                ),
+
+                analyticsApi(
+                    `/api/analytics/platforms/additional/info${query}`
+                )
+                    .catch(
+                        () => null
+                    )
+
+            ]);
+
+
+            const additional =
+                unwrapAnalyticsResponse(
+                    additionalResponse
+                );
+
+
+            const info =
+                infoResponse
+                    ? unwrapAnalyticsResponse(
+                        infoResponse
+                    )
+                    : null;
+
+
+            container.innerHTML = `
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-6
+                ">
+
+                    <div class="
+                        flex
+                        items-center
+                        justify-between
+                        gap-3
+                        mb-5
+                    ">
+
+                        <div>
+
+                            <h2 class="
+                                text-sm
+                                font-semibold
+                                text-white
+                            ">
+                                ${escapeHtml(
+                                    selectedAnalyticsType
+                                )}
+                            </h2>
+
+                            <p class="
+                                text-[10px]
+                                text-gray-500
+                                mt-1
+                            ">
+                                ${escapeHtml(
+                                    selectedAnalyticsPlatform
+                                )}
+                                ·
+                                ${escapeHtml(
+                                    currentAnalyticsPeriod
+                                )}
+                            </p>
+
+                        </div>
+
+                    </div>
+
+
+                    ${
+                        info
+                            ? `
+
+                                <div class="
+                                    mb-5
+                                    p-4
+                                    rounded-xl
+                                    bg-white/[.02]
+                                    border
+                                    border-brand-border
+                                ">
+
+                                    <span class="
+                                        text-[10px]
+                                        text-gray-500
+                                    ">
+                                        Total
+                                    </span>
+
+                                    <div class="
+                                        text-xl
+                                        font-bold
+                                        text-white
+                                        mt-1
+                                    ">
+                                        ${formatAnalyticsScalar(
+                                            info
+                                        )}
+                                    </div>
+
+                                </div>
+
+                            `
+                            : ""
+                    }
+
+
+                    <div class="space-y-2">
+
+                        ${renderAdditionalRows(
+                            additional
+                        )}
+
+                    </div>
+
+                </div>
+
+            `;
+
+
+        } catch (error) {
+
+            container.innerHTML = `
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-rose-500/20
+                    rounded-2xl
+                    p-8
+                    text-center
+                    text-xs
+                    text-rose-400
+                ">
+                    ${escapeHtml(
+                        error.message
+                    )}
+                </div>
+
+            `;
+
+        }
+
+    }
+
+
+    function formatAnalyticsScalar(
+        value
+    ) {
+
+        if (
+            value === null ||
+            value === undefined
+        ) {
+
+            return "-";
+
+        }
+
+
+        if (
+            typeof value !==
+            "object"
+        ) {
+
+            return escapeHtml(
+                value
+            );
+
+        }
+
+
+        const scalar =
+            value.total ??
+            value.totalStreams ??
+            value.streamsTotal ??
+            value.count ??
+            value.value;
+
+
+        if (
+            scalar !== undefined
+        ) {
+
+            return formatNumber(
+                scalar
+            );
+
+        }
+
+
+        return escapeHtml(
+            JSON.stringify(
+                value
+            )
+        );
+
+    }
+
+
+    function renderAdditionalRows(
+        data
+    ) {
+
+        if (
+            Array.isArray(data)
+        ) {
+
+            if (
+                !data.length
+            ) {
+
+                return `
+
+                    <div class="
+                        py-8
+                        text-center
+                        text-xs
+                        text-gray-500
+                    ">
+                        No additional analytics returned.
+                    </div>
+
+                `;
+
+            }
+
+
+            return data
+                .map(
+                    row => `
+
+                        <div class="
+                            flex
+                            justify-between
+                            gap-3
+                            p-3
+                            rounded-xl
+                            bg-white/[.02]
+                            border
+                            border-brand-border/50
+                        ">
+
+                            <span class="
+                                text-xs
+                                text-white
+                            ">
+                                ${escapeHtml(
+                                    row?.name ||
+                                    row?.label ||
+                                    row?.key ||
+                                    row?.value ||
+                                    "Unknown"
+                                )}
+                            </span>
+
+
+                            <span class="
+                                text-xs
+                                text-indigo-400
+                                font-semibold
+                            ">
+                                ${formatNumber(
+                                    row?.total ??
+                                    row?.streams ??
+                                    row?.count ??
+                                    row?.value
+                                )}
+                            </span>
+
+                        </div>
+
+                    `
+                )
+                .join("");
+
+        }
+
+
+        if (
+            data &&
+            typeof data ===
+                "object"
+        ) {
+
+            return Object.entries(
+                data
+            )
+                .map(
+                    ([key, value]) => `
+
+                        <div class="
+                            flex
+                            justify-between
+                            gap-3
+                            p-3
+                            rounded-xl
+                            bg-white/[.02]
+                            border
+                            border-brand-border/50
+                        ">
+
+                            <span class="
+                                text-xs
+                                text-white
+                            ">
+                                ${escapeHtml(
+                                    key
+                                )}
+                            </span>
+
+
+                            <span class="
+                                text-xs
+                                text-indigo-400
+                            ">
+
+                                ${
+                                    typeof value ===
+                                    "object"
+                                        ? escapeHtml(
+                                            JSON.stringify(
+                                                value
+                                            )
+                                        )
+                                        : formatNumber(
+                                            value
+                                        )
+                                }
+
+                            </span>
+
+                        </div>
+
+                    `
+                )
+                .join("");
+
+        }
+
+
+        return `
+
+            <div class="
+                p-4
+                text-xs
+                text-gray-400
+            ">
+                No additional analytics returned.
+            </div>
+
+        `;
+
+    }
+
+
+    function analyticsSetDemographicPlatform(
+        value
+    ) {
+
+        selectedAnalyticsPlatform =
+            value;
+
+        fetchDemographicData();
+
+    }
+
+
+    function analyticsSetAdditionalType(
+        value
+    ) {
+
+        selectedAnalyticsType =
+            value;
+
+        fetchDemographicData();
+
+    }
+
+
+    // =========================================================
+    // PHASE 3
+    // USAGE DISCOVERY
+    //
+    // Too Lost documents:
+    //
+    // /usage-discovery/overview
+    // /usage-discovery/top-songs
+    // /usage-discovery/track-matches
+    //
+    // =========================================================
+
+    async function renderUsageDiscoveryView() {
+
+        const viewport =
+            document.getElementById(
+                "analytics-tab-viewport"
+            );
+
+
+        viewport.innerHTML = `
+
+            <div class="space-y-6">
+
+                <div
+                    id="usage-kpis"
+                    class="
+                        grid
+                        grid-cols-2
+                        md:grid-cols-4
+                        gap-4
+                    "
+                >
+
+                    ${[1,2,3,4].map(
+                        () => `
+
+                            <div class="
+                                h-24
+                                bg-brand-card
+                                border
+                                border-brand-border
+                                rounded-2xl
+                                animate-pulse
+                            "></div>
+
+                        `
+                    ).join("")}
+
+                </div>
+
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-6
+                ">
+
+                    <h2 class="
+                        text-sm
+                        font-semibold
+                        text-white
+                        mb-4
+                    ">
+                        Usage Discovery Matches
+                    </h2>
+
+
+                    <div class="
+                        relative
+                        h-64
+                    ">
+
+                        <canvas
+                            id="usageDiscoveryChart"
+                        ></canvas>
+
+                    </div>
+
+                </div>
+
+
+                <div class="
+                    grid
+                    grid-cols-1
+                    xl:grid-cols-2
+                    gap-6
+                ">
+
+                    <div class="
+                        bg-brand-card
+                        border
+                        border-brand-border
+                        rounded-2xl
+                        p-6
+                    ">
+
+                        <h3 class="
+                            text-xs
+                            font-semibold
+                            text-white
+                            uppercase
+                            mb-4
+                        ">
+                            Top Songs
+                        </h3>
+
+
+                        <div
+                            id="usage-top-songs"
+                        ></div>
+
+
+                        <div
+                            id="usage-songs-pagination"
+                            class="mt-4"
+                        ></div>
+
+                    </div>
+
+
+                    <div class="
+                        bg-brand-card
+                        border
+                        border-brand-border
+                        rounded-2xl
+                        p-6
+                    ">
+
+                        <h3 class="
+                            text-xs
+                            font-semibold
+                            text-white
+                            uppercase
+                            mb-4
+                        ">
+                            Track Matches
+                        </h3>
+
+
+                        <div
+                            id="usage-track-matches"
+                        ></div>
+
+
+                        <div
+                            id="usage-matches-pagination"
+                            class="mt-4"
+                        ></div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        `;
+
+
+        await fetchUsageDiscovery();
+
+    }
+
+
+    async function fetchUsageDiscovery() {
+
+        try {
+
+            const commonQuery = {
+
+                period:
+                    currentAnalyticsPeriod,
+
+                release:
+                    selectedAnalyticsRelease ||
+                    undefined
+
+            };
+
+
+            const [
+                overviewResponse,
+                songsResponse,
+                matchesResponse
+            ] = await Promise.all([
+
+                analyticsApi(
+                    `/api/analytics/usage-discovery/overview${buildQuery(
+                        commonQuery
+                    )}`
+                ),
+
+                analyticsApi(
+                    `/api/analytics/usage-discovery/top-songs${buildQuery({
+
+                        ...commonQuery,
+
+                        page:
+                            usageSongsPage,
+
+                        perPage:
+                            ANALYTICS_PER_PAGE
+
+                    })}`
+                ),
+
+                analyticsApi(
+                    `/api/analytics/usage-discovery/track-matches${buildQuery({
+
+                        ...commonQuery,
+
+                        page:
+                            usageMatchesPage,
+
+                        perPage:
+                            ANALYTICS_PER_PAGE
+
+                    })}`
+                )
+
+            ]);
+
+
+            const overview =
+                unwrapAnalyticsResponse(
+                    overviewResponse
+                );
+
+
+            const usageKpis =
+                document.getElementById(
+                    "usage-kpis"
+                );
+
+
+            if (usageKpis) {
+
+                usageKpis.innerHTML = `
+
+                    <div class="
+                        bg-brand-card
+                        border
+                        border-brand-border
+                        rounded-2xl
+                        p-5
+                    ">
+
+                        <span class="
+                            text-xs
+                            text-gray-400
+                        ">
+                            Matches
+                        </span>
+
+                        <div class="
+                            text-2xl
+                            font-bold
+                            text-white
+                            mt-1
+                        ">
+                            ${formatNumber(
+                                overview?.matches
+                            )}
+                        </div>
+
+                    </div>
+
+
+                    <div class="
+                        bg-brand-card
+                        border
+                        border-brand-border
+                        rounded-2xl
+                        p-5
+                    ">
+
+                        <span class="
+                            text-xs
+                            text-gray-400
+                        ">
+                            Views
+                        </span>
+
+                        <div class="
+                            text-2xl
+                            font-bold
+                            text-indigo-400
+                            mt-1
+                        ">
+                            ${formatNumber(
+                                overview?.additional?.views
+                            )}
+                        </div>
+
+                    </div>
+
+
+                    <div class="
+                        bg-brand-card
+                        border
+                        border-brand-border
+                        rounded-2xl
+                        p-5
+                    ">
+
+                        <span class="
+                            text-xs
+                            text-gray-400
+                        ">
+                            Likes
+                        </span>
+
+                        <div class="
+                            text-2xl
+                            font-bold
+                            text-emerald-400
+                            mt-1
+                        ">
+                            ${formatNumber(
+                                overview?.additional?.likes
+                            )}
+                        </div>
+
+                    </div>
+
+
+                    <div class="
+                        bg-brand-card
+                        border
+                        border-brand-border
+                        rounded-2xl
+                        p-5
+                    ">
+
+                        <span class="
+                            text-xs
+                            text-gray-400
+                        ">
+                            Shares
+                        </span>
+
+                        <div class="
+                            text-2xl
+                            font-bold
+                            text-cyan-400
+                            mt-1
+                        ">
+                            ${formatNumber(
+                                overview?.additional?.shares
+                            )}
+                        </div>
+
+                    </div>
+
+                `;
+
+            }
+
+
+            const usageTimeline =
+                Array.isArray(
+                    overview?.total
+                )
+                    ? overview.total
+                    : [];
+
+
+            createLineChart(
+                "usageDiscoveryChart",
+                "usageChartInstance",
+                usageTimeline.map(
+                    item => ({
+
+                        date:
+                            item.date,
+
+                        totalStreams:
+                            item.matches
+
+                    })
+                ),
+                "#14b8a6"
+            );
+
+
+            renderUsageSongs(
+                songsResponse
+            );
+
+
+            renderUsageMatches(
+                matchesResponse
+            );
+
+
+        } catch (error) {
+
+            showAnalyticsAlert(
+                `Usage Discovery failed: ${error.message}`,
+                "error"
+            );
+
+        }
+
+    }
+
+
+    function renderUsageSongs(
+        response
+    ) {
+
+        const container =
+            document.getElementById(
+                "usage-top-songs"
+            );
+
+
+        if (!container) {
+
+            return;
+
+        }
+
+
+        const rows =
+            Array.isArray(
+                response?.data
+            )
+                ? response.data
+                : [];
+
+
+        if (
+            !rows.length
+        ) {
+
+            container.innerHTML = `
+
+                <div class="
+                    py-8
+                    text-center
+                    text-xs
+                    text-gray-500
+                ">
+                    No usage discovery songs found.
+                </div>
+
+            `;
+
+        } else {
+
+            container.innerHTML =
+                rows
+                    .map(
+                        song => `
+
+                            <div class="
+                                p-3
+                                rounded-xl
+                                border
+                                border-brand-border/60
+                                bg-white/[.02]
+                                mb-2
+                            ">
+
+                                <div class="
+                                    flex
+                                    items-center
+                                    gap-3
+                                ">
+
+                                    ${
+                                        song.coverUrl
+                                            ? `
+
+                                                <img
+                                                    src="${escapeHtml(
+                                                        song.coverUrl
+                                                    )}"
+                                                    class="
+                                                        w-10
+                                                        h-10
+                                                        rounded-lg
+                                                        object-cover
+                                                    "
+                                                />
+
+                                            `
+                                            : `
+
+                                                <div class="
+                                                    w-10
+                                                    h-10
+                                                    rounded-lg
+                                                    bg-white/5
+                                                "></div>
+
+                                            `
+                                    }
+
+
+                                    <div class="min-w-0">
+
+                                        <div class="
+                                            text-xs
+                                            font-semibold
+                                            text-white
+                                            truncate
+                                        ">
+                                            ${escapeHtml(
+                                                song.assetTitle ||
+                                                song.track ||
+                                                "Untitled"
+                                            )}
+                                        </div>
+
+
+                                        <div class="
+                                            text-[10px]
+                                            text-gray-500
+                                            mt-1
+                                        ">
+
+                                            ${formatNumber(
+                                                song.matches
+                                            )}
+                                            matches
+
+                                            ·
+
+                                            ${escapeHtml(
+                                                song.averagePercentOfSongUsed ||
+                                                "0"
+                                            )}%
+                                            used
+
+                                        </div>
+
+                                    </div>
+
+                                </div>
+
+                            </div>
+
+                        `
+                    )
+                    .join("");
+
+        }
+
+
+        renderPagination(
+            "usage-songs-pagination",
+            usageSongsPage,
+            numberValue(
+                response?.totalPages
+            ) || 1,
+            page => {
+
+                usageSongsPage =
+                    page;
+
+                fetchUsageDiscovery();
+
+            }
+        );
+
+    }
+
+
+    function renderUsageMatches(
+        response
+    ) {
+
+        const container =
+            document.getElementById(
+                "usage-track-matches"
+            );
+
+
+        if (!container) {
+
+            return;
+
+        }
+
+
+        const rows =
+            Array.isArray(
+                response?.data
+            )
+                ? response.data
+                : [];
+
+
+        if (
+            !rows.length
+        ) {
+
+            container.innerHTML = `
+
+                <div class="
+                    py-8
+                    text-center
+                    text-xs
+                    text-gray-500
+                ">
+                    No track matches found.
+                </div>
+
+            `;
+
+        } else {
+
+            container.innerHTML =
+                rows
+                    .map(
+                        match => `
+
+                            <div class="
+                                p-3
+                                rounded-xl
+                                border
+                                border-brand-border/60
+                                bg-white/[.02]
+                                mb-2
+                            ">
+
+                                <div class="
+                                    flex
+                                    justify-between
+                                    gap-3
+                                ">
+
+                                    <div class="min-w-0">
+
+                                        <div class="
+                                            text-xs
+                                            font-semibold
+                                            text-white
+                                            truncate
+                                        ">
+                                            ${escapeHtml(
+                                                match.videoTitle ||
+                                                match.assetTitle ||
+                                                "Untitled Match"
+                                            )}
+                                        </div>
+
+
+                                        <div class="
+                                            text-[10px]
+                                            text-gray-500
+                                            mt-1
+                                            truncate
+                                        ">
+
+                                            ${escapeHtml(
+                                                match.creatorName ||
+                                                ""
+                                            )}
+
+                                            ${
+                                                match.channelName
+                                                    ? ` · ${escapeHtml(
+                                                        match.channelName
+                                                    )}`
+                                                    : ""
+                                            }
+
+                                        </div>
+
+                                    </div>
+
+
+                                    <div class="text-right">
+
+                                        <div class="
+                                            text-xs
+                                            font-semibold
+                                            text-indigo-400
+                                        ">
+                                            ${formatNumber(
+                                                match.views
+                                            )}
+                                            views
+                                        </div>
+
+
+                                        <div class="
+                                            text-[10px]
+                                            text-gray-500
+                                        ">
+                                            ${formatNumber(
+                                                match.likes
+                                            )}
+                                            likes
+                                        </div>
+
+                                    </div>
+
+                                </div>
+
+
+                                ${
+                                    match.url
+                                        ? `
+
+                                            <a
+                                                href="${escapeHtml(
+                                                    match.url
+                                                )}"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                class="
+                                                    inline-block
+                                                    mt-2
+                                                    text-[10px]
+                                                    text-brand-accent
+                                                "
+                                            >
+                                                Open match →
+                                            </a>
+
+                                        `
+                                        : ""
+                                }
+
+                            </div>
+
+                        `
+                    )
+                    .join("");
+
+        }
+
+
+        renderPagination(
+            "usage-matches-pagination",
+            usageMatchesPage,
+            numberValue(
+                response?.totalPages
+            ) || 1,
+            page => {
+
+                usageMatchesPage =
+                    page;
+
+                fetchUsageDiscovery();
+
+            }
+        );
+
+    }
+
+
+    // =========================================================
+    // PHASE 4
+    // RELEASE LINKS
+    //
+    // /analytics/release-links/top-releases
+    //
+    // =========================================================
+
+    async function renderReleaseLinksView() {
+
+        const viewport =
+            document.getElementById(
+                "analytics-tab-viewport"
+            );
+
+
+        viewport.innerHTML = `
+
+            <div class="space-y-6">
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-5
+                ">
+
+                    <div class="
+                        flex
+                        gap-3
+                    ">
+
+                        <input
+                            id="release-links-search"
+                            type="text"
+                            maxlength="120"
+                            placeholder="Search releases..."
+                            class="
+                                flex-1
+                                bg-[#12141d]
+                                border
+                                border-brand-border
+                                text-white
+                                text-xs
+                                rounded-xl
+                                px-3
+                                py-3
+                                outline-none
+                            "
+                            onkeydown="
+                                if(event.key === 'Enter'){
+                                    window.searchReleaseLinks();
+                                }
+                            "
+                        />
+
+
+                        <button
+                            onclick="
+                                window.searchReleaseLinks()
+                            "
+                            class="
+                                px-5
+                                py-3
+                                rounded-xl
+                                bg-brand-primary
+                                text-white
+                                text-xs
+                                font-semibold
+                            "
+                        >
+                            Search
+                        </button>
+
+                    </div>
+
+                </div>
+
+
+                <div class="
+                    bg-brand-card
+                    border
+                    border-brand-border
+                    rounded-2xl
+                    p-6
+                ">
+
+                    <div
+                        id="release-links-list"
+                    ></div>
+
+
+                    <div
+                        id="release-links-pagination"
+                        class="mt-5"
+                    ></div>
+
+                </div>
+
+            </div>
+
+        `;
+
+
+        await fetchReleaseLinks();
+
+    }
+
+
+    async function fetchReleaseLinks() {
+
+        const container =
+            document.getElementById(
+                "release-links-list"
+            );
+
+
+        if (!container) {
+
+            return;
+
+        }
+
+
+        try {
+
+            const search =
+                document.getElementById(
+                    "release-links-search"
+                )?.value ||
+                "";
+
+
+            const response =
+                await analyticsApi(
+                    `/api/analytics/release-links/top-releases${buildQuery({
+
+                        search:
+                            search.trim() ||
+                            undefined,
+
+                        release:
+                            selectedAnalyticsRelease ||
+                            undefined,
+
+                        page:
+                            releaseLinksPage,
+
+                        perPage:
+                            ANALYTICS_PER_PAGE
+
+                    })}`
+                );
+
+
+            const rows =
+                Array.isArray(
+                    response?.data
+                )
+                    ? response.data
+                    : [];
+
+
+            if (
+                !rows.length
+            ) {
+
+                container.innerHTML = `
+
+                    <div class="
+                        py-10
+                        text-center
+                        text-xs
+                        text-gray-500
+                    ">
+                        No release link analytics found.
+                    </div>
+
+                `;
+
+            } else {
+
+                container.innerHTML =
+                    rows
+                        .map(
+                            release => `
+
+                                <div class="
+                                    flex
+                                    flex-col
+                                    md:flex-row
+                                    md:items-center
+                                    gap-4
+                                    p-4
+                                    rounded-xl
+                                    border
+                                    border-brand-border/60
+                                    bg-white/[.02]
+                                    mb-2
+                                ">
+
+                                    ${
+                                        release.coverUrl
+                                            ? `
+
+                                                <img
+                                                    src="${escapeHtml(
+                                                        release.coverUrl
+                                                    )}"
+                                                    class="
+                                                        w-14
+                                                        h-14
+                                                        rounded-xl
+                                                        object-cover
+                                                    "
+                                                />
+
+                                            `
+                                            : `
+
+                                                <div class="
+                                                    w-14
+                                                    h-14
+                                                    rounded-xl
+                                                    bg-white/5
+                                                "></div>
+
+                                            `
+                                    }
+
+
+                                    <div class="
+                                        min-w-0
+                                        flex-1
+                                    ">
+
+                                        <div class="
+                                            text-sm
+                                            font-semibold
+                                            text-white
+                                            truncate
+                                        ">
+                                            ${escapeHtml(
+                                                release.title ||
+                                                "Untitled Release"
+                                            )}
+                                        </div>
+
+
+                                        <div class="
+                                            text-[10px]
+                                            text-gray-500
+                                            mt-1
+                                        ">
+                                            Release ID:
+                                            ${escapeHtml(
+                                                release.releaseId ||
+                                                "-"
+                                            )}
+                                        </div>
+
+                                    </div>
+
+
+                                    <div class="
+                                        grid
+                                        grid-cols-3
+                                        gap-4
+                                    ">
+
+                                        <div class="text-right">
+
+                                            <div class="
+                                                text-xs
+                                                font-bold
+                                                text-white
+                                            ">
+                                                ${formatNumber(
+                                                    release.clicks
+                                                )}
+                                            </div>
+
+                                            <div class="
+                                                text-[9px]
+                                                text-gray-500
+                                            ">
+                                                CLICKS
+                                            </div>
+
+                                        </div>
+
+
+                                        <div class="text-right">
+
+                                            <div class="
+                                                text-xs
+                                                font-bold
+                                                text-indigo-400
+                                            ">
+                                                ${formatNumber(
+                                                    release.clicksToService
+                                                )}
+                                            </div>
+
+                                            <div class="
+                                                text-[9px]
+                                                text-gray-500
+                                            ">
+                                                TO SERVICE
+                                            </div>
+
+                                        </div>
+
+
+                                        <div class="text-right">
+
+                                            <div class="
+                                                text-xs
+                                                font-bold
+                                                text-emerald-400
+                                            ">
+                                                ${formatNumber(
+                                                    release.uniqueUsers
+                                                )}
+                                            </div>
+
+                                            <div class="
+                                                text-[9px]
+                                                text-gray-500
+                                            ">
+                                                UNIQUE
+                                            </div>
+
+                                        </div>
+
+                                    </div>
+
+
+                                    ${
+                                        release.link
+                                            ? `
+
+                                                <a
+                                                    href="${escapeHtml(
+                                                        release.link
+                                                    )}"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    class="
+                                                        px-3
+                                                        py-2
+                                                        rounded-lg
+                                                        bg-white/5
+                                                        text-xs
+                                                        text-brand-accent
+                                                        whitespace-nowrap
+                                                    "
+                                                >
+                                                    Open Link
+                                                </a>
+
+                                            `
+                                            : ""
+                                    }
+
+                                </div>
+
+                            `
+                        )
+                        .join("");
+
+            }
+
+
+            renderPagination(
+                "release-links-pagination",
+                releaseLinksPage,
+                numberValue(
+                    response?.totalPages
+                ) || 1,
+                page => {
+
+                    releaseLinksPage =
+                        page;
+
+                    fetchReleaseLinks();
+
+                }
+            );
+
+
+        } catch (error) {
+
+            container.innerHTML = `
+
+                <div class="
+                    py-10
+                    text-center
+                    text-xs
+                    text-rose-400
+                ">
+                    ${escapeHtml(
+                        error.message
+                    )}
+                </div>
+
+            `;
+
+        }
+
+    }
+
+
+    function searchReleaseLinks() {
+
+        releaseLinksPage =
+            1;
+
+        fetchReleaseLinks();
+
+    }
+
+
+    // =========================================================
+    // PHASE 5
+    // RELEASE FILTER
+    // =========================================================
+
+    function analyticsSetRelease(
+        releaseId
+    ) {
+
+        selectedAnalyticsRelease =
+            releaseId ||
+            "";
+
+        tracksPage = 1;
+        usageSongsPage = 1;
+        usageMatchesPage = 1;
+        releaseLinksPage = 1;
+
+
+        renderAnalyticsTab();
+
+    }
+
+
+    // =========================================================
+    // PAGINATION
+    // =========================================================
+
+    const analyticsPaginationCallbacks =
+        {};
+
+
+    function renderPagination(
+        containerId,
+        currentPage,
+        totalPages,
+        callback
+    ) {
+
+        const container =
+            document.getElementById(
+                containerId
+            );
+
+
+        if (!container) {
+
+            return;
+
+        }
+
+
+        totalPages =
+            Math.max(
+                1,
+                numberValue(
+                    totalPages
+                )
+            );
+
+
+        if (
+            totalPages <= 1
+        ) {
+
+            container.innerHTML =
+                "";
+
+            return;
+
+        }
+
+
+        analyticsPaginationCallbacks[
+            containerId
+        ] =
+            callback;
+
+
+        const buttons = [];
+
+
+        buttons.push(`
+
+            <button
+                ${
+                    currentPage <= 1
+                        ? "disabled"
+                        : ""
+                }
+                onclick="
+                    window.analyticsPagination(
+                        '${containerId}',
+                        ${currentPage - 1}
+                    )
+                "
+                class="
+                    px-3
+                    py-2
+                    rounded-lg
+                    text-[10px]
+                    border
+                    border-brand-border
+                    ${
+                        currentPage <= 1
+                            ? "opacity-40"
+                            : "hover:bg-white/5"
+                    }
+                "
+            >
+                Previous
+            </button>
+
+        `);
+
+
+        const start =
+            Math.max(
+                1,
+                currentPage - 2
+            );
+
+
+        const end =
+            Math.min(
+                totalPages,
+                currentPage + 2
+            );
+
+
+        for (
+            let page = start;
+            page <= end;
+            page++
+        ) {
+
+            buttons.push(`
+
+                <button
+                    onclick="
+                        window.analyticsPagination(
+                            '${containerId}',
+                            ${page}
+                        )
+                    "
+                    class="
+                        px-3
+                        py-2
+                        rounded-lg
+                        text-[10px]
+                        border
+                        border-brand-border
+                        ${
+                            page === currentPage
+                                ? "bg-brand-primary text-white"
+                                : "text-gray-400 hover:text-white"
+                        }
+                    "
+                >
+                    ${page}
+                </button>
+
+            `);
+
+        }
+
+
+        buttons.push(`
+
+            <button
+                ${
+                    currentPage >= totalPages
+                        ? "disabled"
+                        : ""
+                }
+                onclick="
+                    window.analyticsPagination(
+                        '${containerId}',
+                        ${currentPage + 1}
+                    )
+                "
+                class="
+                    px-3
+                    py-2
+                    rounded-lg
+                    text-[10px]
+                    border
+                    border-brand-border
+                    ${
+                        currentPage >= totalPages
+                            ? "opacity-40"
+                            : "hover:bg-white/5"
+                    }
+                "
+            >
+                Next
+            </button>
+
+        `);
+
+
+        container.innerHTML = `
+
+            <div class="
+                flex
+                justify-center
+                gap-2
+                flex-wrap
+            ">
+
+                ${buttons.join("")}
+
+            </div>
+
+        `;
+
+    }
+
+
+    function analyticsPagination(
+        containerId,
+        page
+    ) {
+
+        const callback =
+            analyticsPaginationCallbacks[
+                containerId
+            ];
+
+
+        if (
+            typeof callback ===
+            "function"
+        ) {
+
+            callback(
+                page
+            );
+
+        }
+
+    }
+
+
+    // =========================================================
+    // ALERT
+    // =========================================================
+
+    function showAnalyticsAlert(
+        message,
+        type = "info"
+    ) {
+
+        const area =
+            document.getElementById(
+                "analytics-alert-area"
+            );
+
+
+        if (!area) {
+
+            console.error(
+                message
+            );
+
+            return;
+
+        }
+
+
+        area.classList.remove(
+            "hidden"
+        );
+
+
+        area.innerHTML = `
+
+            <div class="
+                p-3
+                rounded-xl
+                text-xs
+                ${
+                    type === "error"
+                        ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                        : "bg-indigo-500/10 text-indigo-300 border border-indigo-500/20"
+                }
+            ">
+
+                ${escapeHtml(
+                    message
+                )}
+
+            </div>
+
+        `;
+
+
+        clearTimeout(
+            window.analyticsAlertTimer
+        );
+
+
+        window.analyticsAlertTimer =
+            setTimeout(
+                () => {
+
+                    area.classList.add(
+                        "hidden"
+                    );
+
+                },
+                6000
+            );
+
+    }
+
+
+    // =========================================================
+    // GLOBAL EXPORTS
+    //
+    // Keep these names because your existing switchView()
+    // already calls these functions.
+    // =========================================================
+
+    window.renderAnalyticsView =
+        renderAnalyticsView;
+
+
+    window.initAnalyticsDashboard =
+        initAnalyticsDashboard;
+
+
+    window.switchAnalyticsTab =
+        switchAnalyticsTab;
+
+
+    window.fetchOverviewData =
+        fetchOverviewData;
+
+
+    window.fetchPlatformData =
+        fetchPlatformData;
+
+
+    window.fetchDemographicData =
+        fetchDemographicData;
+
+
+    window.analyticsSetRelease =
+        analyticsSetRelease;
+
+
+    window.analyticsSelectPlatform =
+        analyticsSelectPlatform;
+
+
+    window.analyticsSetDemographicPlatform =
+        analyticsSetDemographicPlatform;
+
+
+    window.analyticsSetAdditionalType =
+        analyticsSetAdditionalType;
+
+
+    window.openAnalyticsTrack =
+        openAnalyticsTrack;
+
+
+    window.loadTrackChartsSummary =
+        loadTrackChartsSummary;
+
+
+    window.fetchUsageDiscovery =
+        fetchUsageDiscovery;
+
+
+    window.searchReleaseLinks =
+        searchReleaseLinks;
+
+
+    window.fetchReleaseLinks =
+        fetchReleaseLinks;
+
+
+    window.analyticsPagination =
+        analyticsPagination;
+
+
+})();
