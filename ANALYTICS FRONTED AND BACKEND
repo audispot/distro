@@ -1,0 +1,629 @@
+1.FRONTED
+
+(function () {
+    // Private module state
+    let currentAnalyticsPeriod = 'lastThirtyDays';
+    let activeAnalyticsTab = 'overview';
+    let analyticsChartInstance = null;
+    let platformChartInstance = null;
+    let selectedPlatform = 'spotify';
+
+    // List of platforms matching TooLost DSP options
+    const PLATFORMS_LIST = [
+        { id: 'spotify', name: 'Spotify', icon: '<path fill="currentColor" d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.18.295-.563.387-.857.207-2.35-1.434-5.308-1.758-8.793-.963-.33.075-.657-.133-.733-.462-.075-.33.134-.656.463-.732 3.815-.872 7.09-.5 9.713 1.106.294.18.386.563.207.857zm1.222-2.72c-.226.367-.704.482-1.07.257-2.688-1.652-6.785-2.131-9.965-1.166-.413.125-.848-.106-.973-.519-.125-.413.106-.848.519-.973 3.632-1.102 8.147-.568 11.232 1.33.366.226.48.704.257 1.071zm.141-2.827C14.7 8.905 9.074 8.718 5.815 9.708c-.5.152-1.026-.134-1.178-.635-.152-.501.134-1.026.635-1.178 3.755-1.14 9.973-.923 13.758 1.325.45.267.598.85.331 1.3-.267.449-.85.598-1.3.331z"/>' },
+        { id: 'apple', name: 'Apple', icon: '<path fill="currentColor" d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 4.54c.66-.8 1.11-1.92.99-3.04-.96.04-2.12.64-2.8 1.44-.61.71-1.14 1.86-1 2.97 1.08.08 2.16-.57 2.81-1.37z"/>' },
+        { id: 'deezer', name: 'Deezer', icon: '<path fill="currentColor" d="M17.4 14.7h3.6V18h-3.6zM17.4 10.7h3.6v3.3h-3.6zM17.4 6.7h3.6v3.3h-3.6zM17.4 2.7h3.6V6h-3.6zM11.6 14.7h3.6V18h-3.6zM11.6 10.7h3.6v3.3h-3.6zM11.6 6.7h3.6v3.3h-3.6zM5.8 14.7h3.6V18H5.8zM5.8 10.7h3.6v3.3H5.8zM0 14.7h3.6V18H0z"/>' },
+        { id: 'tiktok', name: 'TikTok', icon: '<path fill="currentColor" d="M16.6 5.82s.51.5 0 0A4.278 4.278 0 0 1 15.54 3h-3.09v11.83c0 1.63-1.33 2.95-2.96 2.95a2.95 2.95 0 0 1-2.96-2.95 2.95 2.95 0 0 1 2.96-2.95c.34 0 .66.06.96.17V8.89a6.04 6.04 0 0 0-.96-.08 6.04 6.04 0 0 0-6.04 6.04 6.04 6.04 0 0 0 6.04 6.04 6.04 6.04 0 0 0 6.04-6.04V8.42a7.35 7.35 0 0 0 4.43 1.47V6.8a4.29 4.29 0 0 1-3.32-1.02z"/>' },
+        { id: 'meta', name: 'Meta', icon: '<path fill="currentColor" d="M16.96 4c-1.89 0-3.56.88-4.96 2.37C10.6 4.88 8.93 4 7.04 4 3.15 4 0 7.21 0 11.19c0 4.79 4.09 8.81 9.77 13.9 1.47 1.32 3.4 1.32 4.87 0C20.31 20 24 15.98 24 11.19 24 7.21 20.85 4 16.96 4z"/>' },
+        { id: 'amazon', name: 'Amazon', icon: '<path fill="currentColor" d="M15.93 17.09c-2.7 1.99-6.62 3.04-10.01 3.04-4.75 0-9.04-1.74-12.27-4.66-.25-.23-.03-.54.27-.37 3.48 1.98 7.74 3.16 12.11 3.16 3.01 0 6.47-.72 9.46-2.22.45-.22.84.34.44.75z"/>' },
+        { id: 'soundcloud', name: 'Soundcloud', icon: '<path fill="currentColor" d="M1.175 12.225a.732.732 0 0 0-.725.734v3.313c0 .406.325.735.725.735s.725-.329.725-.735V12.96a.732.732 0 0 0-.725-.735zM22.5 12.25a3.75 3.75 0 0 0-3.75-3.75c-.38 0-.74.06-1.08.17A5.25 5.25 0 0 0 12.5 4.5a5.22 5.22 0 0 0-4.59 2.74A3.49 3.49 0 0 0 6.5 7a3.5 3.5 0 0 0-3.5 3.5c0 .24.03.48.08.71H2.5A2.5 2.5 0 0 0 0 13.71V15a2.5 2.5 0 0 0 2.5 2.5h19.5a3.5 3.5 0 0 0 3.5-3.5c0-1.78-1.33-3.25-3-3.46z"/>' },
+        { id: 'peloton', name: 'Peloton', icon: '<path fill="currentColor" d="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2zm1 14.5h-2V11h2zm0-7.5h-2V7h2z"/>' },
+        { id: 'pandora', name: 'Pandora', icon: '<path fill="currentColor" d="M5.5 2h7.8a6.7 6.7 0 0 1 6.7 6.7c0 3.7-3 6.7-6.7 6.7H9.7v6.6H5.5V2zm4.2 4.1v5.1h3.6a2.55 2.55 0 1 0 0-5.1H9.7z"/>' },
+        { id: 'shorts', name: 'Shorts', icon: '<path fill="currentColor" d="M17.77 10.32l-1.2-.5a.5.5 0 0 1-.27-.64l.5-1.2a4 4 0 0 0-5.15-5.15l-1.2.5a.5.5 0 0 1-.64-.27l-.5-1.2A5.5 5.5 0 0 1 17.77 10.32zM6.23 13.68l1.2.5a.5.5 0 0 1 .27.64l-.5 1.2a4 4 0 0 0 5.15 5.15l1.2-.5a.5.5 0 0 1 .64.27l.5 1.2a5.5 5.5 0 0 1-8.46-8.46z"/>' },
+        { id: 'contentid', name: 'Content ID', icon: '<path fill="currentColor" d="M21.58 7.19a2.88 2.88 0 0 0-2.03-2.04C17.76 4.6 12 4.6 12 4.6s-5.76 0-7.55.55a2.88 2.88 0 0 0-2.03 2.04A30.3 30.3 0 0 0 1.87 12a30.3 30.3 0 0 0 .55 4.81 2.88 2.88 0 0 0 2.03 2.04c1.79.55 7.55.55 7.55.55s5.76 0 7.55-.55a2.88 2.88 0 0 0 2.03-2.04A30.3 30.3 0 0 0 22.13 12a30.3 30.3 0 0 0-.55-4.81zM9.8 15.24V8.76L15.42 12 9.8 15.24z"/>' },
+        { id: 'anghami', name: 'Anghami', icon: '<path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm4 11h-3v3h-2v-3H8v-2h3V8h2v3h3z"/>' },
+        { id: 'boomplay', name: 'Boomplay', icon: '<path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm-1 14.5v-9l6 4.5z"/>' },
+        { id: 'awa', name: 'AWA', icon: '<path fill="currentColor" d="M12 2L2 7v10l10 5 10-5V7zm0 2.8L18.8 8 12 11.2 5.2 8zm-8 4.7l7 3.5v6.5l-7-3.5zm16 10l-7 3.5v-6.5l7-3.5z"/>' },
+        { id: 'flo', name: 'Flo', icon: '<path fill="currentColor" d="M4 4h4v16H4zm6 0h4v16h-4zm6 0h4v16h-4z"/>' },
+        { id: 'iheart', name: 'iHeart', icon: '<path fill="currentColor" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>' },
+        { id: 'snapchat', name: 'Snapchat', icon: '<path fill="currentColor" d="M12 2C8.5 2 6 4.5 6 7.5c0 1.5.5 2.5 1 3.2-.8.3-1.8.8-2 1.8-.2.9.4 1.7 1.2 1.9-.1.4-.4 1.5-1.5 1.8-.5.1-.9.5-.8 1 .2 1.1 2.2 1.8 4.1 1.8.4 0 .8 0 1.2-.1.7.5 1.7.8 2.8.8s2.1-.3 2.8-.8c.4.1.8.1 1.2.1 1.9 0 3.9-.7 4.1-1.8.1-.5-.3-.9-.8-1-1.1-.3-1.4-1.4-1.5-1.8.8-.2 1.4-1 1.2-1.9-.2-1-1.2-1.5-2-1.8.5-.7 1-1.7 1-3.2C18 4.5 15.5 2 12 2z"/>' },
+        { id: 'netease', name: 'NetEase', icon: '<path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm3.5 13.5A4.95 4.95 0 0 1 12 17a4.95 4.95 0 0 1-3.5-1.5A4.95 4.95 0 0 1 7 12c0-1.38.56-2.63 1.46-3.54L12 12l3.54-3.54C16.44 9.37 17 10.62 17 12a4.95 4.95 0 0 1-1.5 3.5z"/>' },
+        { id: 'canva', name: 'Canva', icon: '<path fill="currentColor" d="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2zm3 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"/>' },
+        { id: 'resso', name: 'Resso', icon: '<path fill="currentColor" d="M12 2L2 22h20L12 2zm0 6l5 10H7l5-10z"/>' },
+        { id: 'vevo', name: 'VEVO', icon: '<path fill="currentColor" d="M2.5 7h4L10 17H6L2.5 7zm13 0h4l3.5 10h-4L15.5 7zm-6.5 0h4l-2 10h-4l2-10z"/>' },
+        { id: 'uma', name: 'UMA', icon: '<path fill="currentColor" d="M4 6h3v12H4zm6.5 0h3v12h-3zm6.5 0h3v12h-3z"/>' },
+        { id: 'kkbox', name: 'KKBOX', icon: '<path fill="currentColor" d="M3 3h18v18H3V3zm4 4v10h10V7H7z"/>' },
+        { id: 'jiosaavn', name: 'JioSaavn', icon: '<path fill="currentColor" d="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2zm0 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>' },
+        { id: 'wesing', name: 'WeSing', icon: '<path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/>' },
+        { id: 'qqmusic', name: 'QQ Music', icon: '<path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm2 13h-4v-2h4v2zm1-4H9V9h6v2z"/>' },
+        { id: 'mixcloud', name: 'Mixcloud', icon: '<path fill="currentColor" d="M2.5 14.5A4.5 4.5 0 0 1 7 10c.26 0 .52.02.77.07A6.002 6.002 0 0 1 19 12a4.5 4.5 0 0 1 2.5 8H2.5v-5.5z"/>' },
+        { id: 'audiomack', name: 'Audiomack', icon: '<path fill="currentColor" d="M2 18h2.5V9.5H2V18zm4.5 0H9V6H6.5v12zm4.5 0h2.5V3H11v15zm4.5 0H18V8h-2.5v10zm4.5 0H22v-6h-2.5v6z"/>' },
+        { id: 'pinterest', name: 'Pinterest', icon: '<path fill="currentColor" d="M12 0a12 12 0 0 0-4.37 23.17c-.07-.63-.13-1.6.03-2.29.14-.62.92-3.92.92-3.92s-.24-.47-.24-1.17c0-1.1.64-1.92 1.44-1.92.68 0 1.01.51 1.01 1.12 0 .68-.43 1.7-.66 2.65-.19.79.4 1.44 1.18 1.44 1.41 0 2.5-1.49 2.5-3.64 0-1.9-1.37-3.23-3.32-3.23-2.26 0-3.59 1.7-3.59 3.45 0 .68.26 1.41.59 1.81.06.08.07.15.05.23l-.22.92c-.04.14-.12.17-.28.1-1.03-.48-1.67-1.99-1.67-3.2 0-2.61 1.9-5.01 5.47-5.01 2.87 0 5.1 2.05 5.1 4.78 0 2.85-1.8 5.15-4.3 5.15-.84 0-1.63-.44-1.9-.95l-.52 1.97c-.19.73-.7 1.64-1.04 2.2A11.98 11.98 0 0 0 12 24c6.63 0 12-5.37 12-12S18.63 0 12 0z"/>' },
+        { id: 'jaxsta', name: 'Jaxsta', icon: '<path fill="currentColor" d="M4 4h16v16H4V4zm3 3v10h2V7H7zm4 0v10h2V7h-2zm4 0v10h2V7h-2z"/>' },
+        { id: 'audiblemagic', name: 'Audible Magic', icon: '<path fill="currentColor" d="M12 2L2 19h20L12 2zm0 4l6.5 11h-13L12 6z"/>' },
+        { id: 'trebel', name: 'Trebel', icon: '<path fill="currentColor" d="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2zm1 15h-2v-2h2zm0-4h-2V7h2z"/>' },
+        { id: 'soundtrack', name: 'Soundtrack', icon: '<path fill="currentColor" d="M3 3h4v18H3V3zm7 0h4v18h-4V3zm7 0h4v18h-4V3z"/>' },
+        { id: 'itunes', name: 'iTunes', icon: '<path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm3.8 11.6a2.4 2.4 0 1 1-2.4-2.4c.3 0 .5.05.8.15V6.8l-5 1.1v6.7a2.4 2.4 0 1 1-2.4-2.4c.3 0 .5.05.8.15V6.2l7-1.5v8.9z"/>' },
+        { id: 'alibaba', name: 'Alibaba', icon: '<path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>' },
+        { id: 'whatsapp', name: 'WhatsApp', icon: '<path fill="currentColor" d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.572-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c0-5.445 4.43-9.874 9.877-9.874 2.636 0 5.116 1.028 6.98 2.894a9.81 9.81 0 0 1 2.887 6.98c-.001 5.447-4.432 9.876-9.874 9.876"/>' },
+        { id: 'twitch', name: 'Twitch', icon: '<path fill="currentColor" d="M11.571 4.714h1.715v5.143h-1.715zm4.715 0h1.714v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/>' },
+        { id: 'rythm', name: 'Rythm', icon: '<path fill="currentColor" d="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2zm-1 14.5v-9l6 4.5z"/>' },
+        { id: 'lickd', name: 'Lickd', icon: '<path fill="currentColor" d="M3 5h18v3H3V5zm0 5h18v3H3v-3zm0 5h18v3H3v-3z"/>' }
+    ];
+
+    function renderAnalyticsView() {
+        return `
+            <div class="max-w-7xl mx-auto space-y-6">
+                <!-- Header & Filters -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <h1 class="text-2xl font-bold text-white">Analytics & Performance</h1>
+                        <p class="text-xs text-gray-400 mt-1">Real-time performance across DSPs</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <select id="analytics-period-select" class="bg-brand-card border border-brand-border text-white text-xs rounded-xl px-3 py-2 outline-none focus:border-brand-primary">
+                            <option value="lastSevenDays">Last 7 Days</option>
+                            <option value="lastThirtyDays" selected>Last 30 Days</option>
+                            <option value="lastThreeMonths">Last 3 Months</option>
+                            <option value="lastSixMonths">Last 6 Months</option>
+                            <option value="lastYear">Last Year</option>
+                            <option value="allTime">All Time</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Sub-Navigation Bar -->
+                <div class="flex items-center gap-2 border-b border-brand-border pb-2 overflow-x-auto">
+                    <button onclick="switchAnalyticsTab('overview')" id="tab-btn-overview" class="analytics-tab-btn text-xs font-semibold px-4 py-2 rounded-lg text-white bg-brand-primary">Overview</button>
+                    <button onclick="switchAnalyticsTab('platforms')" id="tab-btn-platforms" class="analytics-tab-btn text-xs font-semibold px-4 py-2 rounded-lg text-gray-400 hover:text-white">Platforms</button>
+                    <button onclick="switchAnalyticsTab('demographics')" id="tab-btn-demographics" class="analytics-tab-btn text-xs font-semibold px-4 py-2 rounded-lg text-gray-400 hover:text-white">Demographics</button>
+                </div>
+
+                <!-- Inline Alert Message Area -->
+                <div id="analytics-alert-area" class="hidden"></div>
+
+                <!-- Tab Content Viewport -->
+                <div id="analytics-tab-viewport"></div>
+            </div>
+        `;
+    }
+
+    async function initAnalyticsDashboard(period = 'lastThirtyDays') {
+        currentAnalyticsPeriod = period;
+
+        const periodSelect = document.getElementById('analytics-period-select');
+        if (periodSelect) {
+            periodSelect.value = period;
+            if (!periodSelect.dataset.listenerAttached) {
+                periodSelect.dataset.listenerAttached = "true";
+                periodSelect.addEventListener('change', (e) => initAnalyticsDashboard(e.target.value));
+            }
+        }
+
+        renderActiveTabContent();
+    }
+
+    function switchAnalyticsTab(tabName) {
+        activeAnalyticsTab = tabName;
+        document.querySelectorAll('.analytics-tab-btn').forEach(btn => {
+            btn.classList.remove('bg-brand-primary', 'text-white');
+            btn.classList.add('text-gray-400');
+        });
+        const selectedBtn = document.getElementById(`tab-btn-${tabName}`);
+        if (selectedBtn) {
+            selectedBtn.classList.add('bg-brand-primary', 'text-white');
+            selectedBtn.classList.remove('text-gray-400');
+        }
+        renderActiveTabContent();
+    }
+
+    async function renderActiveTabContent() {
+        const viewport = document.getElementById('analytics-tab-viewport');
+        if (!viewport) return;
+
+        if (activeAnalyticsTab === 'overview') {
+            viewport.innerHTML = `
+                <div class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="analytics-kpi-container">
+                        <div class="bg-brand-card border border-brand-border p-5 rounded-2xl animate-pulse h-20"></div>
+                        <div class="bg-brand-card border border-brand-border p-5 rounded-2xl animate-pulse h-20"></div>
+                        <div class="bg-brand-card border border-brand-border p-5 rounded-2xl animate-pulse h-20"></div>
+                        <div class="bg-brand-card border border-brand-border p-5 rounded-2xl animate-pulse h-20"></div>
+                    </div>
+                    <div class="bg-brand-card border border-brand-border p-6 rounded-2xl">
+                        <h2 class="text-sm font-semibold text-white mb-4">Streams Over Time</h2>
+                        <div class="relative w-full h-72"><canvas id="analyticsOverviewChart"></canvas></div>
+                    </div>
+                    <div class="bg-brand-card border border-brand-border rounded-2xl p-6">
+                        <h2 class="text-sm font-semibold text-white mb-4">Top Performing Tracks</h2>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-xs text-gray-300">
+                                <thead class="text-gray-400 border-b border-brand-border uppercase">
+                                    <tr>
+                                        <th class="pb-3 px-2">Track</th>
+                                        <th class="pb-3 px-2">ISRC</th>
+                                        <th class="pb-3 px-2 text-right">Streams</th>
+                                        <th class="pb-3 px-2 text-right">Saves</th>
+                                        <th class="pb-3 px-2 text-right">Engagement</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="analytics-tracks-tbody">
+                                    <tr><td colspan="5" class="py-8 text-center text-gray-500">Loading tracks...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+            await fetchOverviewData();
+        } else if (activeAnalyticsTab === 'platforms') {
+            renderPlatformsView();
+        } else if (activeAnalyticsTab === 'demographics') {
+            viewport.innerHTML = `
+                <div class="bg-brand-card border border-brand-border rounded-2xl p-6 space-y-4">
+                    <h2 class="text-sm font-semibold text-white">Demographic & Tier Breakdown</h2>
+                    <div id="demographics-content-area" class="text-xs text-gray-400">Loading demographic data...</div>
+                </div>
+            `;
+            fetchDemographicData();
+        }
+    }
+
+    function renderPlatformsView() {
+        const viewport = document.getElementById('analytics-tab-viewport');
+        if (!viewport) return;
+
+        const currentPlatformObj = PLATFORMS_LIST.find(p => p.id === selectedPlatform) || PLATFORMS_LIST[0];
+
+        viewport.innerHTML = `
+            <div class="space-y-6">
+                <!-- TooLost Platform Selector & Dropdown -->
+                <div class="relative inline-block text-left" id="platform-select-container">
+                    <button id="platform-dropdown-btn" onclick="togglePlatformDropdown()" class="flex items-center gap-2 bg-[#12141d] border border-brand-border px-4 py-2.5 rounded-xl text-white text-xs font-semibold hover:border-gray-500 transition-all">
+                        <svg class="w-4 h-4 text-white" viewBox="0 0 24 24">${currentPlatformObj.icon}</svg>
+                        <span>${currentPlatformObj.name}</span>
+                        <svg class="w-3.5 h-3.5 text-gray-400 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+
+                    <div id="platform-dropdown-menu" class="hidden absolute left-0 mt-2 w-80 bg-[#12141d] border border-brand-border rounded-2xl shadow-2xl z-50 overflow-hidden">
+                        <div class="p-3 border-b border-brand-border">
+                            <div class="relative">
+                                <input type="text" id="platform-search-input" onkeyup="filterPlatformsList()" placeholder="Search platforms..." class="w-full bg-[#0a0c10] border border-brand-border rounded-lg px-3 py-1.5 pl-8 text-xs text-white focus:outline-none focus:border-brand-primary" />
+                                <svg class="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-1 p-2 max-h-72 overflow-y-auto" id="platform-grid-items">
+                            ${PLATFORMS_LIST.map(p => `
+                                <button onclick="selectPlatform('${p.id}')" class="flex flex-col items-center justify-center p-2.5 rounded-xl text-xs text-gray-300 hover:bg-white/10 transition-colors ${p.id === selectedPlatform ? 'bg-indigo-600/30 text-white font-bold' : ''}">
+                                    <svg class="w-5 h-5 mb-1" viewBox="0 0 24 24">${p.icon}</svg>
+                                    <span class="truncate w-full text-center text-[10px]">${p.name}</span>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TooLost Chart Box -->
+                <div class="bg-brand-card border border-brand-border rounded-2xl p-6 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div id="platform-total-streams-display">
+                            <h2 class="text-3xl font-bold text-white" id="platform-streams-count">0</h2>
+                            <p class="text-xs text-gray-400 mt-1">Total Streams</p>
+                        </div>
+                    </div>
+                    <div class="relative w-full h-72">
+                        <canvas id="platformStreamsChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Bottom Grid: Tracks & Countries -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Tracks Section -->
+                    <div class="bg-brand-card border border-brand-border rounded-2xl p-6 space-y-4">
+                        <div class="flex items-center justify-between border-b border-brand-border pb-3">
+                            <h3 class="text-xs font-semibold text-white uppercase tracking-wider">Tracks</h3>
+                        </div>
+                        <div class="overflow-y-auto max-h-64 space-y-3" id="platform-tracks-list">
+                            <div class="text-xs text-gray-500 text-center py-6">Loading track details...</div>
+                        </div>
+                    </div>
+
+                    <!-- Countries Section -->
+                    <div class="bg-brand-card border border-brand-border rounded-2xl p-6 space-y-4">
+                        <div class="flex items-center justify-between border-b border-brand-border pb-3">
+                            <h3 class="text-xs font-semibold text-white uppercase tracking-wider">Countries</h3>
+                        </div>
+                        <div class="overflow-y-auto max-h-64 space-y-3" id="platform-countries-list">
+                            <div class="text-xs text-gray-500 text-center py-6">Loading country details...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        fetchPlatformData(selectedPlatform);
+    }
+
+    async function getAuthToken() {
+        if (!window.currentUser) return null;
+        return typeof window.currentUser.getIdToken === 'function'
+            ? await window.currentUser.getIdToken(true)
+            : window.currentUser.accessToken || null;
+    }
+
+    async function fetchOverviewData() {
+        const token = await getAuthToken();
+        if (!token) return showAlert("Authentication required. Please sign in again.", "error");
+
+        const workerUrl = window.WORKER_BASE_URL || 'https://audiorydistribution.dandredurkofficial.workers.dev';
+
+        try {
+            const [overviewRes, tracksRes] = await Promise.all([
+                fetch(`${workerUrl}/api/analytics/overview?period=${currentAnalyticsPeriod}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+                fetch(`${workerUrl}/api/analytics/tracks?period=${currentAnalyticsPeriod}&page=1&perPage=10`, { headers: { 'Authorization': `Bearer ${token}` } })
+            ]);
+
+            if (overviewRes.ok) {
+                const overviewJson = await overviewRes.json();
+                const data = overviewJson.data || overviewJson;
+                renderKPIs(data);
+                renderChart(data.chart || []);
+            }
+
+            if (tracksRes.ok) {
+                const tracksJson = await tracksRes.json();
+                renderTracksTable(tracksJson.data || []);
+            }
+        } catch (err) {
+            showAlert("Failed to load analytics overview.", "error");
+        }
+    }
+
+    async function fetchPlatformData(platform = 'spotify') {
+        const token = await getAuthToken();
+        if (!token) return;
+
+        const workerUrl = window.WORKER_BASE_URL || 'https://audiorydistribution.dandredurkofficial.workers.dev';
+
+        try {
+            const res = await fetch(`${workerUrl}/api/analytics/platforms?platform=${platform}&period=${currentAnalyticsPeriod}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const json = await res.json();
+
+            if (res.ok) {
+                const payload = json.data || json;
+                const totalStreams = payload.totalStreams || payload.streams || 0;
+                
+                const streamsCountEl = document.getElementById('platform-streams-count');
+                if (streamsCountEl) {
+                    streamsCountEl.innerText = Number(totalStreams).toLocaleString();
+                }
+
+                renderPlatformChart(payload.chart || []);
+                renderPlatformTracks(payload.tracks || []);
+                renderPlatformCountries(payload.countries || []);
+            }
+        } catch (err) {
+            showAlert("Error loading platform streams.", "error");
+        }
+    }
+
+    function renderPlatformChart(chartData) {
+        const canvas = document.getElementById('platformStreamsChart');
+        if (!canvas) return;
+
+        if (platformChartInstance) {
+            platformChartInstance.destroy();
+        }
+
+        const labels = chartData.length > 0 ? chartData.map(p => p.date) : ['2026-05-28', '2026-06-27'];
+        const streams = chartData.length > 0 ? chartData.map(p => p.streams || p.totalStreams) : [0, 0];
+
+        const ctx = canvas.getContext('2d');
+        const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+        gradient.addColorStop(0, 'rgba(124, 58, 237, 0.35)');
+        gradient.addColorStop(1, 'rgba(124, 58, 237, 0.0)');
+
+        platformChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Total Streams',
+                    data: streams,
+                    borderColor: '#8b5cf6',
+                    backgroundColor: gradient,
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { color: 'rgba(255, 255, 255, 0.03)' }, ticks: { color: '#6b7280', font: { size: 10 } } },
+                    y: { grid: { color: 'rgba(255, 255, 255, 0.03)' }, ticks: { color: '#6b7280', font: { size: 10 } } }
+                }
+            }
+        });
+    }
+
+    function renderPlatformTracks(tracks) {
+        const container = document.getElementById('platform-tracks-list');
+        if (!container) return;
+
+        if (!tracks || tracks.length === 0) {
+            container.innerHTML = `<div class="text-xs text-gray-500 text-center py-6">No track data for this platform.</div>`;
+            return;
+        }
+
+        const maxStreams = Math.max(...tracks.map(t => t.streams || 0)) || 1;
+
+        container.innerHTML = tracks.map(t => {
+            const pct = Math.round(((t.streams || 0) / maxStreams) * 100);
+            return `
+                <div class="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 transition-colors">
+                    <div class="flex items-center gap-3">
+                        <img src="${t.coverUrl || 'https://via.placeholder.com/40'}" class="w-9 h-9 rounded-lg object-cover" />
+                        <div>
+                            <p class="text-xs font-semibold text-white truncate max-w-[150px]">${t.title || 'Untitled Track'}</p>
+                            <p class="text-[10px] text-gray-400">${t.artist || 'Unknown Artist'}</p>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-xs font-bold text-indigo-400">${pct.toFixed(2)}%</span>
+                        <p class="text-[10px] text-gray-400">${Number(t.streams || 0).toLocaleString()} streams</p>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderPlatformCountries(countries) {
+        const container = document.getElementById('platform-countries-list');
+        if (!container) return;
+
+        if (!countries || countries.length === 0) {
+            container.innerHTML = `<div class="text-xs text-gray-500 text-center py-6">No country data for this platform.</div>`;
+            return;
+        }
+
+        container.innerHTML = countries.map(c => `
+            <div class="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 transition-colors">
+                <div class="flex items-center gap-3">
+                    <span class="text-sm">${c.flag || '🌐'}</span>
+                    <span class="text-xs font-medium text-white">${c.name || 'Unknown'}</span>
+                </div>
+                <span class="text-xs font-bold text-indigo-400">${c.percentage ? Number(c.percentage).toFixed(2) + '%' : '-'}</span>
+            </div>
+        `).join('');
+    }
+
+    async function fetchDemographicData() {
+        const token = await getAuthToken();
+        const container = document.getElementById('demographics-content-area');
+        if (!token || !container) return;
+
+        const workerUrl = window.WORKER_BASE_URL || 'https://audiorydistribution.dandredurkofficial.workers.dev';
+
+        try {
+            const res = await fetch(`${workerUrl}/api/analytics/platforms?platform=spotify&period=${currentAnalyticsPeriod}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const json = await res.json();
+
+            if (res.ok && json.data) {
+                const data = json.data;
+                container.innerHTML = `
+                    <div class="grid grid-cols-2 gap-3 p-2">
+                        <div class="p-3 bg-brand-border/20 rounded-lg">
+                            <span class="text-xs text-gray-400">Total Streams</span>
+                            <p class="text-lg font-bold text-emerald-400 mt-1">${Number(data.streams || data.totalStreams || 0).toLocaleString()}</p>
+                        </div>
+                        <div class="p-3 bg-brand-border/20 rounded-lg">
+                            <span class="text-xs text-gray-400">Listeners</span>
+                            <p class="text-lg font-bold text-white mt-1">${Number(data.listeners || 0).toLocaleString()}</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = `<p class="text-gray-400 text-xs py-4 text-center">Demographic breakdown unavailable for this period.</p>`;
+            }
+        } catch (err) {
+            container.innerHTML = `<p class="text-gray-400 text-xs py-4 text-center">Unable to load demographic metrics.</p>`;
+        }
+    }
+
+    function togglePlatformDropdown() {
+        const menu = document.getElementById('platform-dropdown-menu');
+        if (menu) menu.classList.toggle('hidden');
+    }
+
+    function selectPlatform(id) {
+        selectedPlatform = id;
+        const menu = document.getElementById('platform-dropdown-menu');
+        if (menu) menu.classList.add('hidden');
+        renderPlatformsView();
+    }
+
+    function filterPlatformsList() {
+        const query = (document.getElementById('platform-search-input')?.value || '').toLowerCase();
+        const buttons = document.querySelectorAll('#platform-grid-items button');
+        buttons.forEach(btn => {
+            const text = btn.innerText.toLowerCase();
+            btn.style.display = text.includes(query) ? 'flex' : 'none';
+        });
+    }
+
+    function showAlert(message, type = "info") {
+        const alertArea = document.getElementById('analytics-alert-area');
+        if (!alertArea) return;
+        alertArea.classList.remove('hidden');
+        alertArea.innerHTML = `
+            <div class="p-3 text-xs rounded-xl ${type === 'error' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20'}">
+                ${message}
+            </div>
+        `;
+    }
+
+    function renderKPIs(data) {
+        const kpiContainer = document.getElementById('analytics-kpi-container');
+        if (!kpiContainer) return;
+        kpiContainer.innerHTML = `
+            <div class="bg-brand-card border border-brand-border p-5 rounded-2xl">
+                <span class="text-xs font-medium text-gray-400">Total Streams</span>
+                <div class="text-2xl font-bold text-white mt-1">${Number(data.totalStreams || 0).toLocaleString()}</div>
+            </div>
+            <div class="bg-brand-card border border-brand-border p-5 rounded-2xl">
+                <span class="text-xs font-medium text-gray-400">Total Saves</span>
+                <div class="text-2xl font-bold text-emerald-400 mt-1">${Number(data.totalSaves || 0).toLocaleString()}</div>
+            </div>
+            <div class="bg-brand-card border border-brand-border p-5 rounded-2xl">
+                <span class="text-xs font-medium text-gray-400">Total Skips</span>
+                <div class="text-2xl font-bold text-rose-400 mt-1">${Number(data.totalSkips || 0).toLocaleString()}</div>
+            </div>
+            <div class="bg-brand-card border border-brand-border p-5 rounded-2xl">
+                <span class="text-xs font-medium text-gray-400">Engagement</span>
+                <div class="text-2xl font-bold text-indigo-400 mt-1">${data.engagement ? Number(data.engagement).toFixed(2) + '%' : '0.00%'}</div>
+            </div>
+        `;
+    }
+
+    function renderChart(chartData) {
+        const canvas = document.getElementById('analyticsOverviewChart');
+        if (!canvas) return;
+
+        if (analyticsChartInstance) {
+            analyticsChartInstance.destroy();
+        }
+
+        const labels = chartData.map(point => point.date);
+        const streams = chartData.map(point => point.totalStreams);
+
+        const ctx = canvas.getContext('2d');
+        analyticsChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Streams',
+                    data: streams,
+                    borderColor: '#6366f1',
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#9ca3af', font: { size: 10 } } },
+                    y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#9ca3af', font: { size: 10 } } }
+                }
+            }
+        });
+    }
+
+    function renderTracksTable(tracks) {
+        const tbody = document.getElementById('analytics-tracks-tbody');
+        if (!tbody) return;
+
+        if (!tracks.length) {
+            tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-gray-500">No track metrics found for this period.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = tracks.map(t => `
+            <tr class="border-b border-brand-border/50 hover:bg-white/5 transition-colors">
+                <td class="py-3 px-2 font-medium text-white">${t.track || 'Unknown Title'}</td>
+                <td class="py-3 px-2 text-gray-400 font-mono">${t.isrc || '-'}</td>
+                <td class="py-3 px-2 text-right font-semibold text-white">${Number(t.totalStreams || 0).toLocaleString()}</td>
+                <td class="py-3 px-2 text-right text-emerald-400">${Number(t.totalSaves || 0).toLocaleString()}</td>
+                <td class="py-3 px-2 text-right text-indigo-400">${t.engagement ? Number(t.engagement).toFixed(2) + '%' : '-'}</td>
+            </tr>
+        `).join('');
+    }
+
+    // Attach necessary functions to the global window scope
+    window.renderAnalyticsView = renderAnalyticsView;
+    window.initAnalyticsDashboard = initAnalyticsDashboard;
+    window.switchAnalyticsTab = switchAnalyticsTab;
+    window.fetchPlatformData = fetchPlatformData;
+    window.fetchDemographicData = fetchDemographicData;
+    window.togglePlatformDropdown = togglePlatformDropdown;
+    window.selectPlatform = selectPlatform;
+    window.filterPlatformsList = filterPlatformsList;
+})();
+
+2.   WORKERS
+
+// -------------------------------------------------------------
+      // ROUTE 3.5: Analytics Catch-All Proxy
+      // -------------------------------------------------------------
+      if (url.pathname.startsWith("/api/analytics")) {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
+
+        let tooLostAccessToken;
+        try {
+          tooLostAccessToken = await getAccessToken(env);
+        } catch (authError) {
+          return new Response(
+            JSON.stringify({ error: "Too Lost Authentication Failed", details: authError.message }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // Extract relative subpath following /api/analytics
+        const subPath = url.pathname.replace(/^\/api\/analytics/, "");
+        const targetUrl = `${baseUrl}/analytics${subPath}${url.search || ""}`;
+
+        // Configure fetch options to pass along request body for non-GET/HEAD calls
+        const fetchOptions = {
+          method: request.method,
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${tooLostAccessToken}`,
+          },
+        };
+
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          fetchOptions.body = await request.text();
+          const contentType = request.headers.get("Content-Type");
+          if (contentType) {
+            fetchOptions.headers["Content-Type"] = contentType;
+          }
+        }
+
+        try {
+          const res = await fetch(targetUrl, fetchOptions);
+          const resText = await res.text();
+
+          return new Response(resText, {
+            status: res.status,
+            headers: { 
+              ...corsHeaders, 
+              "Content-Type": "application/json" 
+            },
+          });
+        } catch (fetchErr) {
+          return new Response(
+            JSON.stringify({ error: "Upstream Proxy Fetch Failed", details: fetchErr.message }),
+            { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
