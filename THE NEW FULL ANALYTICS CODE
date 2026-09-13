@@ -483,8 +483,7 @@
                             text-gray-400
                             mt-1
                         ">
-                            Streaming and usage analytics
-                            supplied by Too Lost.
+                            Streaming and usage analytics.
                         </p>
 
                     </div>
@@ -1644,41 +1643,61 @@
 
     async function loadAnalyticsPlatforms() {
 
-        const response =
-            await analyticsApi(
-                "/api/analytics/platforms"
+    const response =
+        await analyticsApi(
+            "/api/analytics/platforms"
+        );
+
+    const data =
+        unwrapAnalyticsResponse(
+            response
+        );
+
+
+    const platforms =
+        Array.isArray(
+            data?.platforms
+        )
+            ? data.platforms
+            : [];
+
+
+    /*
+     * Too Lost documents additionalTypes directly
+     * under data.additionalTypes.
+     *
+     * The fallback locations below make the frontend
+     * tolerant of a wrapped response without changing
+     * the documented behavior.
+     */
+
+    const additionalTypes =
+        Array.isArray(
+            data?.additionalTypes
+        )
+            ? data.additionalTypes
+            : (
+                Array.isArray(
+                    data?.filters?.additionalTypes
+                )
+                    ? data.filters.additionalTypes
+                    : []
             );
 
 
-        const data =
-            unwrapAnalyticsResponse(
-                response
-            );
+    return {
 
+        platforms,
 
-        return {
+        additionalTypes,
 
-            platforms:
-                Array.isArray(
-                    data?.platforms
-                )
-                    ? data.platforms
-                    : [],
+        filters:
+            data?.filters ||
+            {}
 
-            additionalTypes:
-                Array.isArray(
-                    data?.additionalTypes
-                )
-                    ? data.additionalTypes
-                    : [],
+    };
 
-            filters:
-                data?.filters ||
-                {}
-
-        };
-
-    }
+}
 
 
     // =========================================================
@@ -1855,7 +1874,7 @@
         } catch (error) {
 
             showAnalyticsAlert(
-                `Failed to load Too Lost platforms: ${error.message}`,
+                `Failed to load platforms: ${error.message}`,
                 "error"
             );
 
@@ -1865,168 +1884,189 @@
 
 
     async function fetchPlatformData(
-        platform
-    ) {
+    platform
+) {
 
-        if (!platform) {
+    if (!platform) {
+        return;
+    }
 
-            return;
+    selectedAnalyticsPlatform =
+        platform;
+
+    const content =
+        document.getElementById(
+            "platform-analytics-content"
+        );
+
+    if (content) {
+        content.innerHTML = `
+            <div class="
+                bg-brand-card
+                border
+                border-brand-border
+                rounded-2xl
+                p-8
+                text-center
+                text-xs
+                text-gray-500
+            ">
+                Loading ${escapeHtml(
+                    platform
+                )} analytics...
+            </div>
+        `;
+    }
+
+
+    try {
+
+        /*
+         * ---------------------------------------------------------
+         * LOAD THE PLATFORM CAPABILITY INFORMATION
+         * ---------------------------------------------------------
+         *
+         * We still use /analytics/platforms to verify that the
+         * selected platform exists.
+         *
+         * We do NOT use supportsTotalStreams here.
+         */
+
+        const platformInfo =
+            await loadAnalyticsPlatforms();
+
+
+        const platformMeta =
+            platformInfo.platforms.find(
+                item =>
+                    item &&
+                    item.platform === platform
+            );
+
+
+        if (!platformMeta) {
+
+            throw new Error(
+                `Platform "${platform}" is not available in Too Lost analytics.`
+            );
 
         }
 
 
-        selectedAnalyticsPlatform =
-            platform;
+        /*
+         * ---------------------------------------------------------
+         * SELECTED PLATFORM OVERVIEW
+         * ---------------------------------------------------------
+         *
+         * Use ONLY:
+         *
+         * /analytics/platforms/data
+         *
+         * This endpoint returns:
+         *
+         * countryTotal
+         * streamsTotal
+         * totalStreams
+         * tracksTotal
+         *
+         * We intentionally do NOT request:
+         *
+         * /analytics/platforms/total-streams
+         *
+         * because Too Lost is currently returning HTTP 500
+         * for that endpoint.
+         */
+
+        const query =
+            buildQuery({
+                platform:
+                    platform,
+
+                period:
+                    currentAnalyticsPeriod,
+
+                release:
+                    selectedAnalyticsRelease ||
+                    undefined
+            });
 
 
-        const content =
-            document.getElementById(
-                "platform-analytics-content"
+        const overviewResponse =
+            await analyticsApi(
+                `/api/analytics/platforms/data${query}`
             );
+
+
+        const overview =
+            unwrapAnalyticsResponse(
+                overviewResponse
+            );
+
+
+        /*
+         * ---------------------------------------------------------
+         * RENDER THE WORKING PLATFORM OVERVIEW
+         * ---------------------------------------------------------
+         *
+         * The existing renderer already understands the response
+         * from /platforms/data.
+         */
+
+        renderPlatformAnalytics(
+            platform,
+            overview,
+            null
+        );
+
+        return;
+
+
+    } catch (error) {
+
+        console.error(
+            `Platform analytics failed for ${platform}:`,
+            error
+        );
 
 
         if (content) {
 
             content.innerHTML = `
-
                 <div class="
                     bg-brand-card
                     border
-                    border-brand-border
+                    border-rose-500/20
                     rounded-2xl
                     p-8
                     text-center
-                    text-xs
-                    text-gray-500
                 ">
-                    Loading ${escapeHtml(
-                        platform
-                    )} analytics...
-                </div>
-
-            `;
-
-        }
-
-
-        try {
-
-            const query =
-                buildQuery({
-
-                    platform:
-                        platform,
-
-                    period:
-                        currentAnalyticsPeriod,
-
-                    release:
-                        selectedAnalyticsRelease ||
-                        undefined
-
-                });
-
-
-            /*
-             * THIS is the correct Too Lost selected-platform
-             * overview endpoint.
-             */
-
-            const overviewResponse =
-                await analyticsApi(
-                    `/api/analytics/platforms/data${query}`
-                );
-
-
-            const overview =
-                unwrapAnalyticsResponse(
-                    overviewResponse
-                );
-
-
-            /*
-             * Platform total-streams is separately documented.
-             *
-             * We request it as well, but the UI does not invent
-             * undocumented response properties.
-             */
-
-            let totalStreamsData =
-                null;
-
-
-            try {
-
-                const response =
-                    await analyticsApi(
-                        `/api/analytics/platforms/total-streams${query}`
-                    );
-
-                totalStreamsData =
-                    unwrapAnalyticsResponse(
-                        response
-                    );
-
-            } catch (error) {
-
-                console.warn(
-                    "Platform total-streams endpoint unavailable:",
-                    error
-                );
-
-            }
-
-
-            renderPlatformAnalytics(
-                platform,
-                overview,
-                totalStreamsData
-            );
-
-
-        } catch (error) {
-
-            if (content) {
-
-                content.innerHTML = `
 
                     <div class="
-                        bg-brand-card
-                        border
-                        border-rose-500/20
-                        rounded-2xl
-                        p-8
-                        text-center
+                        text-sm
+                        font-semibold
+                        text-rose-400
                     ">
-
-                        <div class="
-                            text-sm
-                            font-semibold
-                            text-rose-400
-                        ">
-                            Platform analytics failed
-                        </div>
-
-                        <div class="
-                            text-xs
-                            text-gray-500
-                            mt-2
-                        ">
-                            ${escapeHtml(
-                                error.message
-                            )}
-                        </div>
-
+                        Platform analytics failed
                     </div>
 
-                `;
+                    <div class="
+                        text-xs
+                        text-gray-500
+                        mt-2
+                    ">
+                        ${escapeHtml(
+                            error.message
+                        )}
+                    </div>
 
-            }
+                </div>
+            `;
 
         }
 
     }
 
+}
 
     function renderPlatformAnalytics(
         platform,
@@ -2316,8 +2356,7 @@
                                     text-xs
                                     text-gray-500
                                 ">
-                                    Too Lost did not return
-                                    a country list for this platform.
+                                    No country list for this platform.
                                 </div>
 
                             `
@@ -2583,7 +2622,7 @@
                         mt-1
                     ">
                         Select a track to view its
-                        individual Too Lost analytics.
+                        individual analytics.
                     </p>
 
                 </div>
@@ -3067,168 +3106,288 @@
 
     async function renderDemographicsView() {
 
-        const viewport =
-            document.getElementById(
-                "analytics-tab-viewport"
-            );
+    const viewport =
+        document.getElementById(
+            "analytics-tab-viewport"
+        );
 
+    viewport.innerHTML = `
 
-        viewport.innerHTML = `
+        <div class="space-y-6">
 
-            <div class="space-y-6">
+            <div class="
+                bg-brand-card
+                border
+                border-brand-border
+                rounded-2xl
+                p-5
+            ">
 
                 <div class="
-                    bg-brand-card
-                    border
-                    border-brand-border
-                    rounded-2xl
-                    p-5
+                    grid
+                    grid-cols-1
+                    md:grid-cols-2
+                    gap-4
                 ">
 
-                    <div class="
-                        grid
-                        grid-cols-1
-                        md:grid-cols-2
-                        gap-4
-                    ">
+                    <div>
 
-                        <div>
+                        <label class="
+                            block
+                            text-[10px]
+                            text-gray-500
+                            mb-2
+                        ">
+                            Platform
+                        </label>
 
-                            <label class="
-                                block
-                                text-[10px]
-                                text-gray-500
-                                mb-2
-                            ">
-                                Platform
-                            </label>
+                        <select
+                            id="demographic-platform-select"
+                            class="
+                                w-full
+                                bg-[#12141d]
+                                border
+                                border-brand-border
+                                text-white
+                                text-xs
+                                rounded-xl
+                                px-3
+                                py-3
+                            "
+                            onchange="
+                                window.analyticsSetDemographicPlatform(
+                                    this.value
+                                )
+                            "
+                        >
+                            <option value="">
+                                Loading platforms...
+                            </option>
+                        </select>
 
-                            <select
-                                id="demographic-platform-select"
-                                class="
-                                    w-full
-                                    bg-[#12141d]
-                                    border
-                                    border-brand-border
-                                    text-white
-                                    text-xs
-                                    rounded-xl
-                                    px-3
-                                    py-3
-                                "
-                                onchange="
-                                    window.analyticsSetDemographicPlatform(
-                                        this.value
-                                    )
-                                "
-                            >
-
-                                <option>
-                                    Loading...
-                                </option>
-
-                            </select>
-
-                        </div>
+                    </div>
 
 
-                        <div>
+                    <div>
 
-                            <label class="
-                                block
-                                text-[10px]
-                                text-gray-500
-                                mb-2
-                            ">
-                                Analytics Type
-                            </label>
+                        <label class="
+                            block
+                            text-[10px]
+                            text-gray-500
+                            mb-2
+                        ">
+                            Analytics Type
+                        </label>
 
-                            <select
-                                id="demographic-type-select"
-                                class="
-                                    w-full
-                                    bg-[#12141d]
-                                    border
-                                    border-brand-border
-                                    text-white
-                                    text-xs
-                                    rounded-xl
-                                    px-3
-                                    py-3
-                                "
-                                onchange="
-                                    window.analyticsSetAdditionalType(
-                                        this.value
-                                    )
-                                "
-                            >
-
-                                <option>
-                                    Loading...
-                                </option>
-
-                            </select>
-
-                        </div>
+                        <select
+                            id="demographic-type-select"
+                            class="
+                                w-full
+                                bg-[#12141d]
+                                border
+                                border-brand-border
+                                text-white
+                                text-xs
+                                rounded-xl
+                                px-3
+                                py-3
+                            "
+                            onchange="
+                                window.analyticsSetAdditionalType(
+                                    this.value
+                                )
+                            "
+                        >
+                            <option value="">
+                                Loading analytics types...
+                            </option>
+                        </select>
 
                     </div>
 
                 </div>
 
-
-                <div
-                    id="demographics-content-area"
-                ></div>
-
             </div>
 
-        `;
+
+            <div
+                id="demographics-content-area"
+            ></div>
+
+        </div>
+
+    `;
 
 
-        try {
+    try {
 
-            const info =
-                await loadAnalyticsPlatforms();
-
-
-            const platformSelect =
-                document.getElementById(
-                    "demographic-platform-select"
-                );
+        const info =
+            await loadAnalyticsPlatforms();
 
 
-            const typeSelect =
-                document.getElementById(
-                    "demographic-type-select"
-                );
+        /*
+         * ---------------------------------------------------------
+         * NORMALIZE PLATFORM LIST
+         * ---------------------------------------------------------
+         */
 
+        const platforms =
+            Array.isArray(
+                info?.platforms
+            )
+                ? info.platforms.filter(
+                    platform =>
+                        platform &&
+                        platform.platform
+                )
+                : [];
+
+
+        /*
+         * ---------------------------------------------------------
+         * NORMALIZE ADDITIONAL ANALYTICS TYPES
+         * ---------------------------------------------------------
+         *
+         * Too Lost documents this as string[]:
+         *
+         * service_tier
+         * device
+         * gender
+         *
+         * We nevertheless handle object-shaped values too so the
+         * dropdown cannot silently become blank if the API wrapper
+         * changes its representation.
+         */
+
+        const additionalTypes =
+            Array.isArray(
+                info?.additionalTypes
+            )
+                ? info.additionalTypes
+                    .map(
+                        type => {
+
+                            if (
+                                typeof type ===
+                                "string"
+                            ) {
+                                return type;
+                            }
+
+                            if (
+                                type &&
+                                typeof type ===
+                                "object"
+                            ) {
+
+                                return (
+                                    type.type ||
+                                    type.key ||
+                                    type.value ||
+                                    type.name ||
+                                    ""
+                                );
+
+                            }
+
+                            return "";
+
+                        }
+                    )
+                    .map(
+                        type =>
+                            String(
+                                type
+                            ).trim()
+                    )
+                    .filter(
+                        Boolean
+                    )
+                : [];
+
+
+        /*
+         * Remove duplicates while preserving the
+         * order supplied by Too Lost.
+         */
+
+        const uniqueAdditionalTypes =
+            [
+                ...new Set(
+                    additionalTypes
+                )
+            ];
+
+
+        /*
+         * ---------------------------------------------------------
+         * DEFAULT PLATFORM
+         * ---------------------------------------------------------
+         */
+
+        if (
+            !selectedAnalyticsPlatform ||
+            !platforms.some(
+                platform =>
+                    platform.platform ===
+                    selectedAnalyticsPlatform
+            )
+        ) {
+
+            selectedAnalyticsPlatform =
+                platforms.length
+                    ? platforms[0].platform
+                    : "";
+
+        }
+
+
+        /*
+         * ---------------------------------------------------------
+         * DEFAULT ANALYTICS TYPE
+         * ---------------------------------------------------------
+         */
+
+        if (
+            !selectedAnalyticsType ||
+            !uniqueAdditionalTypes.includes(
+                selectedAnalyticsType
+            )
+        ) {
+
+            selectedAnalyticsType =
+                uniqueAdditionalTypes.length
+                    ? uniqueAdditionalTypes[0]
+                    : "";
+
+        }
+
+
+        const platformSelect =
+            document.getElementById(
+                "demographic-platform-select"
+            );
+
+        const typeSelect =
+            document.getElementById(
+                "demographic-type-select"
+            );
+
+
+        /*
+         * ---------------------------------------------------------
+         * PLATFORM DROPDOWN
+         * ---------------------------------------------------------
+         */
+
+        if (platformSelect) {
 
             if (
-                !selectedAnalyticsPlatform &&
-                info.platforms.length
+                platforms.length
             ) {
-
-                selectedAnalyticsPlatform =
-                    info.platforms[0].platform;
-
-            }
-
-
-            if (
-                !selectedAnalyticsType &&
-                info.additionalTypes.length
-            ) {
-
-                selectedAnalyticsType =
-                    info.additionalTypes[0];
-
-            }
-
-
-            if (platformSelect) {
 
                 platformSelect.innerHTML =
-                    info.platforms
+                    platforms
                         .map(
                             platform => `
 
@@ -3243,24 +3402,42 @@
                                             : ""
                                     }
                                 >
-
                                     ${escapeHtml(
                                         platform.platform
                                     )}
-
                                 </option>
 
                             `
                         )
                         .join("");
 
+            } else {
+
+                platformSelect.innerHTML = `
+                    <option value="">
+                        No analytics platforms available
+                    </option>
+                `;
+
             }
 
+        }
 
-            if (typeSelect) {
+
+        /*
+         * ---------------------------------------------------------
+         * ANALYTICS TYPE DROPDOWN
+         * ---------------------------------------------------------
+         */
+
+        if (typeSelect) {
+
+            if (
+                uniqueAdditionalTypes.length
+            ) {
 
                 typeSelect.innerHTML =
-                    info.additionalTypes
+                    uniqueAdditionalTypes
                         .map(
                             type => `
 
@@ -3275,33 +3452,79 @@
                                             : ""
                                     }
                                 >
-
                                     ${escapeHtml(
                                         type
                                     )}
-
                                 </option>
 
                             `
                         )
                         .join("");
 
+            } else {
+
+                typeSelect.innerHTML = `
+                    <option value="">
+                        No analytics types available
+                    </option>
+                `;
+
             }
-
-
-            await fetchDemographicData();
-
-
-        } catch (error) {
-
-            showAnalyticsAlert(
-                `Failed to load additional analytics: ${error.message}`,
-                "error"
-            );
 
         }
 
+
+        /*
+         * ---------------------------------------------------------
+         * LOAD THE SELECTED TYPE
+         * ---------------------------------------------------------
+         */
+
+        if (
+            selectedAnalyticsPlatform &&
+            selectedAnalyticsType
+        ) {
+
+            await fetchDemographicData();
+
+        } else {
+
+            const container =
+                document.getElementById(
+                    "demographics-content-area"
+                );
+
+            if (container) {
+
+                container.innerHTML = `
+                    <div class="
+                        bg-brand-card
+                        border
+                        border-brand-border
+                        rounded-2xl
+                        p-8
+                        text-center
+                        text-xs
+                        text-gray-500
+                    ">
+                        No additional analytics returned.
+                    </div>
+                `;
+
+            }
+
+        }
+
+    } catch (error) {
+
+        showAnalyticsAlert(
+            `Failed to load additional analytics: ${error.message}`,
+            "error"
+        );
+
     }
+
+}
 
 
     async function fetchDemographicData() {
