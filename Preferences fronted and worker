@@ -1,0 +1,639 @@
+1.FRONTED
+
+// State management
+window.prefState = {
+    mode: 'view', // 'view' | 'edit'
+    artistData: null
+};
+
+// State management
+window.prefState = {
+    mode: 'view', // 'view' | 'edit'
+    artistData: null
+};
+
+// State management
+window.prefState = {
+    mode: 'view', // 'view' | 'edit'
+    artistData: null
+};
+
+window.renderPreferencesView = function() {
+    return `
+    <div class="p-4 sm:p-6 max-w-6xl mx-auto space-y-6 sm:space-y-8 relative overflow-x-hidden">
+        <!-- Toast Notification Container -->
+        <div id="pref-toast" class="hidden fixed top-5 right-5 z-50 px-4 py-3 rounded-xl text-xs font-semibold shadow-lg transition-all transform duration-300 flex items-center gap-2"></div>
+
+        <!-- Header -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-brand-border/40 pb-5 gap-4">
+            <div>
+                <h1 class="text-xl sm:text-2xl font-bold text-white tracking-tight">Artist & Label Preferences</h1>
+                <p class="text-xs text-gray-400 mt-1">Manage platform profiles, metadata defaults, social links, and delivery settings.</p>
+            </div>
+            <div id="pref-header-actions" class="shrink-0">
+                <button onclick="window.savePreferences()" id="btn-save-preferences" class="w-full sm:w-auto px-4 py-2 bg-brand-accent hover:brightness-110 text-black font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-floppy-disk"></i> Save Preferences
+                </button>
+            </div>
+        </div>
+
+        <!-- Tab Controls -->
+        <div class="flex gap-2 sm:gap-4 border-b border-brand-border/40 pb-3">
+            <button id="tab-btn-artist" onclick="switchPrefTab('artist')" class="px-3 sm:px-4 py-1.5 text-xs font-bold rounded-lg bg-brand-dark text-brand-accent border border-brand-border/80">Artist Profile</button>
+            <button id="tab-btn-label" onclick="switchPrefTab('label')" class="px-3 sm:px-4 py-1.5 text-xs font-bold rounded-lg text-gray-400 hover:text-white transition-all">Label Settings</button>
+        </div>
+
+        <!-- Submitted Summary Card -->
+        <div id="pref-submitted-view" class="hidden bg-brand-dark/40 border border-brand-border/60 rounded-2xl p-4 sm:p-6 space-y-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-brand-border/30 pb-4 gap-3">
+                <div class="flex items-center gap-2.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+                    <h2 class="text-sm sm:text-base font-bold text-white">Submitted Artist Profile</h2>
+                </div>
+                <div class="flex items-center gap-2 self-start sm:self-auto">
+                    <button onclick="window.openEditMode()" class="px-3 py-1.5 bg-brand-dark hover:bg-black/40 text-brand-accent border border-brand-border/80 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-pen-to-square"></i> Edit
+                    </button>
+                    <button onclick="window.promptDeleteModal()" class="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-trash-can"></i> Delete
+                    </button>
+                </div>
+            </div>
+
+            <!-- Lightweight Inline Delete Confirmation Card -->
+            <div id="pref-delete-modal" class="hidden bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all">
+                <div class="flex items-center gap-3 text-rose-300 text-xs font-medium">
+                    <i class="fa-solid fa-triangle-exclamation text-base text-rose-400 shrink-0"></i>
+                    <span>This action will clear your saved artist preferences. This cannot be undone.</span>
+                </div>
+                <div class="flex gap-2 shrink-0 w-full sm:w-auto justify-end">
+                    <button onclick="window.closeDeleteModal()" class="px-3.5 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold text-xs rounded-xl transition-all">
+                        Cancel
+                    </button>
+                    <button onclick="window.confirmDeletePreferences()" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-trash"></i> Delete
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="space-y-3">
+                    <h3 class="text-xs uppercase font-bold text-gray-400 tracking-wider">Basic Information</h3>
+                    <div class="bg-black/30 rounded-xl p-4 space-y-2 border border-brand-border/30 text-xs">
+                        <p class="text-gray-300"><strong class="text-white">Artist Name:</strong> <span id="summary-artistName" class="ml-1 text-gray-200"></span></p>
+                        <p class="text-gray-300"><strong class="text-white">Genres:</strong> <span id="summary-genres" class="ml-1 text-gray-200"></span></p>
+                        <p class="text-gray-300"><strong class="text-white">Language:</strong> <span id="summary-language" class="ml-1 text-gray-200"></span></p>
+                        <p class="text-gray-300"><strong class="text-white">Bio:</strong> <span id="summary-about" class="ml-1 text-gray-200 block mt-1 italic break-words"></span></p>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <h3 class="text-xs uppercase font-bold text-gray-400 tracking-wider">Platform Links</h3>
+                    <div class="bg-black/30 rounded-xl p-4 space-y-2 border border-brand-border/30 text-xs">
+                        <p class="text-gray-300 flex items-start gap-2">
+                            <i class="fa-brands fa-spotify text-emerald-400 text-sm shrink-0 mt-0.5"></i>
+                            <span id="summary-spotify" class="break-all text-gray-200"></span>
+                        </p>
+                        <p class="text-gray-300 flex items-start gap-2">
+                            <i class="fa-brands fa-apple text-gray-300 text-sm shrink-0 mt-0.5"></i>
+                            <span id="summary-appleMusic" class="break-all text-gray-200"></span>
+                        </p>
+                        <p class="text-gray-300 flex items-start gap-2">
+                            <i class="fa-brands fa-youtube text-red-400 text-sm shrink-0 mt-0.5"></i>
+                            <span id="summary-vevo" class="break-all text-gray-200"></span>
+                        </p>
+                        <p class="text-gray-300 flex items-start gap-2">
+                            <i class="fa-solid fa-globe text-blue-400 text-sm shrink-0 mt-0.5"></i>
+                            <span id="summary-website" class="break-all text-gray-200"></span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <h3 class="text-xs uppercase font-bold text-gray-400 tracking-wider">Copyright & Record Label</h3>
+                <div class="bg-black/30 rounded-xl p-4 grid grid-cols-1 md:grid-cols-3 gap-3 border border-brand-border/30 text-xs">
+                    <p class="text-gray-300"><strong class="text-white">Label:</strong> <span id="summary-label" class="ml-1 break-words"></span></p>
+                    <p class="text-gray-300"><strong class="text-white">C-Line:</strong> <span id="summary-cLine" class="ml-1 break-words"></span></p>
+                    <p class="text-gray-300"><strong class="text-white">P-Line:</strong> <span id="summary-pLine" class="ml-1 break-words"></span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Artist Profile Form Section -->
+        <div id="pref-section-artist" class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Main Info Card -->
+                <div class="bg-brand-dark/40 border border-brand-border/60 rounded-2xl p-4 sm:p-5 space-y-4">
+                    <h3 class="text-sm font-bold text-white border-b border-brand-border/30 pb-2">Basic Info</h3>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Artist Name</label>
+                        <input type="text" id="pref-artistName" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-accent">
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Primary Genre</label>
+                            <input type="text" id="pref-primaryGenre" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Secondary Genre</label>
+                            <input type="text" id="pref-secondaryGenre" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Language</label>
+                        <input type="text" id="pref-language" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Bio / About</label>
+                        <textarea id="pref-about" rows="3" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white"></textarea>
+                    </div>
+                </div>
+
+                <!-- Platform IDs / Links Card -->
+                <div class="bg-brand-dark/40 border border-brand-border/60 rounded-2xl p-4 sm:p-5 space-y-4">
+                    <h3 class="text-sm font-bold text-white border-b border-brand-border/30 pb-2">Platform Identifiers</h3>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1"><i class="fa-brands fa-spotify text-emerald-400"></i> Spotify Link</label>
+                        <input type="text" id="pref-platform-spotify" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1"><i class="fa-brands fa-apple text-gray-300"></i> Apple Music Link</label>
+                        <input type="text" id="pref-platform-appleMusic" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1"><i class="fa-brands fa-youtube text-red-400"></i> VEVO Channel</label>
+                        <input type="text" id="pref-platform-vevo" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1"><i class="fa-solid fa-globe text-blue-400"></i> Official Website</label>
+                        <input type="text" id="pref-platform-website" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Defaults & Copyright Info -->
+            <div class="bg-brand-dark/40 border border-brand-border/60 rounded-2xl p-4 sm:p-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">Default Label</label>
+                    <input type="text" id="pref-label" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">C-Line Copyright</label>
+                    <input type="text" id="pref-cLine" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">P-Line Copyright</label>
+                    <input type="text" id="pref-pLine" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                </div>
+            </div>
+        </div>
+
+        <!-- Label Settings Form Section -->
+        <div id="pref-section-label" class="space-y-6 hidden">
+            <div class="bg-brand-dark/40 border border-brand-border/60 rounded-2xl p-4 sm:p-5 space-y-4 max-w-2xl">
+                <h3 class="text-sm font-bold text-white border-b border-brand-border/30 pb-2">Record Label Info</h3>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">Label Name</label>
+                    <input type="text" id="pref-label-name" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">About Label</label>
+                    <textarea id="pref-label-about" rows="3" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white"></textarea>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">Label Website</label>
+                    <input type="text" id="pref-label-website" class="w-full bg-black/40 border border-brand-border/60 rounded-xl px-3 py-2 text-xs text-white">
+                </div>
+            </div>
+        </div>
+    </div>
+    `;
+};
+
+// UI Toast Notification Helper
+window.showPrefToast = function(message, type = 'success') {
+    const toast = document.getElementById('pref-toast');
+    if (!toast) return;
+
+    if (type === 'success') {
+        toast.className = "fixed top-5 right-5 z-50 px-4 py-3 rounded-xl text-xs font-semibold shadow-lg bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 flex items-center gap-2";
+        toast.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${message}`;
+    } else {
+        toast.className = "fixed top-5 right-5 z-50 px-4 py-3 rounded-xl text-xs font-semibold shadow-lg bg-rose-500/20 border border-rose-500/50 text-rose-300 flex items-center gap-2";
+        toast.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> ${message}`;
+    }
+
+    toast.classList.remove('hidden');
+    setTimeout(() => {
+        toast.classList.add('hidden');
+    }, 4000);
+};
+
+// Toggle UI Modes between Form and Submitted View
+window.updateUIMode = function() {
+    const submittedView = document.getElementById('pref-submitted-view');
+    const formView = document.getElementById('pref-section-artist');
+    const headerActions = document.getElementById('pref-header-actions');
+
+    if (window.prefState.mode === 'view' && window.prefState.artistData && window.prefState.artistData.artistName) {
+        submittedView.classList.remove('hidden');
+        formView.classList.add('hidden');
+        headerActions.classList.add('hidden');
+        window.populateSummary(window.prefState.artistData);
+    } else {
+        submittedView.classList.add('hidden');
+        formView.classList.remove('hidden');
+        headerActions.classList.remove('hidden');
+    }
+};
+
+window.populateSummary = function(data) {
+    document.getElementById('summary-artistName').innerText = data.artistName || 'Not specified';
+    const primary = data.primaryGenre || '';
+    const secondary = data.secondaryGenre ? ` / ${data.secondaryGenre}` : '';
+    document.getElementById('summary-genres').innerText = (primary + secondary) || 'Not specified';
+    document.getElementById('summary-language').innerText = data.language || 'Not specified';
+    document.getElementById('summary-about').innerText = data.about || 'No bio submitted.';
+    
+    document.getElementById('summary-label').innerText = data.label || 'None';
+    document.getElementById('summary-cLine').innerText = data.cLine || data.c_line || 'None';
+    document.getElementById('summary-pLine').innerText = data.pLine || data.p_line || 'None';
+
+    const p = data.platforms || {};
+    document.getElementById('summary-spotify').innerText = p.spotify || 'Not linked';
+    document.getElementById('summary-appleMusic').innerText = p.appleMusic || 'Not linked';
+    document.getElementById('summary-vevo').innerText = p.vevo || 'Not linked';
+    document.getElementById('summary-website').innerText = p.website || 'Not linked';
+};
+
+window.openEditMode = function() {
+    window.prefState.mode = 'edit';
+    window.updateUIMode();
+};
+
+window.promptDeleteModal = function() {
+    document.getElementById('pref-delete-modal').classList.remove('hidden');
+};
+
+window.closeDeleteModal = function() {
+    document.getElementById('pref-delete-modal').classList.add('hidden');
+};
+
+window.confirmDeletePreferences = async function() {
+    window.closeDeleteModal();
+    const token = window.currentUser?.getIdToken ? await window.currentUser.getIdToken() : '';
+    const baseUrl = window.WORKER_BASE_URL || '';
+
+    try {
+        const emptyPayload = {
+            artistName: "",
+            primaryGenre: "",
+            secondaryGenre: "",
+            language: "",
+            about: "",
+            label: "",
+            cLine: "",
+            pLine: "",
+            platforms: { spotify: "", appleMusic: "", vevo: "", website: "" }
+        };
+
+        const res = await fetch(`${baseUrl}/api/preferences/artist/submit`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(emptyPayload)
+        });
+
+        if (res.ok) {
+            window.prefState.artistData = null;
+            window.prefState.mode = 'edit';
+            
+            document.getElementById('pref-artistName').value = '';
+            document.getElementById('pref-primaryGenre').value = '';
+            document.getElementById('pref-secondaryGenre').value = '';
+            document.getElementById('pref-language').value = '';
+            document.getElementById('pref-about').value = '';
+            document.getElementById('pref-label').value = '';
+            document.getElementById('pref-cLine').value = '';
+            document.getElementById('pref-pLine').value = '';
+            document.getElementById('pref-platform-spotify').value = '';
+            document.getElementById('pref-platform-appleMusic').value = '';
+            document.getElementById('pref-platform-vevo').value = '';
+            document.getElementById('pref-platform-website').value = '';
+
+            window.updateUIMode();
+            window.showPrefToast('Artist preferences deleted successfully.', 'success');
+        } else {
+            window.showPrefToast('Failed to clear preferences.', 'error');
+        }
+    } catch (err) {
+        console.error('Delete error:', err);
+        window.showPrefToast('Server connection error.', 'error');
+    }
+};
+
+window.switchPrefTab = function(tab) {
+    const artistTab = document.getElementById('tab-btn-artist');
+    const labelTab = document.getElementById('tab-btn-label');
+    const artistSec = document.getElementById('pref-section-artist');
+    const labelSec = document.getElementById('pref-section-label');
+    const submittedView = document.getElementById('pref-submitted-view');
+
+    if (tab === 'artist') {
+        artistTab.className = "px-3 sm:px-4 py-1.5 text-xs font-bold rounded-lg bg-brand-dark text-brand-accent border border-brand-border/80";
+        labelTab.className = "px-3 sm:px-4 py-1.5 text-xs font-bold rounded-lg text-gray-400 hover:text-white transition-all";
+        labelSec.classList.add('hidden');
+        window.updateUIMode();
+    } else {
+        labelTab.className = "px-3 sm:px-4 py-1.5 text-xs font-bold rounded-lg bg-brand-dark text-brand-accent border border-brand-border/80";
+        artistTab.className = "px-3 sm:px-4 py-1.5 text-xs font-bold rounded-lg text-gray-400 hover:text-white transition-all";
+        labelSec.classList.remove('hidden');
+        artistSec.classList.add('hidden');
+        submittedView.classList.add('hidden');
+    }
+};
+
+window.initPreferencesPage = async function() {
+    const token = window.currentUser?.getIdToken ? await window.currentUser.getIdToken() : '';
+    const baseUrl = window.WORKER_BASE_URL || '';
+
+    try {
+        const res = await fetch(`${baseUrl}/api/preferences/artist`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+            const body = await res.json();
+            const artist = body.data?.artist || {};
+            
+            window.prefState.artistData = artist;
+
+            document.getElementById('pref-artistName').value = artist.artistName || '';
+            document.getElementById('pref-primaryGenre').value = artist.primaryGenre || '';
+            document.getElementById('pref-secondaryGenre').value = artist.secondaryGenre || '';
+            document.getElementById('pref-language').value = artist.language || '';
+            document.getElementById('pref-about').value = artist.about || '';
+            document.getElementById('pref-label').value = artist.label || '';
+            document.getElementById('pref-cLine').value = artist.cLine || artist.c_line || '';
+            document.getElementById('pref-pLine').value = artist.pLine || artist.p_line || '';
+
+            if (artist.platforms) {
+                document.getElementById('pref-platform-spotify').value = artist.platforms.spotify || '';
+                document.getElementById('pref-platform-appleMusic').value = artist.platforms.appleMusic || '';
+                document.getElementById('pref-platform-vevo').value = artist.platforms.vevo || '';
+                document.getElementById('pref-platform-website').value = artist.platforms.website || '';
+            }
+
+            if (artist.artistName) {
+                window.prefState.mode = 'view';
+            } else {
+                window.prefState.mode = 'edit';
+            }
+            window.updateUIMode();
+        }
+    } catch (err) {
+        console.error('Failed to load preferences:', err);
+        window.showPrefToast('Failed to load preferences from server.', 'error');
+    }
+};
+
+window.savePreferences = async function() {
+    const btn = document.getElementById('btn-save-preferences');
+    btn.disabled = true;
+    btn.innerText = 'Saving...';
+
+    const token = window.currentUser?.getIdToken ? await window.currentUser.getIdToken() : '';
+    const baseUrl = window.WORKER_BASE_URL || '';
+
+    const payload = {
+        artistName: document.getElementById('pref-artistName').value,
+        primaryGenre: document.getElementById('pref-primaryGenre').value,
+        secondaryGenre: document.getElementById('pref-secondaryGenre').value,
+        language: document.getElementById('pref-language').value,
+        about: document.getElementById('pref-about').value,
+        label: document.getElementById('pref-label').value,
+        cLine: document.getElementById('pref-cLine').value,
+        pLine: document.getElementById('pref-pLine').value,
+        platforms: {
+            spotify: document.getElementById('pref-platform-spotify').value,
+            appleMusic: document.getElementById('pref-platform-appleMusic').value,
+            vevo: document.getElementById('pref-platform-vevo').value,
+            website: document.getElementById('pref-platform-website').value
+        }
+    };
+
+    try {
+        const res = await fetch(`${baseUrl}/api/preferences/artist/submit`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        if (res.ok) {
+            window.prefState.artistData = payload;
+            window.prefState.mode = 'view';
+            window.updateUIMode();
+            window.showPrefToast('Preferences saved successfully!', 'success');
+        } else {
+            window.showPrefToast('Failed to save preferences.', 'error');
+        }
+    } catch (err) {
+        console.error('Error saving preferences:', err);
+        window.showPrefToast('Error connecting to the server.', 'error');
+    } finally { // <-- Fixed typo here
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> Save Preferences`;
+    }
+};
+
+
+
+2.WORKER
+
+const TOO_LOST_BASE_URL = "https://api-sandbox.toolost.com/v1";
+
+      // Helper for Too Lost API Requests
+      async function fetchTooLostAPI(endpoint, method = "GET", body = null, apiKey) {
+        const options = {
+          method,
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          }
+        };
+        if (body) {
+          options.body = JSON.stringify(body);
+        }
+        return await fetch(`${TOO_LOST_BASE_URL}${endpoint}`, options);
+      }
+
+// 1. GET Artist Preferences (/api/preferences/artist)
+      if (url.pathname === "/api/preferences/artist" && request.method === "GET") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const prefKey = `PREFERENCES_ARTIST_${userId}`;
+        let artistData = null;
+
+        // Try fetching directly from Too Lost API upstream first
+        try {
+          const upstreamRes = await fetchTooLostAPI("/preferences/artist", "GET", null, env.TOO_LOST_API_KEY);
+          if (upstreamRes.ok) {
+            const upstreamJson = await upstreamRes.json();
+            artistData = upstreamJson.data?.artist || upstreamJson.data || null;
+      
+            // Update KV cache with fresh upstream data
+            if (artistData) {
+              await env.AUDIORY_KV.put(prefKey, JSON.stringify(artistData));
+            }
+          }
+        } catch (err) {
+          console.error("Too Lost API upstream fetch failed, reading from KV cache:", err);
+        }
+
+        // Fallback to KV storage if upstream is unreachable or empty
+        if (!artistData) {
+          const rawData = await env.AUDIORY_KV.get(prefKey);
+          artistData = rawData ? JSON.parse(rawData) : null;
+        }
+
+        // Dynamic empty schema if no data has been saved yet
+        if (!artistData) {
+          artistData = {
+            artistName: "",
+            primaryGenre: "",
+            secondaryGenre: "",
+            language: "",
+            about: "",
+            profileImg: null,
+            social: { facebook: "", instagram: "", twitter: "", youtube: "" },
+            platforms: { spotify: "", soundcloud: "", appleMusic: "", vevo: "", website: "" },
+            deliveries: { delivery_youtube: false, delivery_soundexchange: false, delivery_facebook: false },
+            releaseTime: "",
+            timeZone: "",
+            label: "",
+            cLine: "",
+            pLine: ""
+          };
+        }
+
+        return new Response(
+          JSON.stringify({
+            data: { artist: artistData },
+            message: "Artist preferences retrieved successfully"
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 2. POST Submit Artist Preferences (/api/preferences/artist/submit)
+      if (url.pathname === "/api/preferences/artist/submit" && request.method === "POST") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const body = await request.json();
+        const prefKey = `PREFERENCES_ARTIST_${userId}`;
+
+        // Fetch existing values to maintain structure during partial updates
+        const existingRaw = await env.AUDIORY_KV.get(prefKey);
+        const existingData = existingRaw ? JSON.parse(existingRaw) : {};
+
+        const updatedData = {
+          ...existingData,
+          ...body,
+          updatedAt: new Date().toISOString()
+        };
+
+        // 1. Forward to Too Lost API Upstream
+        let upstreamSuccess = false;
+        try {
+          const upstreamRes = await fetchTooLostAPI("/preferences/artist", "POST", updatedData, env.TOO_LOST_API_KEY);
+          if (upstreamRes.ok) {
+            upstreamSuccess = true;
+          } else {
+            console.warn("Too Lost API sync responded with error code:", upstreamRes.status);
+          }
+        } catch (err) {
+          console.error("Failed to forward preferences to Too Lost API:", err);
+        }
+
+        // 2. Save state locally in KV storage
+        await env.AUDIORY_KV.put(prefKey, JSON.stringify(updatedData));
+
+        return new Response(
+          JSON.stringify({ 
+            message: "Preferences updated successfully", 
+            data: updatedData,
+            syncedWithTooLost: upstreamSuccess
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 3. GET Label Preferences (/api/preferences/label)
+      if (url.pathname === "/api/preferences/label" && request.method === "GET") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const labelKey = `PREFERENCES_LABEL_${userId}`;
+        let labelData = null;
+
+        // Attempt live upstream call to Too Lost API
+        try {
+          const upstreamRes = await fetchTooLostAPI("/preferences/label", "GET", null, env.TOO_LOST_API_KEY);
+          if (upstreamRes.ok) {
+            const upstreamJson = await upstreamRes.json();
+            labelData = upstreamJson.data || null;
+
+            if (labelData) {
+              await env.AUDIORY_KV.put(labelKey, JSON.stringify(labelData));
+            }
+          }
+        } catch (err) {
+          console.error("Too Lost API label preferences fetch failed, using KV:", err);
+        }
+
+        // Fallback to KV storage
+        if (!labelData) {
+          const rawData = await env.AUDIORY_KV.get(labelKey);
+          labelData = rawData ? JSON.parse(rawData) : null;
+        }
+
+        // Dynamic empty schema if no data has been saved yet
+        if (!labelData) {
+          labelData = {
+            label: {
+              name: "",
+              about: "",
+              profileImg: null,
+              social: { facebook: "", instagram: "", twitter: "", youtube: "" },
+              platforms: { website: "" }
+            },
+            artists: []
+          };
+        }
+
+        return new Response(
+          JSON.stringify({ data: labelData, message: "Label preferences retrieved successfully" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+     
