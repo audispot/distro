@@ -1,0 +1,532 @@
+Preferences
+
+Endpoints for managing artist and label preferences. Requires a valid OAuth 2.0 Bearer token with appropriate preference scopes.
+
+OPERATIONS
+get
+/preferences/artist
+get
+/preferences/artists
+get
+/preferences/label
+get
+/preferences/label/artist/{id}
+get
+/preferences/search-spotify
+get
+/preferences/search-yt-channel
+get
+/preferences/search-apple
+get
+/preferences/get-spotify-artist
+get
+/preferences/get-yt-channel
+get
+/preferences/get-apple-artist
+get
+/preferences/artist-via-link
+post
+/preferences/search/artist-platform
+post
+/preferences/artist/get-artist-via-url
+post
+/preferences/artist/submit
+post
+/preferences/label/submit
+post
+/preferences/label/artist/remove
+
+
+1.Get artist preferences
+Returns the artist preferences for the authenticated user including release count. Requires scope: read:preferences.
+
+Responses
+
+200 object
+data object required
+
+artist object · ArtistPreferenceResource nullable required
+
+about string | null required Example Electronic music producer from Los Angeles.
+additional object required
+
+allmusic string | null required Example null
+ddex string | null required Example null
+isni string | null required Example null
+musicbrainz string | null required Example null
+wikipedia string | null required Example null
+artistName string required Example Nova Waves
+audiomack object required
+
+cLine string | null required Example 2024 Indie Records
+deliveries object required
+
+beatport boolean required Example false
+delivery_beatport_link string | null required Example null
+delivery_even boolean required Example false
+delivery_facebook boolean required Example true
+delivery_hook boolean required Example false
+delivery_lyricfind boolean required Example false
+delivery_soundcloud boolean required Example false
+delivery_soundexchange boolean required Example true
+delivery_tracklib boolean required Example false
+delivery_youtube boolean required Example true
+id integer required Example 1
+Integer numbers.
+
+label string | null required Example Indie Records
+language string | null required Example English
+platforms object required
+appleMusic string | null required Example https://music.apple.com/artist/nova-waves/123456
+soundcloud string | null requiredExample null
+spotify string | null required Example https://open.spotify.com/artist/1a2b3c
+vevo string | null required Example https://www.youtube.com/@ArtistVEVO
+website string | null required Example https://novawaves.com
+youtube string | null required Example null
+
+pLine string | null required Example 2024 Indie Records
+primaryGenre string | null required Example Electronic
+profileImg string | null required Example https://cdn.example.com/preferences/artists/abc123.jpg
+releaseTime string | null required Example 00:00 
+secondaryGenre string | null required Example Pop
+social object required
+
+facebook string | null required Example https://facebook.com/novawaves
+instagram string | null required Example https://instagram.com/novawaves
+twitter string | null required Example null
+youtube string | null required Example null
+timeZone string | null required Example America/New_York
+collaborators string
+defaultRoles string
+stores object Empty object
+
+territories string
+releaseCount integer required
+Integer numbers.
+
+message string required
+
+2.Get preference artists
+Returns artists with Spotify links for the authenticated user. Requires scope: read:preferences.
+
+Responses
+200 object
+data array object[] required
+
+artist_name string required
+default_roles array object[] required
+
+artist_id integer required
+Integer numbers.
+
+default boolean required
+id integer required
+Integer numbers.
+
+name string required
+spotify_link string | null required
+type string required
+id integer required
+Integer numbers.
+
+
+3. Get label preferences
+
+Returns the label preferences with paginated artists for the authenticated user. Requires scope: read:preferences.
+
+Query Parameters
+search string | null max length:  255 Example nova
+perPage integer | null min:  1 max:  100 Example 10
+Integer numbers.
+
+page integer | null min:  1 Example 1
+Integer numbers
+
+Responses
+200 object
+data objectrequired
+
+artists array object[] · LabelArtistCollection required
+
+artistName string required Example Nova Waves
+id integer required Example 1
+Integer numbers.
+
+language string | null required Example English
+primaryGenre string | null required Example Electronic
+profileImg string | null required Example https://cdn.example.com/preferences/artists/abc123.jpg
+secondaryGenre string | null required Example Pop
+defaultRoles string
+stores object Empty object
+
+territories string
+label object · LabelPreferenceResource nullable required
+
+about string | null required Example Independent record label based in NYC.
+id integer required Example 1
+Integer numbers.
+
+name string required Example Indie Records
+platforms object required
+
+website string | null required Example https://indierecords.com
+profileImg string | null required Example https://cdn.example.com/preferences/labels/xyz789.jpg
+social object required
+
+facebook string | null required Example https://facebook.com/indierecords 
+instagram string | null required Example null
+twitter string | null required Example null
+youtube string | null required Example null
+message string required
+
+
+4. Get label artist​
+
+Returns a single artist by ID for label view. Requires scope: read:preferences.
+
+Path Parameters
+id integer required Example 1
+The artist ID.
+
+Responses
+200 object
+data object · LabelArtistResource required
+
+artistName string required Example Nova Waves
+id integer required Example 1
+Integer numbers.
+
+language string | null required Example English
+primaryGenre string | null required Example Electronic
+profileImg string | null required Example https://cdn.example.com/preferences/artists/abc123.jpg
+secondaryGenre string | null required Example pop
+defaultRoles string
+stores object
+Empty object
+territories string
+
+
+5.Search Spotify artists
+
+Search for artists on Spotify by name. Requires scope: read:preferences.
+
+artist string Example Nova Waves
+Artist name to search.
+
+limit integer Default Example 5
+Maximum number of results.
+
+Responses
+200 object
+data array object[] required
+
+followers integer required
+Integer numbers.
+
+id string required
+image string required
+name string required
+url string required
+
+
+6. Search YouTube channels​
+
+Search for YouTube channels by name. Requires scope: read:preferences.
+
+Query Parameters
+channel string Example Nova Waves
+Channel name to search.
+
+limit integer Default Example 5
+Maximum number of results.
+
+Responses
+200 object
+data array object[] required
+
+id string required
+image string required
+name string required
+url string required
+
+
+7. Search Apple Music artists
+
+Search for artists on Apple Music by name. Requires scope: read:preferences.
+
+Query Parameters
+artist string Example Nova Waves
+Artist name to search.
+
+limit integer Default Example 5
+Maximum number of results.
+
+Responses
+200 object
+data array object[] required
+
+id string required
+image string required
+name string required
+url string required
+
+
+8.Get Spotify artist
+
+Retrieve a Spotify artist by their link or ID. Requires scope: read:preferences.
+
+Query Parameters
+link string Example https://open.spotify.com/artist/1a2b3c
+Spotify artist link or ID.
+
+Responses
+200 object
+data array object[] required
+
+id string required
+image string required
+name string required
+type string require
+url string required
+
+
+9. Get YouTube channel
+
+Retrieve a YouTube channel by their link. Requires scope: read:preferences.
+
+Query Parameters
+link string Example https://www.youtube.com/@novawaves
+YouTube channel link.
+
+Responses
+200 object
+data array object[] required
+
+id string required
+image string required
+name string required
+url string required
+
+
+10. Get Apple Music artist
+
+Retrieve an Apple Music artist by their link. Requires scope: read:preferences.
+
+Query Parameters
+link string Example https://music.apple.com/artist/nova-waves/123456
+Apple Music artist link.
+
+Responses
+200 object
+data array object[] required
+
+id string required
+image string required
+name string required
+url string required
+
+
+11. Get artist via link
+
+Retrieve an artist by platform link (unified across platforms). Requires scope: read:preferences.
+
+Query Parameters
+link string required Example https://open.spotify.com/artist/1a2b3c
+platform string enum required Example spotify
+values
+  spotify
+  youtube
+  apple
+  audiomack
+
+Responses
+200 object
+data array object[] required
+
+id string required
+image string required
+name string required
+url string required
+
+
+12. Search artist via platform
+
+Unified search across platforms: Spotify, YouTube, Apple Music, Audiomack. Requires scope: read:preferences.
+
+Body ·SearchPlatformRequest required application/json
+platform string enum required Example spotify
+values
+  spotify
+  youtube
+  apple
+  audiomack
+term string max length:  255 required Example Nova Waves
+limit integer | null min:  1 max:  50 Example 5
+Integer numbers.
+
+Responses
+200 object
+data object required
+
+platform string required
+results array object[] required
+
+followers integer required
+Integer numbers.
+
+id string required
+image string required
+name string required
+url string required
+
+13. Get artist via URL
+
+Retrieve an artist by URL with name validation. The artist name must match the profile name on Spotify or Apple Music. Requires scope: read:preferences.
+
+Body ·SearchPlatformRequest required application/json
+platform string enum required Example spotify
+values
+  spotify
+  youtube
+  apple
+
+url string required Example https://open.spotify.com/artist/1a2b3cy
+name string | null Example Nova Waves
+
+
+Responses
+200 object
+data array object[] required
+
+followers integer required
+Integer numbers.
+
+id string required
+image string required
+name string required
+type string require
+url string required
+
+
+
+14. Submit artist preferences
+
+Create or update artist preferences for the authenticated user. Requires scope: write:preferences.
+
+Body ·SubmitArtistPreferenceRequest required application/json
+artistName string max length:  255 required Example Nova Waves
+metadata object required
+
+artists array object[] | null
+
+name string required Example Nova Waves
+role string required Example Main Artist
+credits array object[] | null
+
+name string required Example Jane Smith
+role string required Example Mixing Engineer
+writers array object[] | null
+
+name string required Example John Doe
+role string required Example composer
+about string | null Example Electronic music producer from Los Angeles.
+additional object
+
+allmusic string | null Example null
+ddex string | null Example null
+isni string | null Example null
+musicbrainz string | null Example null
+wikipedia string | null Example null
+audiomack object
+
+link string | null Example null
+status boolean | null Example false
+c_line string | null Example 2024 Indie Records
+collaborators array object[] | null
+
+name string required Example DJ Echo
+deliveries object
+
+beatport boolean | null Example false
+delivery_beatport_link string | null Example null
+delivery_even boolean | null Example false
+delivery_facebook boolean | null Example true
+delivery_hook boolean | null Example false
+delivery_lyricfind boolean | null Example false
+delivery_soundcloud boolean | null Example false
+delivery_soundexchange boolean | null Example true
+delivery_tracklib boolean | null Example false
+delivery_youtube boolean | null Example true
+id integer | null Example null
+Integer numbers.
+
+img string | null Example null
+label string | null Example Indie Records
+language string | null Example English
+p_lineCopy link to p_line string | null Example 2024 Indie Records
+platforms object
+
+appleMusic string | null Example https://music.apple.com/artist/nova-waves/123456
+soundcloud string | null Example null
+spotify string | null Example https://open.spotify.com/artist/1a2b3c
+vevo string | null Pattern ^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$
+website string | null Example https://novawaves.com
+youtube string | null Pattern Example null
+primaryGenre string | null Example Electronic
+releaseTime string | null Example 00:00
+removeImg boolean | null Example false
+secondaryGenre string | null Example pop
+social object
+
+facebook string | null Example https://facebook.com/novawaves
+instagram string | null Example https://instagram.com/novawaves
+twitter string | null Example null
+youtube string | null Example null
+stores array string[] | null
+territories array object[] | null
+s
+code string required Example US
+name string required Example United States
+timeZone string | null Example America/New_York
+
+Responses
+200 object
+message string required
+
+
+15.Submit label preferences
+
+Create or update label preferences for the authenticated user. Requires scope: write:preferences.
+
+Body ·SubmitLabelPreferenceRequest required application/json
+name string max length:  255 required Example
+about string | null Example
+img string | null Example
+platforms object
+
+website string | null Example
+removeImg boolean | null Example
+social object
+
+facebook string | null Example
+instagram string | null Example
+twitter string | null Example
+youtube string | null Example
+
+
+Responses
+200 object
+message string required
+
+
+16. Remove artist​
+
+Remove an artist from label management. Requires scope: write:preferences.
+
+Body ·RemoveLabelArtistRequest required application/json
+artistId integer min: 1 required
+Integer numbers.
+
+Responses
+200 object
+message string required
