@@ -1410,6 +1410,521 @@ async function getPlatformIntegration(env, platform) {
   return integration || null;
 }
 
+// ============================================================
+// ROYALTY CALCULATION HELPERS
+// ============================================================
+
+function generateRoyaltyId(prefix) {
+  return `${prefix}_${crypto.randomUUID()}`;
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+async function getSalesEventForRoyalty(env, eventId, userId) {
+  const result = await env.DB.prepare(`
+    SELECT
+      se.*,
+      r.title AS release_title,
+      t.title AS track_title
+    FROM sales_events se
+    LEFT JOIN releases r
+      ON r.id = se.release_id
+    LEFT JOIN tracks t
+      ON t.id = se.track_id
+    WHERE se.id = ?
+      AND se.user_id = ?
+    LIMIT 1
+  `).bind(eventId, userId).all();
+
+  return result.results?.[0] || null;
+}
+
+async function getApplicableRoyaltyAgreement(
+  env,
+  userId,
+  salesEvent
+) {
+  // ----------------------------------------------------------
+  // Priority:
+  // 1. Track agreement
+  // 2. Release agreement
+  // 3. Artist agreement
+  // ----------------------------------------------------------
+
+  if (salesEvent.track_id) {
+    const trackAgreement = await env.DB.prepare(`
+      SELECT *
+      FROM royalty_agreements
+      WHERE user_id = ?
+        AND scope_type = 'track'
+        AND track_id = ?
+        AND status = 'active'
+        AND (effective_from IS NULL OR effective_from <= ?)
+        AND (effective_to IS NULL OR effective_to >= ?)
+      ORDER BY version DESC, created_at DESC
+      LIMIT 1
+    `).bind(
+      userId,
+      salesEvent.track_id,
+      salesEvent.event_date,
+      salesEvent.event_date
+    ).first();
+
+    if (trackAgreement) {
+      return trackAgreement;
+    }
+  }
+
+  if (salesEvent.release_id) {
+    const releaseAgreement = await env.DB.prepare(`
+      SELECT *
+      FROM royalty_agreements
+      WHERE user_id = ?
+        AND scope_type = 'release'
+        AND release_id = ?
+        AND status = 'active'
+        AND (effective_from IS NULL OR effective_from <= ?)
+        AND (effective_to IS NULL OR effective_to >= ?)
+      ORDER BY version DESC, created_at DESC
+      LIMIT 1
+    `).bind(
+      userId,
+      salesEvent.release_id,
+      salesEvent.event_date,
+      salesEvent.event_date
+    ).first();
+
+    if (releaseAgreement) {
+      return releaseAgreement;
+    }
+  }
+
+  if (salesEvent.artist_id) {
+    const artistAgreement = await env.DB.prepare(`
+      SELECT *
+      FROM royalty_agreements
+      WHERE user_id = ?
+        AND scope_type = 'artist'
+        AND artist_id = ?
+        AND status = 'active'
+        AND (effective_from IS NULL OR effective_from <= ?)
+        AND (effective_to IS NULL OR effective_to >= ?)
+      ORDER BY version DESC, created_at DESC
+      LIMIT 1
+    `).bind(
+      userId,
+      salesEvent.artist_id,
+      salesEvent.event_date,
+      salesEvent.event_date
+    ).first();
+
+    if (artistAgreement) {
+      return artistAgreement;
+    }
+  }
+
+  return null;
+}
+
+async function getRoyaltySplitsForCalculation(env, agreementId) {
+  const result = await env.DB.prepare(`
+    SELECT
+      rs.*,
+      a.name AS linked_artist_name,
+      tc.name AS linked_contributor_name
+    FROM royalty_splits rs
+    LEFT JOIN artists a
+      ON a.id = rs.artist_id
+    LEFT JOIN track_contributors tc
+      ON tc.id = rs.contributor_id
+    WHERE rs.agreement_id = ?
+    ORDER BY rs.created_at ASC
+  `).bind(agreementId).all();
+
+  return result.results || [];
+}
+
+function getRoyaltyRecipientType(split) {
+  if (split.artist_id) {
+    return "artist";
+  }
+
+  if (split.contributor_id) {
+    return "contributor";
+  }
+
+  return "other";
+}
+
+function getRoyaltyRecipientId(split) {
+  return split.artist_id || split.contributor_id || null;
+}
+
+function getRoyaltyRecipientName(split) {
+  return (
+    split.name ||
+    split.linked_artist_name ||
+    split.linked_contributor_name ||
+    "Unknown recipient"
+  );
+}
+
+// ============================================================
+// AUDIORY ROYALTY ENGINE - STAGE 1
+// ROYALTY AGREEMENTS + SPLITS
+// ============================================================
+
+const ROYALTY_SCOPE_TYPES = [
+  "track",
+  "release",
+  "artist"
+];
+
+const ROYALTY_AGREEMENT_STATUSES = [
+  "draft",
+  "active",
+  "expired",
+  "cancelled"
+];
+
+const ROYALTY_SPLIT_ROLES = [
+  "artist",
+  "featured_artist",
+  "producer",
+  "songwriter",
+  "composer",
+  "lyricist",
+  "remixer",
+  "engineer",
+  "vocalist",
+  "other"
+];
+
+
+async function requireRoyaltyAuth(request, env) {
+  const token = getBearerToken(request);
+
+  if (!token) {
+    throw new Error("Authorization required");
+  }
+
+  const auth = await verifyToken(
+    token,
+    env.JWT_SECRET
+  );
+
+  if (!auth) {
+    throw new Error("Invalid or expired token");
+  }
+
+  const userId =
+    auth.sub ||
+    auth.user_id ||
+    auth.userId ||
+    auth.id;
+
+  if (!userId) {
+    throw new Error("Authenticated user ID not found");
+  }
+
+  return {
+    auth,
+    userId,
+    token
+  };
+}
+
+
+function isValidRoyaltyScopeType(value) {
+  return ROYALTY_SCOPE_TYPES.includes(value);
+}
+
+
+function isValidRoyaltyAgreementStatus(value) {
+  return ROYALTY_AGREEMENT_STATUSES.includes(value);
+}
+
+
+function isValidRoyaltySplitRole(value) {
+  return ROYALTY_SPLIT_ROLES.includes(value);
+}
+
+
+function validateRoyaltyPercentage(value) {
+  const percentage = Number(value);
+
+  if (!Number.isFinite(percentage)) {
+    return {
+      valid: false,
+      error: "split_percentage must be a number"
+    };
+  }
+
+  if (percentage < 0 || percentage > 100) {
+    return {
+      valid: false,
+      error: "split_percentage must be between 0 and 100"
+    };
+  }
+
+  return {
+    valid: true,
+    value: percentage
+  };
+}
+
+
+async function getRoyaltyAgreement(
+  env,
+  userId,
+  agreementId
+) {
+  return await env.DB.prepare(`
+    SELECT
+      ra.*,
+
+      r.title AS release_title,
+      r.release_type,
+
+      t.title AS track_title,
+      t.isrc,
+
+      a.name AS artist_name
+
+    FROM royalty_agreements ra
+
+    LEFT JOIN releases r
+      ON r.id = ra.release_id
+
+    LEFT JOIN tracks t
+      ON t.id = ra.track_id
+
+    LEFT JOIN artists a
+      ON a.id = ra.artist_id
+
+    WHERE ra.id = ?
+      AND ra.user_id = ?
+
+    LIMIT 1
+  `)
+    .bind(
+      agreementId,
+      userId
+    )
+    .first();
+}
+
+
+async function getRoyaltyAgreementSplits(
+  env,
+  userId,
+  agreementId
+) {
+  const result = await env.DB.prepare(`
+    SELECT
+      rs.*,
+      a.name AS artist_name
+
+    FROM royalty_splits rs
+
+    LEFT JOIN artists a
+      ON a.id = rs.artist_id
+
+    INNER JOIN royalty_agreements ra
+      ON ra.id = rs.agreement_id
+
+    WHERE rs.agreement_id = ?
+      AND rs.user_id = ?
+      AND ra.user_id = ?
+
+    ORDER BY
+      rs.created_at ASC
+  `)
+    .bind(
+      agreementId,
+      userId,
+      userId
+    )
+    .all();
+
+  return result.results || [];
+}
+
+
+function calculateRoyaltySplitTotal(splits) {
+  return Number(
+    (splits || [])
+      .reduce(
+        (total, split) =>
+          total +
+          Number(
+            split.split_percentage || 0
+          ),
+        0
+      )
+      .toFixed(6)
+  );
+}
+
+
+async function validateRoyaltyTarget(
+  env,
+  userId,
+  scopeType,
+  releaseId,
+  trackId,
+  artistId
+) {
+
+  if (scopeType === "track") {
+
+    if (!trackId) {
+      return {
+        valid: false,
+        error: "track_id is required for track scope"
+      };
+    }
+
+    const track =
+      await env.DB.prepare(`
+        SELECT
+          t.id,
+          t.release_id,
+          t.title,
+          t.isrc,
+          r.user_id
+        FROM tracks t
+        INNER JOIN releases r
+          ON r.id = t.release_id
+        WHERE t.id = ?
+        LIMIT 1
+      `)
+        .bind(trackId)
+        .first();
+
+    if (!track) {
+      return {
+        valid: false,
+        error: "Track not found"
+      };
+    }
+
+    if (track.user_id !== userId) {
+      return {
+        valid: false,
+        error:
+          "You do not have permission to use this track"
+      };
+    }
+
+    return {
+      valid: true,
+      target: track
+    };
+  }
+
+
+  if (scopeType === "release") {
+
+    if (!releaseId) {
+      return {
+        valid: false,
+        error:
+          "release_id is required for release scope"
+      };
+    }
+
+    const release =
+      await env.DB.prepare(`
+        SELECT
+          id,
+          user_id,
+          title,
+          release_type,
+          artist_id
+        FROM releases
+        WHERE id = ?
+        LIMIT 1
+      `)
+        .bind(releaseId)
+        .first();
+
+    if (!release) {
+      return {
+        valid: false,
+        error: "Release not found"
+      };
+    }
+
+    if (release.user_id !== userId) {
+      return {
+        valid: false,
+        error:
+          "You do not have permission to use this release"
+      };
+    }
+
+    return {
+      valid: true,
+      target: release
+    };
+  }
+
+
+  if (scopeType === "artist") {
+
+    if (!artistId) {
+      return {
+        valid: false,
+        error:
+          "artist_id is required for artist scope"
+      };
+    }
+
+    const artist =
+      await env.DB.prepare(`
+        SELECT
+          id,
+          user_id,
+          name
+        FROM artists
+        WHERE id = ?
+        LIMIT 1
+      `)
+        .bind(artistId)
+        .first();
+
+    if (!artist) {
+      return {
+        valid: false,
+        error: "Artist not found"
+      };
+    }
+
+    if (artist.user_id !== userId) {
+      return {
+        valid: false,
+        error:
+          "You do not have permission to use this artist"
+      };
+    }
+
+    return {
+      valid: true,
+      target: artist
+    };
+  }
+
+
+  return {
+    valid: false,
+    error: "Invalid royalty scope type"
+  };
+}
+
+
 // -------------------------
 // Main Worker
 // -------------------------
@@ -16543,6 +17058,1503 @@ if (
       },
       500
     );
+  }
+}
+
+// ============================================================
+// PATCH /v1/royalties/agreements/:agreement_id
+// ============================================================
+
+if (
+  request.method === "PATCH" &&
+  url.pathname.startsWith("/v1/royalties/agreements/")
+) {
+  try {
+    const auth = await requireRoyaltyAuth(request, env);
+
+    const userId =
+      auth.sub ||
+      auth.user_id ||
+      auth.userId ||
+      auth.id;
+
+    if (!userId) {
+      return json({
+        success: false,
+        error: "Unable to determine authenticated user"
+      }, 401);
+    }
+
+    const agreementId =
+      url.pathname.split("/")[4];
+
+    if (!agreementId) {
+      return json({
+        success: false,
+        error: "Agreement ID is required"
+      }, 400);
+    }
+
+    const agreement = await getRoyaltyAgreement(
+      env,
+      agreementId,
+      userId
+    );
+
+    if (!agreement) {
+      return json({
+        success: false,
+        error: "Royalty agreement not found"
+      }, 404);
+    }
+
+    const body = await request.json();
+
+    const allowedStatuses = [
+      "draft",
+      "active",
+      "expired",
+      "cancelled"
+    ];
+
+    if (
+      body.status !== undefined &&
+      !allowedStatuses.includes(body.status)
+    ) {
+      return json({
+        success: false,
+        error: "Invalid agreement status"
+      }, 400);
+    }
+
+    const updates = [];
+    const params = [];
+
+    if (body.status !== undefined) {
+      updates.push("status = ?");
+      params.push(body.status);
+    }
+
+    if (body.name !== undefined) {
+      if (
+        typeof body.name !== "string" ||
+        !body.name.trim()
+      ) {
+        return json({
+          success: false,
+          error: "name must be a non-empty string"
+        }, 400);
+      }
+
+      updates.push("name = ?");
+      params.push(body.name.trim());
+    }
+
+    if (body.description !== undefined) {
+      updates.push("description = ?");
+      params.push(
+        body.description === null
+          ? null
+          : String(body.description)
+      );
+    }
+
+    if (body.effective_from !== undefined) {
+      updates.push("effective_from = ?");
+      params.push(body.effective_from || null);
+    }
+
+    if (body.effective_to !== undefined) {
+      updates.push("effective_to = ?");
+      params.push(body.effective_to || null);
+    }
+
+    if (!updates.length) {
+      return json({
+        success: false,
+        error: "No fields to update"
+      }, 400);
+    }
+
+    updates.push(
+      "updated_at = CURRENT_TIMESTAMP"
+    );
+
+    params.push(agreementId);
+    params.push(userId);
+
+    await env.DB.prepare(`
+      UPDATE royalty_agreements
+      SET ${updates.join(", ")}
+      WHERE id = ?
+        AND user_id = ?
+    `).bind(...params).run();
+
+    const updatedAgreement =
+      await getRoyaltyAgreement(
+        env,
+        agreementId,
+        userId
+      );
+
+    return json({
+      success: true,
+      message: "Royalty agreement updated successfully",
+      agreement: updatedAgreement
+    });
+
+  } catch (error) {
+    console.error(
+      "Royalty agreement update error:",
+      error
+    );
+
+    return json({
+      success: false,
+      error: "Failed to update royalty agreement",
+      details: error.message
+    }, 500);
+  }
+}
+
+// ============================================================
+// POST /v1/royalties/agreements
+// CREATE ROYALTY AGREEMENT
+// ============================================================
+
+if (
+  request.method === "POST" &&
+  url.pathname === "/v1/royalties/agreements"
+) {
+
+  const authResult =
+    await requireRoyaltyAuth(
+      request,
+      env
+    );
+
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
+  const userId =
+    authResult.userId;
+
+  try {
+
+    let body;
+
+    try {
+      body = await request.json();
+    } catch {
+      return json({
+        success: false,
+        error: "Invalid JSON body"
+      }, 400);
+    }
+
+
+    const name =
+      String(
+        body.name || ""
+      ).trim();
+
+    const description =
+      body.description
+        ? String(body.description).trim()
+        : null;
+
+    const scopeType =
+      String(
+        body.scope_type || "track"
+      )
+        .trim()
+        .toLowerCase();
+
+    const releaseId =
+      body.release_id
+        ? String(body.release_id).trim()
+        : null;
+
+    const trackId =
+      body.track_id
+        ? String(body.track_id).trim()
+        : null;
+
+    const artistId =
+      body.artist_id
+        ? String(body.artist_id).trim()
+        : null;
+
+    const effectiveFrom =
+      body.effective_from
+        ? String(body.effective_from).trim()
+        : null;
+
+    const effectiveTo =
+      body.effective_to
+        ? String(body.effective_to).trim()
+        : null;
+
+
+    if (!name) {
+      return json({
+        success: false,
+        error: "Agreement name is required"
+      }, 400);
+    }
+
+
+    if (name.length > 255) {
+      return json({
+        success: false,
+        error:
+          "Agreement name is too long"
+      }, 400);
+    }
+
+
+    if (
+      !isValidRoyaltyScopeType(
+        scopeType
+      )
+    ) {
+      return json({
+        success: false,
+        error:
+          "Invalid scope_type",
+        allowed_scope_types:
+          ROYALTY_SCOPE_TYPES
+      }, 400);
+    }
+
+
+    const target =
+      await validateRoyaltyTarget(
+        env,
+        userId,
+        scopeType,
+        releaseId,
+        trackId,
+        artistId
+      );
+
+
+    if (!target.valid) {
+      return json({
+        success: false,
+        error: target.error
+      }, target.error.includes("not found")
+        ? 404
+        : 403);
+    }
+
+
+    if (
+      effectiveFrom &&
+      !/^\d{4}-\d{2}-\d{2}$/.test(
+        effectiveFrom
+      )
+    ) {
+      return json({
+        success: false,
+        error:
+          "effective_from must use YYYY-MM-DD"
+      }, 400);
+    }
+
+
+    if (
+      effectiveTo &&
+      !/^\d{4}-\d{2}-\d{2}$/.test(
+        effectiveTo
+      )
+    ) {
+      return json({
+        success: false,
+        error:
+          "effective_to must use YYYY-MM-DD"
+      }, 400);
+    }
+
+
+    if (
+      effectiveFrom &&
+      effectiveTo &&
+      effectiveFrom > effectiveTo
+    ) {
+      return json({
+        success: false,
+        error:
+          "effective_from cannot be after effective_to"
+      }, 400);
+    }
+
+
+    const agreementId =
+      generateId(
+        "royalty_agreement"
+      );
+
+
+    await env.DB.prepare(`
+      INSERT INTO royalty_agreements (
+        id,
+        user_id,
+        name,
+        description,
+        scope_type,
+        release_id,
+        track_id,
+        artist_id,
+        status,
+        effective_from,
+        effective_to,
+        version
+      )
+      VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, 1
+      )
+    `)
+      .bind(
+        agreementId,
+        userId,
+        name,
+        description,
+        scopeType,
+        releaseId,
+        trackId,
+        artistId,
+        effectiveFrom,
+        effectiveTo
+      )
+      .run();
+
+
+    const agreement =
+      await getRoyaltyAgreement(
+        env,
+        userId,
+        agreementId
+      );
+
+
+    return json({
+      success: true,
+      message:
+        "Royalty agreement created successfully",
+      agreement
+    }, 201);
+
+  } catch (error) {
+
+    console.error(
+      "Create royalty agreement error:",
+      error
+    );
+
+    return json({
+      success: false,
+      error:
+        error?.message ||
+        "Failed to create royalty agreement"
+    }, 500);
+  }
+}
+
+// ============================================================
+// POST /v1/royalties/agreements/:agreement_id/splits
+// ADD ROYALTY SPLIT
+// ============================================================
+
+if (
+  request.method === "POST" &&
+  url.pathname.match(
+    /^\/v1\/royalties\/agreements\/[^/]+\/splits$/
+  )
+) {
+
+  const authResult =
+    await requireRoyaltyAuth(
+      request,
+      env
+    );
+
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
+  const userId =
+    authResult.userId;
+
+  try {
+
+    const parts =
+      url.pathname.split("/");
+
+    const agreementId =
+      parts[4];
+
+
+    if (!agreementId) {
+      return json({
+        success: false,
+        error:
+          "Agreement ID is required"
+      }, 400);
+    }
+
+
+    const agreement =
+      await getRoyaltyAgreement(
+        env,
+        userId,
+        agreementId
+      );
+
+
+    if (!agreement) {
+      return json({
+        success: false,
+        error:
+          "Royalty agreement not found"
+      }, 404);
+    }
+
+
+    if (
+      agreement.status !== "draft"
+    ) {
+      return json({
+        success: false,
+        error:
+          "Splits can only be added to a draft agreement"
+      }, 409);
+    }
+
+
+    let body;
+
+    try {
+      body = await request.json();
+    } catch {
+      return json({
+        success: false,
+        error:
+          "Invalid JSON body"
+      }, 400);
+    }
+
+
+    const name =
+      String(
+        body.name || ""
+      ).trim();
+
+    const role =
+      String(
+        body.role || ""
+      )
+        .trim()
+        .toLowerCase();
+
+    const contributorId =
+      body.contributor_id
+        ? String(body.contributor_id).trim()
+        : null;
+
+    const artistId =
+      body.artist_id
+        ? String(body.artist_id).trim()
+        : null;
+
+
+    const percentageCheck =
+      validateRoyaltyPercentage(
+        body.split_percentage
+      );
+
+
+    if (!name) {
+      return json({
+        success: false,
+        error:
+          "Split name is required"
+      }, 400);
+    }
+
+
+    if (!isValidRoyaltySplitRole(role)) {
+      return json({
+        success: false,
+        error:
+          "Invalid split role",
+        allowed_roles:
+          ROYALTY_SPLIT_ROLES
+      }, 400);
+    }
+
+
+    if (!percentageCheck.valid) {
+      return json({
+        success: false,
+        error:
+          percentageCheck.error
+      }, 400);
+    }
+
+
+    const percentage =
+      percentageCheck.value;
+
+
+    if (
+      !contributorId &&
+      !artistId
+    ) {
+      return json({
+        success: false,
+        error:
+          "Either contributor_id or artist_id is required"
+      }, 400);
+    }
+
+
+    if (
+      contributorId &&
+      artistId
+    ) {
+      return json({
+        success: false,
+        error:
+          "Use contributor_id or artist_id, not both"
+      }, 400);
+    }
+
+
+    // --------------------------------------------------------
+    // Validate contributor
+    // --------------------------------------------------------
+
+    if (contributorId) {
+
+      const contributor =
+        await env.DB.prepare(`
+          SELECT
+            tc.id,
+            tc.track_id,
+            tc.name,
+            tc.role,
+            tc.artist_id,
+            r.user_id
+          FROM track_contributors tc
+          INNER JOIN tracks t
+            ON t.id = tc.track_id
+          INNER JOIN releases r
+            ON r.id = t.release_id
+          WHERE tc.id = ?
+          LIMIT 1
+        `)
+          .bind(contributorId)
+          .first();
+
+
+      if (!contributor) {
+        return json({
+          success: false,
+          error:
+            "Contributor not found"
+        }, 404);
+      }
+
+
+      if (
+        contributor.user_id !==
+        userId
+      ) {
+        return json({
+          success: false,
+          error:
+            "You do not have permission to use this contributor"
+        }, 403);
+      }
+
+
+      if (
+        agreement.scope_type ===
+        "track" &&
+        contributor.track_id !==
+        agreement.track_id
+      ) {
+        return json({
+          success: false,
+          error:
+            "Contributor does not belong to the agreement track"
+        }, 400);
+      }
+    }
+
+
+    // --------------------------------------------------------
+    // Validate artist
+    // --------------------------------------------------------
+
+    if (artistId) {
+
+      const artist =
+        await env.DB.prepare(`
+          SELECT
+            id,
+            user_id,
+            name
+          FROM artists
+          WHERE id = ?
+          LIMIT 1
+        `)
+          .bind(artistId)
+          .first();
+
+
+      if (!artist) {
+        return json({
+          success: false,
+          error:
+            "Artist not found"
+        }, 404);
+      }
+
+
+      if (
+        artist.user_id !==
+        userId
+      ) {
+        return json({
+          success: false,
+          error:
+            "You do not have permission to use this artist"
+        }, 403);
+      }
+    }
+
+
+    // --------------------------------------------------------
+    // Check existing split
+    // --------------------------------------------------------
+
+    if (contributorId) {
+
+      const existing =
+        await env.DB.prepare(`
+          SELECT id
+          FROM royalty_splits
+          WHERE agreement_id = ?
+            AND contributor_id = ?
+          LIMIT 1
+        `)
+          .bind(
+            agreementId,
+            contributorId
+          )
+          .first();
+
+
+      if (existing) {
+        return json({
+          success: false,
+          error:
+            "This contributor already has a split in this agreement"
+        }, 409);
+      }
+    }
+
+
+    if (artistId) {
+
+      const existing =
+        await env.DB.prepare(`
+          SELECT id
+          FROM royalty_splits
+          WHERE agreement_id = ?
+            AND artist_id = ?
+          LIMIT 1
+        `)
+          .bind(
+            agreementId,
+            artistId
+          )
+          .first();
+
+
+      if (existing) {
+        return json({
+          success: false,
+          error:
+            "This artist already has a split in this agreement"
+        }, 409);
+      }
+    }
+
+
+    // --------------------------------------------------------
+    // Check total
+    // --------------------------------------------------------
+
+    const currentResult =
+      await env.DB.prepare(`
+        SELECT
+          COALESCE(
+            SUM(split_percentage),
+            0
+          ) AS total
+        FROM royalty_splits
+        WHERE agreement_id = ?
+      `)
+        .bind(agreementId)
+        .first();
+
+
+    const currentTotal =
+      Number(
+        currentResult?.total || 0
+      );
+
+
+    const newTotal =
+      Number(
+        (
+          currentTotal +
+          percentage
+        ).toFixed(6)
+      );
+
+
+    if (newTotal > 100) {
+      return json({
+        success: false,
+        error:
+          "Royalty splits cannot exceed 100%",
+        current_total:
+          currentTotal,
+        requested_split:
+          percentage,
+        resulting_total:
+          newTotal
+      }, 400);
+    }
+
+
+    const splitId =
+      generateId(
+        "royalty_split"
+      );
+
+
+    await env.DB.prepare(`
+      INSERT INTO royalty_splits (
+        id,
+        agreement_id,
+        user_id,
+        contributor_id,
+        artist_id,
+        name,
+        role,
+        split_percentage
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+      .bind(
+        splitId,
+        agreementId,
+        userId,
+        contributorId,
+        artistId,
+        name,
+        role,
+        percentage
+      )
+      .run();
+
+
+    const split =
+      await env.DB.prepare(`
+        SELECT *
+        FROM royalty_splits
+        WHERE id = ?
+        LIMIT 1
+      `)
+        .bind(splitId)
+        .first();
+
+
+    return json({
+      success: true,
+      message:
+        "Royalty split added successfully",
+      split,
+      agreement_total:
+        newTotal,
+      remaining:
+        Number(
+          (100 - newTotal).toFixed(6)
+        )
+    }, 201);
+
+  } catch (error) {
+
+    console.error(
+      "Add royalty split error:",
+      error
+    );
+
+    return json({
+      success: false,
+      error:
+        error?.message ||
+        "Failed to add royalty split"
+    }, 500);
+  }
+}
+
+// ============================================================
+// GET /v1/royalties/agreements/:agreement_id
+// GET ROYALTY AGREEMENT
+// ============================================================
+
+if (
+  request.method === "GET" &&
+  url.pathname.match(
+    /^\/v1\/royalties\/agreements\/[^/]+$/
+  )
+) {
+
+  const authResult =
+    await requireRoyaltyAuth(
+      request,
+      env
+    );
+
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
+  const userId =
+    authResult.userId;
+
+  try {
+
+    const agreementId =
+      url.pathname.split("/")[4];
+
+
+    const agreement =
+      await getRoyaltyAgreement(
+        env,
+        userId,
+        agreementId
+      );
+
+
+    if (!agreement) {
+      return json({
+        success: false,
+        error:
+          "Royalty agreement not found"
+      }, 404);
+    }
+
+
+    const splits =
+      await getRoyaltyAgreementSplits(
+        env,
+        userId,
+        agreementId
+      );
+
+
+    const total =
+      calculateRoyaltySplitTotal(
+        splits
+      );
+
+
+    return json({
+      success: true,
+
+      agreement: {
+        ...agreement,
+
+        version:
+          Number(
+            agreement.version || 1
+          ),
+
+        splits,
+
+        split_summary: {
+          total_percentage: total,
+
+          remaining_percentage:
+            Number(
+              (100 - total)
+                .toFixed(6)
+            ),
+
+          complete:
+            total === 100
+        }
+      }
+    });
+
+  } catch (error) {
+
+    console.error(
+      "Get royalty agreement error:",
+      error
+    );
+
+    return json({
+      success: false,
+      error:
+        error?.message ||
+        "Failed to load royalty agreement"
+    }, 500);
+  }
+}
+
+// ============================================================
+// GET /v1/royalties/agreements
+// LIST ROYALTY AGREEMENTS
+// ============================================================
+
+if (
+  request.method === "GET" &&
+  url.pathname ===
+    "/v1/royalties/agreements"
+) {
+
+  const authResult =
+    await requireRoyaltyAuth(
+      request,
+      env
+    );
+
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
+  const userId =
+    authResult.userId;
+
+  try {
+
+    const status =
+      url.searchParams.get(
+        "status"
+      );
+
+    const scopeType =
+      url.searchParams.get(
+        "scope_type"
+      );
+
+    const conditions = [
+      "ra.user_id = ?"
+    ];
+
+    const params = [
+      userId
+    ];
+
+
+    if (status) {
+
+      if (
+        !isValidRoyaltyAgreementStatus(
+          status
+        )
+      ) {
+        return json({
+          success: false,
+          error:
+            "Invalid status",
+          allowed_statuses:
+            ROYALTY_AGREEMENT_STATUSES
+        }, 400);
+      }
+
+      conditions.push(
+        "ra.status = ?"
+      );
+
+      params.push(status);
+    }
+
+
+    if (scopeType) {
+
+      if (
+        !isValidRoyaltyScopeType(
+          scopeType
+        )
+      ) {
+        return json({
+          success: false,
+          error:
+            "Invalid scope_type",
+          allowed_scope_types:
+            ROYALTY_SCOPE_TYPES
+        }, 400);
+      }
+
+      conditions.push(
+        "ra.scope_type = ?"
+      );
+
+      params.push(scopeType);
+    }
+
+
+    const result =
+      await env.DB.prepare(`
+        SELECT
+          ra.*,
+
+          r.title AS release_title,
+          r.release_type,
+
+          t.title AS track_title,
+          t.isrc,
+
+          a.name AS artist_name,
+
+          (
+            SELECT
+              COALESCE(
+                SUM(rs.split_percentage),
+                0
+              )
+            FROM royalty_splits rs
+            WHERE rs.agreement_id = ra.id
+          ) AS split_total
+
+        FROM royalty_agreements ra
+
+        LEFT JOIN releases r
+          ON r.id = ra.release_id
+
+        LEFT JOIN tracks t
+          ON t.id = ra.track_id
+
+        LEFT JOIN artists a
+          ON a.id = ra.artist_id
+
+        WHERE ${conditions.join(" AND ")}
+
+        ORDER BY
+          ra.created_at DESC
+      `)
+        .bind(...params)
+        .all();
+
+
+    const agreements =
+      (result.results || [])
+        .map(agreement => {
+
+          const total =
+            Number(
+              Number(
+                agreement.split_total ||
+                0
+              ).toFixed(6)
+            );
+
+          return {
+            ...agreement,
+
+            version:
+              Number(
+                agreement.version || 1
+              ),
+
+            split_total:
+              total,
+
+            remaining_percentage:
+              Number(
+                (100 - total)
+                  .toFixed(6)
+              ),
+
+            complete:
+              total === 100
+          };
+        });
+
+
+    return json({
+      success: true,
+      agreements
+    });
+
+  } catch (error) {
+
+    console.error(
+      "List royalty agreements error:",
+      error
+    );
+
+    return json({
+      success: false,
+      error:
+        error?.message ||
+        "Failed to load royalty agreements"
+    }, 500);
+  }
+}
+
+// ============================================================
+// POST /v1/royalties/calculate
+// ============================================================
+
+if (
+  request.method === "POST" &&
+  url.pathname === "/v1/royalties/calculate"
+) {
+  try {
+    const auth = await requireRoyaltyAuth(request, env);
+    const userId = auth.userId;
+
+    const body = await request.json();
+
+    const eventId = body.event_id;
+
+    if (!eventId) {
+      return json({
+        success: false,
+        error: "event_id is required"
+      }, 400);
+    }
+
+    // --------------------------------------------------------
+    // Load sales event
+    // --------------------------------------------------------
+
+    const salesEvent = await getSalesEventForRoyalty(
+      env,
+      eventId,
+      userId
+    );
+
+    if (!salesEvent) {
+      return json({
+        success: false,
+        error: "Sales event not found"
+      }, 404);
+    }
+
+    // --------------------------------------------------------
+    // Check whether this sales event was already calculated
+    // --------------------------------------------------------
+
+    const existingCalculation = await env.DB.prepare(`
+      SELECT *
+      FROM royalty_calculations
+      WHERE sales_event_id = ?
+        AND user_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).bind(
+      eventId,
+      userId
+    ).first();
+
+    if (existingCalculation) {
+      const existingLedger = await env.DB.prepare(`
+        SELECT *
+        FROM royalty_ledger
+        WHERE calculation_id = ?
+        ORDER BY created_at ASC
+      `).bind(
+        existingCalculation.id
+      ).all();
+
+      return json({
+        success: true,
+        duplicate: true,
+        message: "Royalty calculation already exists",
+        calculation: existingCalculation,
+        ledger: existingLedger.results || []
+      });
+    }
+
+    // --------------------------------------------------------
+    // Find applicable agreement
+    // --------------------------------------------------------
+
+    const agreement = await getApplicableRoyaltyAgreement(
+      env,
+      userId,
+      salesEvent
+    );
+
+    if (!agreement) {
+      return json({
+        success: false,
+        error: "No active royalty agreement found",
+        sales_event_id: eventId,
+        track_id: salesEvent.track_id,
+        release_id: salesEvent.release_id,
+        artist_id: salesEvent.artist_id
+      }, 422);
+    }
+
+    // --------------------------------------------------------
+    // Load splits
+    // --------------------------------------------------------
+
+    const splits = await getRoyaltySplitsForCalculation(
+      env,
+      agreement.id
+    );
+
+    if (!splits.length) {
+      return json({
+        success: false,
+        error: "Royalty agreement has no splits",
+        agreement_id: agreement.id
+      }, 422);
+    }
+
+    // --------------------------------------------------------
+    // Validate split total
+    // --------------------------------------------------------
+
+    const splitTotal = roundMoney(
+      splits.reduce(
+        (total, split) =>
+          total + Number(split.split_percentage || 0),
+        0
+      )
+    );
+
+    if (splitTotal !== 100) {
+      return json({
+        success: false,
+        error: "Royalty agreement splits must total exactly 100%",
+        agreement_id: agreement.id,
+        total_percentage: splitTotal,
+        remaining_percentage: roundMoney(100 - splitTotal)
+      }, 422);
+    }
+
+    // --------------------------------------------------------
+    // Determine royalty base
+    // --------------------------------------------------------
+
+    const grossRevenue = Number(
+      salesEvent.gross_revenue || 0
+    );
+
+    const netRevenue = Number(
+      salesEvent.net_revenue || 0
+    );
+
+    const royaltyBase = netRevenue;
+
+    if (royaltyBase < 0) {
+      return json({
+        success: false,
+        error: "Royalty base cannot be negative"
+      }, 422);
+    }
+
+    // --------------------------------------------------------
+    // Create calculation
+    // --------------------------------------------------------
+
+    const calculationId = generateRoyaltyId(
+      "royalty_calculation"
+    );
+
+    await env.DB.prepare(`
+      INSERT INTO royalty_calculations (
+        id,
+        user_id,
+        agreement_id,
+        sales_event_id,
+        release_id,
+        track_id,
+        gross_revenue,
+        net_revenue,
+        royalty_base,
+        currency,
+        calculation_date,
+        status,
+        metadata_json
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      calculationId,
+      userId,
+      agreement.id,
+      eventId,
+      salesEvent.release_id || null,
+      salesEvent.track_id || null,
+      grossRevenue,
+      netRevenue,
+      royaltyBase,
+      salesEvent.currency || "USD",
+      salesEvent.event_date,
+      "calculated",
+      JSON.stringify({
+        agreement_version: agreement.version,
+        agreement_name: agreement.name,
+        split_total: splitTotal,
+        calculation_method: "net_revenue"
+      })
+    ).run();
+
+    // --------------------------------------------------------
+    // Create ledger entries
+    // --------------------------------------------------------
+
+    const ledgerEntries = [];
+
+    for (const split of splits) {
+      const percentage = Number(
+        split.split_percentage || 0
+      );
+
+      const royaltyAmount = roundMoney(
+        royaltyBase * (percentage / 100)
+      );
+
+      const recipientType =
+        getRoyaltyRecipientType(split);
+
+      const recipientId =
+        getRoyaltyRecipientId(split);
+
+      const recipientName =
+        getRoyaltyRecipientName(split);
+
+      const ledgerId = generateRoyaltyId(
+        "royalty_ledger"
+      );
+
+      await env.DB.prepare(`
+        INSERT INTO royalty_ledger (
+          id,
+          user_id,
+          calculation_id,
+          agreement_id,
+          sales_event_id,
+          release_id,
+          track_id,
+          recipient_type,
+          recipient_id,
+          recipient_name,
+          recipient_role,
+          split_percentage,
+          royalty_base,
+          royalty_amount,
+          currency,
+          entry_type,
+          status,
+          description,
+          metadata_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        ledgerId,
+        userId,
+        calculationId,
+        agreement.id,
+        eventId,
+        salesEvent.release_id || null,
+        salesEvent.track_id || null,
+        recipientType,
+        recipientId,
+        recipientName,
+        split.role,
+        percentage,
+        royaltyBase,
+        royaltyAmount,
+        salesEvent.currency || "USD",
+        "royalty",
+        "unpaid",
+        `Royalty for ${salesEvent.track_title || salesEvent.release_title || "sales event"}`,
+        JSON.stringify({
+          agreement_version: agreement.version,
+          calculation_method: "net_revenue"
+        })
+      ).run();
+
+      ledgerEntries.push({
+        id: ledgerId,
+        recipient_type: recipientType,
+        recipient_id: recipientId,
+        recipient_name: recipientName,
+        recipient_role: split.role,
+        split_percentage: percentage,
+        royalty_base: royaltyBase,
+        royalty_amount: royaltyAmount,
+        currency: salesEvent.currency || "USD",
+        status: "unpaid"
+      });
+    }
+
+    // --------------------------------------------------------
+    // Return calculation
+    // --------------------------------------------------------
+
+    const totalCalculated = roundMoney(
+      ledgerEntries.reduce(
+        (total, entry) =>
+          total + Number(entry.royalty_amount || 0),
+        0
+      )
+    );
+
+    return json({
+      success: true,
+      message: "Royalty calculated successfully",
+
+      calculation: {
+        id: calculationId,
+        sales_event_id: eventId,
+        agreement_id: agreement.id,
+        agreement_name: agreement.name,
+        agreement_version: agreement.version,
+
+        gross_revenue: grossRevenue,
+        net_revenue: netRevenue,
+        royalty_base: royaltyBase,
+
+        currency: salesEvent.currency || "USD",
+
+        calculation_date: salesEvent.event_date,
+
+        total_calculated: totalCalculated,
+
+        status: "calculated"
+      },
+
+      ledger: ledgerEntries
+    }, 201);
+
+  } catch (error) {
+    console.error(
+      "Royalty calculation error:",
+      error
+    );
+
+    return json({
+      success: false,
+      error: "Failed to calculate royalty",
+      details: error.message
+    }, 500);
   }
 }
 
