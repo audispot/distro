@@ -1,0 +1,2902 @@
+```javascript
+// =============================================================
+// PREFERENCES — ARTIST & LABEL
+// =============================================================
+//
+// IMPORTANT SECURITY REQUIREMENT
+//
+// getAccessToken(env, userId) MUST return the Too Lost OAuth token
+// belonging to THIS authenticated user.
+//
+// If your existing getAccessToken() currently uses one global
+// client-credentials token for every Audiory user, that MUST be
+// changed. Otherwise one user's Too Lost preferences can be
+// returned to another user.
+//
+// JavaScript allows the extra userId argument even if your current
+// helper only accepts env, but for proper account isolation your
+// helper should actually use userId to retrieve that user's
+// OAuth access token.
+//
+// =============================================================
+
+
+// =============================================================
+// COMMON JSON RESPONSE HELPER
+// =============================================================
+
+function preferencesJSON(
+  data,
+  status,
+  corsHeaders
+) {
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+
+// =============================================================
+// COMMON VALUE HELPERS
+// =============================================================
+
+function toNullableString(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return null;
+  }
+
+  const text = String(value).trim();
+
+  return text === ""
+    ? null
+    : text;
+}
+
+
+function toNullableBoolean(value) {
+  if (
+    value === true ||
+    value === "true"
+  ) {
+    return true;
+  }
+
+  if (
+    value === false ||
+    value === "false"
+  ) {
+    return false;
+  }
+
+  return null;
+}
+
+
+function normalizePlatform(value) {
+  const platform =
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
+
+  if (
+    platform === "applemusic" ||
+    platform === "apple_music"
+  ) {
+    return "apple";
+  }
+
+  if (
+    platform === "yt" ||
+    platform === "ytmusic" ||
+    platform === "youtube_music"
+  ) {
+    return "youtube";
+  }
+
+  return platform;
+}
+
+
+// =============================================================
+// TOO LOST API
+// =============================================================
+
+async function fetchTooLostAPI(
+  endpoint,
+  method = "GET",
+  body = null,
+  accessToken,
+  env
+) {
+  const baseUrl = (
+    env.TOO_LOST_BASE_URL ||
+    "https://api-sandbox.toolost.com/v1"
+  ).replace(/\/$/, "");
+
+  const options = {
+    method,
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    }
+  };
+
+  if (body !== null) {
+    options.body =
+      JSON.stringify(body);
+  }
+
+  return fetch(
+    `${baseUrl}${endpoint}`,
+    options
+  );
+}
+
+
+// =============================================================
+// USER AUTHENTICATION
+// =============================================================
+//
+// Every route below requires the authenticated userId.
+//
+// The surrounding Worker must already set:
+//
+//   const userId = ...
+//
+// from the authenticated Audiory/Firebase user.
+//
+// =============================================================
+
+
+// =============================================================
+// TOO LOST ACCESS TOKEN
+// =============================================================
+//
+// IMPORTANT:
+//
+// Use the existing shared OAuth helper.
+//
+// Pass userId so the helper can return the OAuth token for the
+// CURRENT authenticated user.
+//
+// If your helper currently only accepts env, this call still works
+// syntactically because JavaScript ignores extra arguments.
+// However, the helper MUST actually use userId if it currently
+// returns one shared token for every user.
+//
+// =============================================================
+
+async function getUserTooLostAccessToken(
+  env,
+  userId
+) {
+  if (!userId) {
+    throw new Error(
+      "Unauthenticated."
+    );
+  }
+
+  return getAccessToken(
+    env,
+    userId
+  );
+}
+
+
+// =============================================================
+// ADDITIONAL TOO LOST GET HELPER
+// =============================================================
+
+async function proxyTooLostPreferencesGET(
+  request,
+  env,
+  corsHeaders,
+  userId,
+  tooLostPath
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthenticated."
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  let accessToken;
+
+  try {
+    accessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
+      );
+  } catch (authError) {
+    console.error(
+      "Too Lost Preferences authentication failed:",
+      authError
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          "Unable to authenticate with Too Lost."
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  try {
+    const upstream =
+      await fetchTooLostAPI(
+        tooLostPath,
+        "GET",
+        null,
+        accessToken,
+        env
+      );
+
+    const rawText =
+      await upstream.text();
+
+    let responseData = {};
+
+    try {
+      responseData =
+        rawText
+          ? JSON.parse(rawText)
+          : {};
+    } catch {
+      responseData = {
+        raw: rawText
+      };
+    }
+
+    return preferencesJSON(
+      responseData,
+      upstream.status,
+      corsHeaders
+    );
+
+  } catch (error) {
+    console.error(
+      "Too Lost Preferences GET request failed:",
+      error
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Could not connect to Too Lost.",
+        details:
+          error?.message ||
+          String(error)
+      },
+      502,
+      corsHeaders
+    );
+  }
+}
+
+
+// =============================================================
+// ADDITIONAL TOO LOST POST HELPER
+// =============================================================
+
+async function proxyTooLostPreferencesPOST(
+  request,
+  env,
+  corsHeaders,
+  userId,
+  tooLostPath
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthenticated."
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  const body =
+    await request
+      .json()
+      .catch(() => ({}));
+
+  let accessToken;
+
+  try {
+    accessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
+      );
+  } catch (authError) {
+    console.error(
+      "Too Lost Preferences authentication failed:",
+      authError
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          "Unable to authenticate with Too Lost."
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  try {
+    const upstream =
+      await fetchTooLostAPI(
+        tooLostPath,
+        "POST",
+        body,
+        accessToken,
+        env
+      );
+
+    const rawText =
+      await upstream.text();
+
+    let responseData = {};
+
+    try {
+      responseData =
+        rawText
+          ? JSON.parse(rawText)
+          : {};
+    } catch {
+      responseData = {
+        raw: rawText
+      };
+    }
+
+    return preferencesJSON(
+      responseData,
+      upstream.status,
+      corsHeaders
+    );
+
+  } catch (error) {
+    console.error(
+      "Too Lost Preferences POST request failed:",
+      error
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Could not connect to Too Lost.",
+        details:
+          error?.message ||
+          String(error)
+      },
+      502,
+      corsHeaders
+    );
+  }
+}
+
+
+// =============================================================
+// GET /api/preferences/artists
+//
+// Too Lost:
+// GET /preferences/artists
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/artists" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPreferencesGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/artists${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// GET /api/preferences/label/artist/:id
+// =============================================================
+
+const labelArtistMatch =
+  url.pathname.match(
+    /^\/api\/preferences\/label\/artist\/(\d+)$/
+  );
+
+if (
+  labelArtistMatch &&
+  request.method === "GET"
+) {
+  const artistId =
+    labelArtistMatch[1];
+
+  return proxyTooLostPreferencesGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/label/artist/${artistId}`
+  );
+}
+
+
+// =============================================================
+// GET /api/preferences/search-spotify
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/search-spotify" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPreferencesGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/search-spotify${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// GET /api/preferences/search-yt-channel
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/search-yt-channel" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPreferencesGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/search-yt-channel${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// GET /api/preferences/search-apple
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/search-apple" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPreferencesGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/search-apple${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// GET /api/preferences/get-spotify-artist
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/get-spotify-artist" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPreferencesGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/get-spotify-artist${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// GET /api/preferences/get-yt-channel
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/get-yt-channel" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPreferencesGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/get-yt-channel${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// GET /api/preferences/get-apple-artist
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/get-apple-artist" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPreferencesGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/get-apple-artist${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// GET /api/preferences/artist-via-link
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/artist-via-link" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPreferencesGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/artist-via-link${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// POST /api/preferences/artist/get-artist-via-url
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/artist/get-artist-via-url" &&
+  request.method === "POST"
+) {
+  return proxyTooLostPreferencesPOST(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    "/preferences/artist/get-artist-via-url"
+  );
+}
+
+
+// =============================================================
+// ARTIST PLATFORM SEARCH
+// =============================================================
+//
+// POST /api/preferences/search/artist-platform
+//
+// Primary Too Lost endpoint:
+//
+// POST /preferences/search/artist-platform
+//
+// Body:
+//
+// {
+//   platform: "spotify",
+//   term: "Official Bigi",
+//   limit: 5
+// }
+//
+// If the newer endpoint returns 404 / 405 / 500 / 502 / 503,
+// we try the older platform-specific endpoints already present
+// in your Worker.
+//
+// This prevents the Audiory Worker from hiding the actual Too Lost
+// response behind its own generic 500.
+//
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/search/artist-platform" &&
+  request.method === "POST"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthorized"
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  let body;
+
+  try {
+    body =
+      await request.json();
+  } catch {
+    return preferencesJSON(
+      {
+        error:
+          "Invalid JSON request body."
+      },
+      400,
+      corsHeaders
+    );
+  }
+
+  const normalizedPlatform =
+    normalizePlatform(
+      body?.platform
+    );
+
+  const term =
+    String(
+      body?.term ??
+      body?.artist ??
+      body?.name ??
+      ""
+    ).trim();
+
+  let limit =
+    Number(body?.limit);
+
+  if (
+    !Number.isFinite(limit) ||
+    limit < 1
+  ) {
+    limit = 5;
+  }
+
+  limit =
+    Math.min(
+      Math.floor(limit),
+      50
+    );
+
+  const allowedPlatforms = [
+    "spotify",
+    "youtube",
+    "apple",
+    "audiomack"
+  ];
+
+  if (
+    !allowedPlatforms.includes(
+      normalizedPlatform
+    )
+  ) {
+    return preferencesJSON(
+      {
+        error:
+          "Invalid platform.",
+        allowedPlatforms,
+        received:
+          body?.platform || null
+      },
+      400,
+      corsHeaders
+    );
+  }
+
+  if (!term) {
+    return preferencesJSON(
+      {
+        error:
+          "Search term is required."
+      },
+      400,
+      corsHeaders
+    );
+  }
+
+  if (term.length > 255) {
+    return preferencesJSON(
+      {
+        error:
+          "Search term must be 255 characters or less."
+      },
+      400,
+      corsHeaders
+    );
+  }
+
+  let accessToken;
+
+  try {
+    accessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
+      );
+  } catch (authError) {
+    console.error(
+      "Too Lost preference search authentication error:",
+      authError
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          String(authError)
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  const tooLostPayload = {
+    platform:
+      normalizedPlatform,
+
+    term,
+
+    limit
+  };
+
+  console.log(
+    "TOO LOST ARTIST PLATFORM SEARCH REQUEST:",
+    JSON.stringify(
+      tooLostPayload,
+      null,
+      2
+    )
+  );
+
+  // -----------------------------------------------------------
+  // PRIMARY SEARCH
+  // -----------------------------------------------------------
+
+  try {
+    const upstream =
+      await fetchTooLostAPI(
+        "/preferences/search/artist-platform",
+        "POST",
+        tooLostPayload,
+        accessToken,
+        env
+      );
+
+    const upstreamText =
+      await upstream.text();
+
+    let upstreamBody = {};
+
+    try {
+      upstreamBody =
+        upstreamText
+          ? JSON.parse(upstreamText)
+          : {};
+    } catch {
+      upstreamBody = {
+        raw: upstreamText
+      };
+    }
+
+    console.log(
+      "TOO LOST ARTIST PLATFORM SEARCH RESPONSE:",
+      JSON.stringify(
+        {
+          status:
+            upstream.status,
+          response:
+            upstreamBody
+        },
+        null,
+        2
+      )
+    );
+
+    // ---------------------------------------------------------
+    // SUCCESS
+    // ---------------------------------------------------------
+
+    if (upstream.ok) {
+      return preferencesJSON(
+        upstreamBody,
+        200,
+        corsHeaders
+      );
+    }
+
+    // ---------------------------------------------------------
+    // FALLBACK
+    //
+    // Existing older endpoints:
+    //
+    // Spotify:
+    // GET /preferences/search-spotify?artist=...
+    //
+    // YouTube:
+    // GET /preferences/search-yt-channel?channel=...
+    //
+    // Apple:
+    // GET /preferences/search-apple?artist=...
+    // ---------------------------------------------------------
+
+    const shouldFallback =
+      [
+        404,
+        405,
+        500,
+        502,
+        503
+      ].includes(
+        upstream.status
+      );
+
+    if (!shouldFallback) {
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost rejected the platform search.",
+          tooLostStatus:
+            upstream.status,
+          tooLostResponse:
+            upstreamBody
+        },
+        upstream.status,
+        corsHeaders
+      );
+    }
+
+    let fallbackPath =
+      null;
+
+    if (
+      normalizedPlatform ===
+      "spotify"
+    ) {
+      fallbackPath =
+        `/preferences/search-spotify?artist=${encodeURIComponent(
+          term
+        )}&limit=${encodeURIComponent(
+          limit
+        )}`;
+    }
+
+    if (
+      normalizedPlatform ===
+      "youtube"
+    ) {
+      fallbackPath =
+        `/preferences/search-yt-channel?channel=${encodeURIComponent(
+          term
+        )}&limit=${encodeURIComponent(
+          limit
+        )}`;
+    }
+
+    if (
+      normalizedPlatform ===
+      "apple"
+    ) {
+      fallbackPath =
+        `/preferences/search-apple?artist=${encodeURIComponent(
+          term
+        )}&limit=${encodeURIComponent(
+          limit
+        )}`;
+    }
+
+    // Audiomack does not have an old GET fallback in the
+    // supplied Worker, so keep the original upstream response.
+    if (!fallbackPath) {
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost artist-platform search failed.",
+          tooLostStatus:
+            upstream.status,
+          tooLostResponse:
+            upstreamBody
+        },
+        502,
+        corsHeaders
+      );
+    }
+
+    console.warn(
+      "Trying legacy Too Lost artist platform search:",
+      fallbackPath
+    );
+
+    const fallback =
+      await fetchTooLostAPI(
+        fallbackPath,
+        "GET",
+        null,
+        accessToken,
+        env
+      );
+
+    const fallbackText =
+      await fallback.text();
+
+    let fallbackBody = {};
+
+    try {
+      fallbackBody =
+        fallbackText
+          ? JSON.parse(
+              fallbackText
+            )
+          : {};
+    } catch {
+      fallbackBody = {
+        raw: fallbackText
+      };
+    }
+
+    console.log(
+      "TOO LOST LEGACY ARTIST SEARCH RESPONSE:",
+      JSON.stringify(
+        {
+          status:
+            fallback.status,
+          response:
+            fallbackBody
+        },
+        null,
+        2
+      )
+    );
+
+    if (fallback.ok) {
+      return preferencesJSON(
+        fallbackBody,
+        200,
+        corsHeaders
+      );
+    }
+
+    return preferencesJSON(
+      {
+        error:
+          "Artist platform search failed.",
+        primarySearch: {
+          status:
+            upstream.status,
+          response:
+            upstreamBody
+        },
+        fallbackSearch: {
+          status:
+            fallback.status,
+          response:
+            fallbackBody
+        }
+      },
+      502,
+      corsHeaders
+    );
+
+  } catch (error) {
+    console.error(
+      "Preference platform search failed:",
+      error
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Preference platform search failed.",
+        details:
+          error?.message ||
+          String(error)
+      },
+      502,
+      corsHeaders
+    );
+  }
+}
+
+
+// =============================================================
+// GET ARTIST PREFERENCES
+// =============================================================
+//
+// GET /api/preferences/artist
+//
+// IMPORTANT:
+// The existing artist is retrieved first.
+// The returned artist ID is preserved.
+//
+// This ID is later used during submit so editing does NOT create
+// another artist.
+//
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/artist" &&
+  request.method === "GET"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthenticated."
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  const kvKey =
+    `PREFERENCES_ARTIST_${userId}`;
+
+  let artistData =
+    null;
+
+  let syncedWithTooLost =
+    false;
+
+  let tooLostAccessToken =
+    null;
+
+  try {
+    tooLostAccessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
+      );
+  } catch (authError) {
+    console.error(
+      "Too Lost artist preferences authentication failed:",
+      authError
+    );
+  }
+
+  // -----------------------------------------------------------
+  // Too Lost
+  // -----------------------------------------------------------
+
+  if (tooLostAccessToken) {
+    try {
+      const upstream =
+        await fetchTooLostAPI(
+          "/preferences/artist",
+          "GET",
+          null,
+          tooLostAccessToken,
+          env
+        );
+
+      const upstreamText =
+        await upstream.text();
+
+      let upstreamJson = {};
+
+      try {
+        upstreamJson =
+          upstreamText
+            ? JSON.parse(
+                upstreamText
+              )
+            : {};
+      } catch {
+        upstreamJson = {
+          raw: upstreamText
+        };
+      }
+
+      if (upstream.ok) {
+        artistData =
+          upstreamJson?.data?.artist ||
+          upstreamJson?.artist ||
+          upstreamJson?.data ||
+          null;
+
+        if (artistData) {
+          syncedWithTooLost =
+            true;
+
+          if (
+            env.AUDIORY_KV
+          ) {
+            await env.AUDIORY_KV.put(
+              kvKey,
+              JSON.stringify(
+                artistData
+              )
+            );
+          }
+        }
+      } else {
+        console.error(
+          "Too Lost artist preferences GET rejected:",
+          {
+            status:
+              upstream.status,
+            response:
+              upstreamJson
+          }
+        );
+      }
+
+    } catch (error) {
+      console.error(
+        "Too Lost artist preferences GET failed:",
+        error
+      );
+    }
+  }
+
+  // -----------------------------------------------------------
+  // Audiory KV
+  // -----------------------------------------------------------
+
+  if (
+    !artistData &&
+    env.AUDIORY_KV
+  ) {
+    const cached =
+      await env.AUDIORY_KV.get(
+        kvKey
+      );
+
+    if (cached) {
+      try {
+        artistData =
+          JSON.parse(
+            cached
+          );
+      } catch {
+        artistData =
+          null;
+      }
+    }
+  }
+
+  // -----------------------------------------------------------
+  // Empty state
+  // -----------------------------------------------------------
+
+  if (!artistData) {
+    artistData = {
+      id: null,
+
+      artistName: "",
+
+      about: "",
+
+      primaryGenre: "",
+
+      secondaryGenre: "",
+
+      language: "",
+
+      profileImg: "",
+
+      label: "",
+
+      cLine: "",
+
+      pLine: "",
+
+      releaseTime: "",
+
+      timeZone:
+        "Africa/Nairobi",
+
+      collaborators: [],
+
+      defaultRoles: [],
+
+      territories: [],
+
+      platforms: {
+        spotify: "",
+        appleMusic: "",
+        soundcloud: "",
+        vevo: "",
+        website: "",
+        youtube: ""
+      },
+
+      social: {
+        facebook: "",
+        instagram: "",
+        twitter: "",
+        youtube: ""
+      },
+
+      audiomack: {
+        link: "",
+        status: ""
+      },
+
+      deliveries: {
+        beatport: false,
+        delivery_beatport_link: "",
+        delivery_even: false,
+        delivery_facebook: false,
+        delivery_hook: false,
+        delivery_lyricfind: false,
+        delivery_soundcloud: false,
+        delivery_soundexchange: false,
+        delivery_tracklib: false,
+        delivery_youtube: false
+      },
+
+      additional: {
+        allmusic: "",
+        ddex: "",
+        isni: "",
+        musicbrainz: "",
+        wikipedia: ""
+      },
+
+      stores: [],
+
+      metadata: {
+        artists: [],
+        credits: [],
+        writers: []
+      }
+    };
+  }
+
+  return preferencesJSON(
+    {
+      data: {
+        artist:
+          artistData
+      },
+
+      message:
+        "Artist preferences retrieved.",
+
+      syncedWithTooLost
+    },
+    200,
+    corsHeaders
+  );
+}
+
+
+// =============================================================
+// POST ARTIST PREFERENCES
+// =============================================================
+//
+// POST /api/preferences/artist/submit
+//
+// CRITICAL CHANGE:
+//
+// We DO NOT blindly send:
+//
+//   id: null
+//
+// anymore.
+//
+// Before saving, we retrieve the existing artist preference and
+// obtain its Too Lost ID.
+//
+// If the user is editing artist 178145, then the payload becomes:
+//
+//   id: 178145
+//
+// This tells Too Lost to update the existing artist instead of
+// creating another artist.
+//
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/artist/submit" &&
+  request.method === "POST"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthenticated."
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  const body =
+    await request
+      .json()
+      .catch(() => ({}));
+
+  const artistName =
+    String(
+      body.artistName || ""
+    ).trim();
+
+  if (!artistName) {
+    return preferencesJSON(
+      {
+        error:
+          "Artist name is required."
+      },
+      400,
+      corsHeaders
+    );
+  }
+
+  const platforms =
+    body.platforms || {};
+
+  const social =
+    body.social || {};
+
+  const metadata =
+    body.metadata || {};
+
+  // -----------------------------------------------------------
+  // FIND EXISTING ARTIST ID
+  // -----------------------------------------------------------
+
+  const artistKVKey =
+    `PREFERENCES_ARTIST_${userId}`;
+
+  let existingArtist =
+    null;
+
+  let existingArtistId =
+    null;
+
+  // First try KV because this is already scoped to userId.
+  if (env.AUDIORY_KV) {
+    const cachedArtist =
+      await env.AUDIORY_KV.get(
+        artistKVKey
+      );
+
+    if (cachedArtist) {
+      try {
+        existingArtist =
+          JSON.parse(
+            cachedArtist
+          );
+      } catch {
+        existingArtist =
+          null;
+      }
+    }
+  }
+
+  if (
+    existingArtist?.id
+  ) {
+    existingArtistId =
+      Number(
+        existingArtist.id
+      );
+  }
+
+  // -----------------------------------------------------------
+  // If KV does not have the ID, ask Too Lost.
+  // -----------------------------------------------------------
+
+  let tooLostAccessToken;
+
+  try {
+    tooLostAccessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
+      );
+  } catch (authError) {
+    console.error(
+      "Too Lost artist preferences authentication failed:",
+      authError
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          "Unable to authenticate with Too Lost.",
+        syncedWithTooLost:
+          false
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  if (
+    !existingArtistId
+  ) {
+    try {
+      const currentArtistResponse =
+        await fetchTooLostAPI(
+          "/preferences/artist",
+          "GET",
+          null,
+          tooLostAccessToken,
+          env
+        );
+
+      const currentArtistText =
+        await currentArtistResponse.text();
+
+      let currentArtistJson =
+        {};
+
+      try {
+        currentArtistJson =
+          currentArtistText
+            ? JSON.parse(
+                currentArtistText
+              )
+            : {};
+      } catch {
+        currentArtistJson = {
+          raw:
+            currentArtistText
+        };
+      }
+
+      if (
+        currentArtistResponse.ok
+      ) {
+        const currentArtist =
+          currentArtistJson?.data?.artist ||
+          currentArtistJson?.artist ||
+          currentArtistJson?.data ||
+          null;
+
+        if (
+          currentArtist?.id
+        ) {
+          existingArtistId =
+            Number(
+              currentArtist.id
+            );
+
+          existingArtist =
+            currentArtist;
+        }
+      }
+
+    } catch (lookupError) {
+      console.error(
+        "Could not retrieve existing Too Lost artist:",
+        lookupError
+      );
+    }
+  }
+
+  // -----------------------------------------------------------
+  // Normalize incoming fields
+  // -----------------------------------------------------------
+
+  const tooLostPayload = {
+    artistName:
+      toNullableString(
+        artistName
+      ),
+
+    metadata: {
+      artists:
+        Array.isArray(
+          metadata.artists
+        ) &&
+        metadata.artists.length > 0
+          ? metadata.artists
+          : [
+              {
+                name:
+                  toNullableString(
+                    artistName
+                  ) ||
+                  "Unknown Artist",
+
+                role:
+                  "Main Artist"
+              }
+            ],
+
+      credits:
+        Array.isArray(
+          metadata.credits
+        )
+          ? metadata.credits
+          : [],
+
+      writers:
+        Array.isArray(
+          metadata.writers
+        )
+          ? metadata.writers
+          : []
+    },
+
+    about:
+      toNullableString(
+        body.about
+      ),
+
+    additional: {
+      allmusic:
+        toNullableString(
+          body.additional?.allmusic
+        ),
+
+      ddex:
+        toNullableString(
+          body.additional?.ddex
+        ),
+
+      isni:
+        toNullableString(
+          body.additional?.isni
+        ),
+
+      musicbrainz:
+        toNullableString(
+          body.additional?.musicbrainz
+        ),
+
+      wikipedia:
+        toNullableString(
+          body.additional?.wikipedia
+        )
+    },
+
+    audiomack: {
+      link:
+        toNullableString(
+          body.audiomack?.link
+        ),
+
+      status:
+        toNullableBoolean(
+          body.audiomack?.status
+        )
+    },
+
+    c_line:
+      toNullableString(
+        body.c_line ??
+        body.cLine
+      ),
+
+    collaborators:
+      Array.isArray(
+        body.collaborators
+      )
+        ? body.collaborators
+        : [],
+
+    deliveries: {
+      beatport:
+        toNullableBoolean(
+          body.deliveries?.beatport
+        ),
+
+      delivery_beatport_link:
+        toNullableString(
+          body.deliveries
+            ?.delivery_beatport_link
+        ),
+
+      delivery_even:
+        toNullableBoolean(
+          body.deliveries?.delivery_even
+        ),
+
+      delivery_facebook:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_facebook
+        ),
+
+      delivery_hook:
+        toNullableBoolean(
+          body.deliveries?.delivery_hook
+        ),
+
+      delivery_lyricfind:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_lyricfind
+        ),
+
+      delivery_soundcloud:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_soundcloud
+        ),
+
+      delivery_soundexchange:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_soundexchange
+        ),
+
+      delivery_tracklib:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_tracklib
+        ),
+
+      delivery_youtube:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_youtube
+        )
+    },
+
+    // ---------------------------------------------------------
+    // CRITICAL:
+    //
+    // Existing artist => existing ID
+    // New artist      => null
+    // ---------------------------------------------------------
+
+    id:
+      existingArtistId ||
+      null,
+
+    img:
+      toNullableString(
+        body.img ??
+        body.profileImg
+      ),
+
+    label:
+      toNullableString(
+        body.label
+      ),
+
+    language:
+      toNullableString(
+        body.language
+      ),
+
+    p_line:
+      toNullableString(
+        body.p_line ??
+        body.pLine
+      ),
+
+    platforms: {
+      appleMusic:
+        toNullableString(
+          body.platforms
+            ?.appleMusic ??
+          body.platforms
+            ?.apple_music
+        ),
+
+      soundcloud:
+        toNullableString(
+          body.platforms
+            ?.soundcloud
+        ),
+
+      spotify:
+        toNullableString(
+          body.platforms
+            ?.spotify
+        ),
+
+      vevo:
+        toNullableString(
+          body.platforms
+            ?.vevo
+        ),
+
+      website:
+        toNullableString(
+          body.platforms
+            ?.website
+        ),
+
+      youtube:
+        toNullableString(
+          body.platforms
+            ?.youtube
+        )
+    },
+
+    primaryGenre:
+      toNullableString(
+        body.primaryGenre
+      ),
+
+    releaseTime:
+      toNullableString(
+        body.releaseTime
+      ),
+
+    removeImg:
+      body.removeImg === true,
+
+    secondaryGenre:
+      toNullableString(
+        body.secondaryGenre
+      ),
+
+    social: {
+      facebook:
+        toNullableString(
+          body.social?.facebook
+        ),
+
+      instagram:
+        toNullableString(
+          body.social?.instagram
+        ),
+
+      twitter:
+        toNullableString(
+          body.social?.twitter
+        ),
+
+      youtube:
+        toNullableString(
+          body.social?.youtube
+        )
+    },
+
+    stores:
+      Array.isArray(
+        body.stores
+      )
+        ? body.stores
+        : [],
+
+    territories:
+      Array.isArray(
+        body.territories
+      )
+        ? body.territories
+        : [],
+
+    timeZone:
+      toNullableString(
+        body.timeZone ??
+        body.timezone ??
+        body.releaseTimezone
+      ) ||
+      "Africa/Nairobi"
+  };
+
+  console.log(
+    "EXISTING TOO LOST ARTIST ID:",
+    existingArtistId
+  );
+
+  console.log(
+    "FINAL TOO LOST ARTIST PAYLOAD:",
+    JSON.stringify(
+      tooLostPayload,
+      null,
+      2
+    )
+  );
+
+  // -----------------------------------------------------------
+  // Submit
+  // -----------------------------------------------------------
+
+  let tooLostResponse;
+
+  let tooLostJson =
+    {};
+
+  try {
+    tooLostResponse =
+      await fetchTooLostAPI(
+        "/preferences/artist/submit",
+        "POST",
+        tooLostPayload,
+        tooLostAccessToken,
+        env
+      );
+
+    const rawTooLostBody =
+      await tooLostResponse.text();
+
+    try {
+      tooLostJson =
+        rawTooLostBody
+          ? JSON.parse(
+              rawTooLostBody
+            )
+          : {};
+    } catch {
+      tooLostJson = {
+        raw:
+          rawTooLostBody
+      };
+    }
+
+    console.log(
+      "TOO LOST ARTIST SUBMIT:",
+      {
+        status:
+          tooLostResponse.status,
+        response:
+          tooLostJson
+      }
+    );
+
+    if (
+      !tooLostResponse.ok
+    ) {
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost rejected the artist preferences.",
+
+          tooLostStatus:
+            tooLostResponse.status,
+
+          tooLostResponse:
+            tooLostJson,
+
+          artistIdSent:
+            tooLostPayload.id
+        },
+        tooLostResponse.status,
+        corsHeaders
+      );
+    }
+
+  } catch (error) {
+    console.error(
+      "Too Lost artist preferences request failed:",
+      error
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Could not connect to Too Lost.",
+
+        details:
+          error?.message ||
+          String(error),
+
+        syncedWithTooLost:
+          false
+      },
+      502,
+      corsHeaders
+    );
+  }
+
+  // -----------------------------------------------------------
+  // Determine the ID returned by Too Lost.
+  //
+  // This is important for a newly-created artist.
+  // -----------------------------------------------------------
+
+  const returnedArtist =
+    tooLostJson?.data?.artist ||
+    tooLostJson?.artist ||
+    (
+      tooLostJson?.data &&
+      typeof tooLostJson.data ===
+        "object" &&
+      !Array.isArray(
+        tooLostJson.data
+      )
+        ? tooLostJson.data
+        : null
+    );
+
+  const savedArtistId =
+    Number(
+      returnedArtist?.id ||
+      tooLostJson?.data?.id ||
+      existingArtistId ||
+      0
+    ) || null;
+
+  // -----------------------------------------------------------
+  // Save only after Too Lost accepts.
+  // -----------------------------------------------------------
+
+  const savedArtist = {
+    ...tooLostPayload,
+
+    id:
+      savedArtistId,
+
+    cLine:
+      tooLostPayload.c_line,
+
+    pLine:
+      tooLostPayload.p_line,
+
+    profileImg:
+      tooLostPayload.img,
+
+    savedAt:
+      new Date().toISOString()
+  };
+
+  if (
+    env.AUDIORY_KV
+  ) {
+    await env.AUDIORY_KV.put(
+      artistKVKey,
+      JSON.stringify(
+        savedArtist
+      )
+    );
+  }
+
+  return preferencesJSON(
+    {
+      success:
+        true,
+
+      message:
+        "Artist preferences saved and synchronized with Too Lost.",
+
+      data: {
+        artist:
+          savedArtist
+      },
+
+      syncedWithTooLost:
+        true
+    },
+    200,
+    corsHeaders
+  );
+}
+
+
+// =============================================================
+// GET LABEL PREFERENCES
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/label" &&
+  request.method === "GET"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthorized"
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  const labelKey =
+    `PREFERENCES_LABEL_${userId}`;
+
+  let labelData =
+    null;
+
+  let syncedWithTooLost =
+    false;
+
+  // -----------------------------------------------------------
+  // Authenticate using CURRENT USER
+  // -----------------------------------------------------------
+
+  try {
+    const accessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
+      );
+
+    const upstreamRes =
+      await fetchTooLostAPI(
+        "/preferences/label",
+        "GET",
+        null,
+        accessToken,
+        env
+      );
+
+    const upstreamText =
+      await upstreamRes.text();
+
+    let upstreamJson =
+      {};
+
+    try {
+      upstreamJson =
+        JSON.parse(
+          upstreamText || "{}"
+        );
+    } catch {
+      upstreamJson = {
+        raw:
+          upstreamText
+      };
+    }
+
+    console.log(
+      "TOO LOST LABEL GET:",
+      {
+        status:
+          upstreamRes.status,
+        response:
+          upstreamJson
+      }
+    );
+
+    if (
+      upstreamRes.ok
+    ) {
+      labelData =
+        upstreamJson?.data ||
+        null;
+
+      syncedWithTooLost =
+        true;
+
+      if (
+        labelData &&
+        env.AUDIORY_KV
+      ) {
+        await env.AUDIORY_KV.put(
+          labelKey,
+          JSON.stringify(
+            labelData
+          )
+        );
+      }
+    }
+
+  } catch (err) {
+    console.error(
+      "Too Lost label preferences fetch failed:",
+      err
+    );
+  }
+
+  // -----------------------------------------------------------
+  // User-specific KV fallback
+  // -----------------------------------------------------------
+
+  if (
+    !labelData &&
+    env.AUDIORY_KV
+  ) {
+    const rawData =
+      await env.AUDIORY_KV.get(
+        labelKey
+      );
+
+    if (rawData) {
+      try {
+        labelData =
+          JSON.parse(
+            rawData
+          );
+      } catch {
+        labelData =
+          null;
+      }
+    }
+  }
+
+  // -----------------------------------------------------------
+  // Empty state
+  // -----------------------------------------------------------
+
+  if (!labelData) {
+    labelData = {
+      label: {
+        id: null,
+
+        name: "",
+
+        about: "",
+
+        profileImg: null,
+
+        social: {
+          facebook: "",
+          instagram: "",
+          twitter: "",
+          youtube: ""
+        },
+
+        platforms: {
+          website: ""
+        }
+      },
+
+      artists: []
+    };
+  }
+
+  return preferencesJSON(
+    {
+      data:
+        labelData,
+
+      message:
+        "Label preferences retrieved.",
+
+      syncedWithTooLost
+    },
+    200,
+    corsHeaders
+  );
+}
+
+
+// =============================================================
+// POST LABEL PREFERENCES
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/label/submit" &&
+  request.method === "POST"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthorized"
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  try {
+    const requestText =
+      await request.text();
+
+    let body =
+      {};
+
+    try {
+      body =
+        JSON.parse(
+          requestText ||
+          "{}"
+        );
+    } catch (jsonError) {
+      return preferencesJSON(
+        {
+          error:
+            "Invalid JSON request body.",
+          details:
+            jsonError?.message ||
+            String(jsonError)
+        },
+        400,
+        corsHeaders
+      );
+    }
+
+    const name =
+      toNullableString(
+        body.name
+      );
+
+    if (!name) {
+      return preferencesJSON(
+        {
+          error:
+            "Label name is required."
+        },
+        400,
+        corsHeaders
+      );
+    }
+
+    // ---------------------------------------------------------
+    // FIND EXISTING LABEL ID
+    // ---------------------------------------------------------
+
+    const labelKVKey =
+      `PREFERENCES_LABEL_${userId}`;
+
+    let existingLabelId =
+      null;
+
+    // KV first.
+    if (
+      env.AUDIORY_KV
+    ) {
+      const cached =
+        await env.AUDIORY_KV.get(
+          labelKVKey
+        );
+
+      if (cached) {
+        try {
+          const parsed =
+            JSON.parse(
+              cached
+            );
+
+          existingLabelId =
+            Number(
+              parsed?.label?.id ||
+              parsed?.id ||
+              0
+            ) || null;
+
+        } catch {
+          existingLabelId =
+            null;
+        }
+      }
+    }
+
+    // ---------------------------------------------------------
+    // GET current Too Lost label if KV does not contain ID.
+    // ---------------------------------------------------------
+
+    let accessToken;
+
+    try {
+      accessToken =
+        await getUserTooLostAccessToken(
+          env,
+          userId
+        );
+    } catch (authError) {
+      console.error(
+        "TOO LOST LABEL AUTHENTICATION ERROR:",
+        authError
+      );
+
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost Authentication Failed",
+          details:
+            authError?.message ||
+            String(authError)
+        },
+        401,
+        corsHeaders
+      );
+    }
+
+    if (
+      !existingLabelId
+    ) {
+      try {
+        const currentLabelRes =
+          await fetchTooLostAPI(
+            "/preferences/label",
+            "GET",
+            null,
+            accessToken,
+            env
+          );
+
+        const currentLabelText =
+          await currentLabelRes.text();
+
+        let currentLabelJson =
+          {};
+
+        try {
+          currentLabelJson =
+            currentLabelText
+              ? JSON.parse(
+                  currentLabelText
+                )
+              : {};
+        } catch {
+          currentLabelJson = {
+            raw:
+              currentLabelText
+          };
+        }
+
+        if (
+          currentLabelRes.ok
+        ) {
+          const currentLabel =
+            currentLabelJson?.data?.label ||
+            currentLabelJson?.label ||
+            null;
+
+          existingLabelId =
+            Number(
+              currentLabel?.id ||
+              0
+            ) || null;
+        }
+
+      } catch (lookupError) {
+        console.error(
+          "Could not retrieve existing Too Lost label:",
+          lookupError
+        );
+      }
+    }
+
+    // ---------------------------------------------------------
+    // CANONICAL LABEL PAYLOAD
+    // ---------------------------------------------------------
+
+    const tooLostPayload = {
+      name,
+
+      about:
+        toNullableString(
+          body.about
+        )?.slice(
+          0,
+          500
+        ) || null,
+
+      img:
+        toNullableString(
+          body.img ??
+          body.profileImg
+        ),
+
+      platforms: {
+        website:
+          toNullableString(
+            body.platforms
+              ?.website
+          )
+      },
+
+      removeImg:
+        toNullableBoolean(
+          body.removeImg
+        ) === true,
+
+      social: {
+        facebook:
+          toNullableString(
+            body.social
+              ?.facebook
+          ),
+
+        instagram:
+          toNullableString(
+            body.social
+              ?.instagram
+          ),
+
+        twitter:
+          toNullableString(
+            body.social
+              ?.twitter
+          ),
+
+        youtube:
+          toNullableString(
+            body.social
+              ?.youtube
+          )
+      }
+    };
+
+    // ---------------------------------------------------------
+    // IMPORTANT:
+    //
+    // If Too Lost's label endpoint supports an ID for updating,
+    // preserve it rather than creating another label.
+    //
+    // Do NOT send id:null.
+    //
+    // Only add it when an existing ID is known.
+    // ---------------------------------------------------------
+
+    if (
+      existingLabelId
+    ) {
+      tooLostPayload.id =
+        existingLabelId;
+    }
+
+    console.log(
+      "AUDIORY -> TOO LOST LABEL PAYLOAD:",
+      JSON.stringify(
+        tooLostPayload,
+        null,
+        2
+      )
+    );
+
+    // ---------------------------------------------------------
+    // SEND TO TOO LOST
+    // ---------------------------------------------------------
+
+    let upstreamRes;
+
+    try {
+      upstreamRes =
+        await fetchTooLostAPI(
+          "/preferences/label/submit",
+          "POST",
+          tooLostPayload,
+          accessToken,
+          env
+        );
+
+    } catch (networkError) {
+      console.error(
+        "TOO LOST LABEL NETWORK ERROR:",
+        networkError
+      );
+
+      return preferencesJSON(
+        {
+          error:
+            "Unable to connect to Too Lost.",
+          details:
+            networkError?.message ||
+            String(networkError)
+        },
+        502,
+        corsHeaders
+      );
+    }
+
+    const upstreamText =
+      await upstreamRes.text();
+
+    let upstreamData =
+      {};
+
+    try {
+      upstreamData =
+        JSON.parse(
+          upstreamText ||
+          "{}"
+        );
+    } catch {
+      upstreamData = {
+        raw:
+          upstreamText
+      };
+    }
+
+    console.log(
+      "TOO LOST LABEL RESPONSE:",
+      JSON.stringify(
+        {
+          status:
+            upstreamRes.status,
+          ok:
+            upstreamRes.ok,
+          response:
+            upstreamData
+        },
+        null,
+        2
+      )
+    );
+
+    if (
+      !upstreamRes.ok
+    ) {
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost rejected the label preferences.",
+
+          tooLostStatus:
+            upstreamRes.status,
+
+          tooLostResponse:
+            upstreamData,
+
+          labelIdSent:
+            existingLabelId
+        },
+        upstreamRes.status,
+        corsHeaders
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Determine saved label ID.
+    // ---------------------------------------------------------
+
+    const returnedLabel =
+      upstreamData?.data?.label ||
+      upstreamData?.label ||
+      null;
+
+    const savedLabelId =
+      Number(
+        returnedLabel?.id ||
+        upstreamData?.data?.id ||
+        existingLabelId ||
+        0
+      ) || null;
+
+    // ---------------------------------------------------------
+    // Preserve existing artists.
+    // ---------------------------------------------------------
+
+    let existingArtists =
+      [];
+
+    if (
+      env.AUDIORY_KV
+    ) {
+      const cached =
+        await env.AUDIORY_KV.get(
+          labelKVKey
+        );
+
+      if (cached) {
+        try {
+          const parsed =
+            JSON.parse(
+              cached
+            );
+
+          if (
+            Array.isArray(
+              parsed?.artists
+            )
+          ) {
+            existingArtists =
+              parsed.artists;
+          }
+
+        } catch {
+          existingArtists =
+            [];
+        }
+      }
+    }
+
+    const returnedArtists =
+      Array.isArray(
+        upstreamData?.data
+          ?.artists
+      )
+        ? upstreamData.data.artists
+        : existingArtists;
+
+    const savedData = {
+      label: {
+        id:
+          savedLabelId,
+
+        name,
+
+        about:
+          tooLostPayload.about,
+
+        profileImg:
+          tooLostPayload.img,
+
+        platforms:
+          tooLostPayload.platforms,
+
+        social:
+          tooLostPayload.social
+      },
+
+      artists:
+        returnedArtists
+    };
+
+    // ---------------------------------------------------------
+    // USER-SPECIFIC KV ONLY
+    // ---------------------------------------------------------
+
+    if (
+      env.AUDIORY_KV
+    ) {
+      await env.AUDIORY_KV.put(
+        labelKVKey,
+        JSON.stringify(
+          savedData
+        )
+      );
+    }
+
+    return preferencesJSON(
+      {
+        message:
+          upstreamData?.message ||
+          "Label preferences updated.",
+
+        data:
+          savedData,
+
+        syncedWithTooLost:
+          true
+      },
+      200,
+      corsHeaders
+    );
+
+  } catch (error) {
+    console.error(
+      "AUDIORY LABEL SAVE ERROR:",
+      error
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Audiory could not save label preferences.",
+        details:
+          error?.message ||
+          String(error)
+      },
+      500,
+      corsHeaders
+    );
+  }
+}
+
+
+// =============================================================
+// POST /api/preferences/label/artist/remove
+// =============================================================
+//
+// Removes an artist from label management.
+//
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/label/artist/remove" &&
+  request.method === "POST"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthorized"
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  let body;
+
+  try {
+    body =
+      await request.json();
+  } catch {
+    return preferencesJSON(
+      {
+        error:
+          "Invalid JSON request body."
+      },
+      400,
+      corsHeaders
+    );
+  }
+
+  const artistId =
+    Number(
+      body?.artistId
+    );
+
+  if (
+    !Number.isInteger(
+      artistId
+    ) ||
+    artistId <= 0
+  ) {
+    return preferencesJSON(
+      {
+        error:
+          "A valid artistId is required."
+      },
+      400,
+      corsHeaders
+    );
+  }
+
+  try {
+    const accessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
+      );
+
+    const upstream =
+      await fetchTooLostAPI(
+        "/preferences/label/artist/remove",
+        "POST",
+        {
+          artistId
+        },
+        accessToken,
+        env
+      );
+
+    const upstreamText =
+      await upstream.text();
+
+    let upstreamBody =
+      {};
+
+    try {
+      upstreamBody =
+        upstreamText
+          ? JSON.parse(
+              upstreamText
+            )
+          : {};
+    } catch {
+      upstreamBody = {
+        raw:
+          upstreamText
+      };
+    }
+
+    console.log(
+      "TOO LOST LABEL ARTIST REMOVE:",
+      {
+        artistId,
+        status:
+          upstream.status,
+        response:
+          upstreamBody
+      }
+    );
+
+    if (
+      !upstream.ok
+    ) {
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost rejected the artist removal.",
+
+          tooLostStatus:
+            upstream.status,
+
+          tooLostResponse:
+            upstreamBody
+        },
+        upstream.status,
+        corsHeaders
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Update USER-SPECIFIC KV.
+    // ---------------------------------------------------------
+
+    if (
+      env.AUDIORY_KV
+    ) {
+      const labelKey =
+        `PREFERENCES_LABEL_${userId}`;
+
+      const cached =
+        await env.AUDIORY_KV.get(
+          labelKey
+        );
+
+      if (cached) {
+        try {
+          const labelData =
+            JSON.parse(
+              cached
+            );
+
+          if (
+            Array.isArray(
+              labelData?.artists
+            )
+          ) {
+            labelData.artists =
+              labelData.artists.filter(
+                (artist) =>
+                  Number(
+                    artist?.id
+                  ) !== artistId
+              );
+
+            await env.AUDIORY_KV.put(
+              labelKey,
+              JSON.stringify(
+                labelData
+              )
+            );
+          }
+
+        } catch (kvError) {
+          console.error(
+            "Could not update label KV after artist removal:",
+            kvError
+          );
+        }
+      }
+    }
+
+    return preferencesJSON(
+      {
+        success:
+          true,
+
+        message:
+          upstreamBody?.message ||
+          "Artist removed from label.",
+
+        data:
+          upstreamBody?.data ||
+          null
+      },
+      200,
+      corsHeaders
+    );
+
+  } catch (error) {
+    console.error(
+      "Remove label artist error:",
+      error
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Failed to remove artist.",
+        details:
+          error?.message ||
+          String(error)
+      },
+      502,
+      corsHeaders
+    );
+  }
+}
+```
