@@ -1,18570 +1,10480 @@
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization"
-};
+// Base32 / TOTP helpers used by the 2FA endpoints.
+const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-// -------------------------
-// Utility functions
-// -------------------------
-
-function json(data, status = 200) {
-  return Response.json(data, {
-    status,
-    headers: corsHeaders
-  });
-}
-
-function base64url(input) {
-  let bytes;
-
-  if (input instanceof ArrayBuffer) {
-    bytes = new Uint8Array(input);
-  } else if (ArrayBuffer.isView(input)) {
-    bytes = new Uint8Array(
-      input.buffer,
-      input.byteOffset,
-      input.byteLength
-    );
-  } else {
-    bytes = new TextEncoder().encode(String(input));
-  }
-
-  let binary = "";
-
+function base32Encode(bytes) {
+  let bits = 0;
+  let value = 0;
+  let output = "";
   for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-function generateId(prefix) {
-  return `${prefix}_${crypto.randomUUID()}`;
-}
-
-// -------------------------
-// Password hashing
-// -------------------------
-
-async function hashPassword(password) {
-  const encoder = new TextEncoder();
-
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: 100000,
-      hash: "SHA-256"
-    },
-    keyMaterial,
-    256
-  );
-
-  return `${base64url(salt)}.${base64url(derivedBits)}`;
-}
-
-// -------------------------
-// Password verification
-// -------------------------
-
-async function verifyPassword(password, storedHash) {
-  const [saltString, hashString] = storedHash.split(".");
-
-  if (!saltString || !hashString) {
-    return false;
-  }
-
-  const encoder = new TextEncoder();
-
-  function decodeBase64Url(value) {
-    value = value
-      .replace(/-/g, "+")
-      .replace(/_/g, "/");
-
-    while (value.length % 4) {
-      value += "=";
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
     }
-
-    const binary = atob(value);
-
-    const bytes = new Uint8Array(binary.length);
-
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-
-    return bytes;
   }
-
-  const salt = decodeBase64Url(saltString);
-
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: 100000,
-      hash: "SHA-256"
-    },
-    keyMaterial,
-    256
-  );
-
-  return base64url(derivedBits) === hashString;
+  if (bits > 0) output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+  return output;
 }
 
-// -------------------------
-// JWT creation
-// -------------------------
+function base32Decode(input) {
+  const clean = String(input || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
+  let bits = 0;
+  let value = 0;
+  const output = [];
+  for (const char of clean) {
+    const index = BASE32_ALPHABET.indexOf(char);
+    if (index < 0) continue;
+    value = (value << 5) | index;
+    bits += 5;
+    if (bits >= 8) {
+      output.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return new Uint8Array(output);
+}
 
-async function createToken(user, secret) {
-  const encoder = new TextEncoder();
+function normalizeTotpCode(value) {
+  const code = String(value || "").replace(/\s/g, "");
+  return /^\d{6}$/.test(code) ? code : null;
+}
 
-  const header = {
-    alg: "HS256",
-    typ: "JWT"
-  };
+async function generateTotpCode(secret, counter) {
+  const keyBytes = base32Decode(secret);
+  const counterBytes = new ArrayBuffer(8);
+  const view = new DataView(counterBytes);
+  view.setUint32(0, Math.floor(counter / 0x100000000));
+  view.setUint32(4, counter >>> 0);
 
-  const payload = {
-    sub: user.id,
-    email: user.email,
-    role: user.role,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24
-  };
-
-  const encodedHeader = base64url(
-    JSON.stringify(header)
-  );
-
-  const encodedPayload = base64url(
-    JSON.stringify(payload)
-  );
-
-  const unsignedToken =
-    `${encodedHeader}.${encodedPayload}`;
-
-  const key = await crypto.subtle.importKey(
+  const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(secret),
-    {
-      name: "HMAC",
-      hash: "SHA-256"
-    },
+    keyBytes,
+    { name: "HMAC", hash: "SHA-1" },
     false,
     ["sign"]
   );
-
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    encoder.encode(unsignedToken)
-  );
-
-  return `${unsignedToken}.${base64url(signature)}`;
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, counterBytes));
+  const offset = mac[mac.length - 1] & 0x0f;
+  const binary = ((mac[offset] & 0x7f) << 24) |
+    ((mac[offset + 1] & 0xff) << 16) |
+    ((mac[offset + 2] & 0xff) << 8) |
+    (mac[offset + 3] & 0xff);
+  return String(binary % 1000000).padStart(6, "0");
 }
 
-// -------------------------
-// JWT verification
-// -------------------------
+async function verifyTotpCode(secret, suppliedCode, window = 1) {
+  if (!secret || !/^\d{6}$/.test(String(suppliedCode || ""))) return false;
+  const currentCounter = Math.floor(Date.now() / 1000 / 30);
+  for (let offset = -window; offset <= window; offset++) {
+    const expected = await generateTotpCode(secret, currentCounter + offset);
+    if (expected === String(suppliedCode)) return true;
+  }
+  return false;
+}
 
-async function verifyToken(token, secret) {
+function getClientIp(request) {
+  return request.headers.get("cf-connecting-ip") ||
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    "unknown";
+}
+
+function getClientDevice(userAgent) {
+  const ua = String(userAgent || "");
+  if (/iPhone|iPad|Android|Mobile/i.test(ua)) return "Mobile Browser";
+  if (/Windows/i.test(ua)) return "Chrome/Windows";
+  if (/Macintosh|Mac OS/i.test(ua)) return "Browser/macOS";
+  if (/Linux/i.test(ua)) return "Browser/Linux";
+  return "Web Browser";
+}
+
+function getClientLocation(request) {
+  const city = request.cf?.city;
+  const country = request.cf?.country;
+  if (city && country) return `${city}, ${country}`;
+  if (country) return country;
+  return "Unknown";
+}
+
+async function recordLoginSession(env, userId, request) {
+  if (!env.AUDIORY_KV || !userId) return null;
+  const key = `SESSIONS_USER_${userId}`;
+  const raw = await env.AUDIORY_KV.get(key);
+  const sessions = raw ? JSON.parse(raw) : [];
+  const now = new Date().toISOString();
+  const session = {
+    id: `sess_${crypto.randomUUID()}`,
+    loginAt: now,
+    lastActiveAt: now,
+    logoutAt: null,
+    lastLoggedInAt: now,
+    device: getClientDevice(request.headers.get("user-agent")),
+    userAgent: request.headers.get("user-agent") || "Unknown",
+    ip: getClientIp(request),
+    location: getClientLocation(request),
+    isCurrent: true,
+    revoked: false
+  };
+  for (const item of sessions) item.isCurrent = false;
+  sessions.unshift(session);
+  await env.AUDIORY_KV.put(key, JSON.stringify(sessions.slice(0, 25)));
+  return session;
+}
+
+// Module-level in-memory cache across Worker isolate invocations
+let cachedAccessToken = null;
+let tokenExpiresAt = 0;
+let activeRefreshToken = null;
+
+// Helper: Simple JWT decoder to extract 'uid' or 'user_id' from Firebase / Auth Bearer token
+function parseUserIdFromToken(request) {
+  const authHeader = request.headers.get("Authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return null;
+  const token = authHeader.split("Bearer ")[1].trim();
   try {
-    const parts = token.split(".");
-
-    if (parts.length !== 3) {
-      return null;
+    const payloadBase64 = token.split(".")[1];
+    if (!payloadBase64) return null;
+    
+    // Normalize base64 URL encoding and padding
+    let base64 = payloadBase64.replace(/-/g, "+").replace(/_/g, "/");
+    while (base64.length % 4) {
+      base64 += "=";
     }
 
-    const [
-      encodedHeader,
-      encodedPayload,
-      encodedSignature
-    ] = parts;
+    const decodedJson = atob(base64);
+    const payload = JSON.parse(decodedJson);
+    return payload.user_id || payload.uid || payload.sub || null;
+  } catch (e) {
+    return null;
+  }
+}
 
-    const unsignedToken =
-      `${encodedHeader}.${encodedPayload}`;
+// ============================================================================
+// HELPER: HTML LANDING PAGE GENERATOR
+// ============================================================================
+function renderArtistLandingPage(data) {
+  const title = data.title || 'Listen Now';
+  const cover = data.coverUrl || 'https://placehold.co/600x600/1e293b/00f2fe?text=Music';
+  const platforms = data.platforms || {};
 
-    const encoder = new TextEncoder();
+  const dspConfig = [
+    { key: 'spotify', label: 'Spotify', icon: 'fa-brands fa-spotify', color: '#1DB954' },
+    { key: 'apple', label: 'Apple Music', icon: 'fa-brands fa-apple', color: '#FA243C' },
+    { key: 'youtube', label: 'YouTube Music', icon: 'fa-brands fa-youtube', color: '#FF0000' },
+    { key: 'deezer', label: 'Deezer', icon: 'fa-brands fa-deezer', color: '#A238FF' },
+    { key: 'tidal', label: 'Tidal', icon: 'fa-solid fa-compact-disc', color: '#00FFFF' },
+    { key: 'amazon', label: 'Amazon Music', icon: 'fa-brands fa-amazon', color: '#FF9900' }
+  ];
 
-    function decodeBase64Url(value) {
-      value = value
-        .replace(/-/g, "+")
-        .replace(/_/g, "/");
+  const buttonsHtml = dspConfig
+    .filter(dsp => platforms[dsp.key] && platforms[dsp.key].trim() !== '')
+    .map(dsp => `
+      <a href="${platforms[dsp.key]}" target="_blank" rel="noopener noreferrer" 
+         class="flex items-center justify-between p-3.5 rounded-xl bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 transition group">
+        <div class="flex items-center gap-3">
+          <i class="${dsp.icon} text-xl" style="color: ${dsp.color}"></i>
+          <span class="text-sm font-semibold text-white">${dsp.label}</span>
+        </div>
+        <span class="px-3 py-1 text-xs font-bold bg-[#00f2fe] text-black rounded-lg group-hover:scale-105 transition">Play</span>
+      </a>
+    `).join('');
 
-      while (value.length % 4) {
-        value += "=";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} | Audiory</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { background-color: #0b0f17; font-family: system-ui, -apple-system, sans-serif; }
+  </style>
+</head>
+<body class="min-h-screen text-white flex flex-col items-center justify-center p-4 relative overflow-x-hidden">
+  <!-- Blurred Background Glow -->
+  <div class="absolute inset-0 bg-cover bg-center opacity-20 blur-3xl pointer-events-none" style="background-image: url('${cover}');"></div>
+
+  <main class="w-full max-w-sm mx-auto relative z-10 flex flex-col items-center space-y-6 my-8">
+    <!-- Album Cover -->
+    <div class="w-64 h-64 sm:w-72 sm:h-72 rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-black/40">
+      <img src="${cover}" alt="${title}" class="w-full h-full object-cover">
+    </div>
+
+    <!-- Title Header -->
+    <div class="text-center space-y-1">
+      <h1 class="text-xl font-bold tracking-tight text-white">${title}</h1>
+      <p class="text-xs text-gray-400">Select your preferred streaming platform</p>
+    </div>
+
+    <!-- Platform Links -->
+    <div class="w-full space-y-2.5">
+      ${buttonsHtml || '<p class="text-center text-xs text-gray-500">No active store links available.</p>'}
+    </div>
+
+    <!-- Branding -->
+    <footer class="pt-4 text-center">
+      <p class="text-[10px] text-gray-500 uppercase tracking-widest">Powered by <span class="text-[#00f2fe] font-semibold">Audiory</span></p>
+    </footer>
+  </main>
+</body>
+</html>`;
+}
+
+async function getAccessToken(env, forceRefresh = false) {
+  if (!env) {
+    throw new Error("Cloudflare env object was not passed into getAccessToken(env).");
+  }
+
+  // 1. Check Cloudflare KV for an active access token
+  if (!forceRefresh && env.AUDIORY_KV) {
+    const kvAccessToken = await env.AUDIORY_KV.get("TOO_LOST_ACCESS_TOKEN");
+    if (kvAccessToken) return kvAccessToken;
+  }
+
+  const tokenUrl = env.TOO_LOST_TOKEN_URL || "https://sandbox.toolost.com/oauth/token";
+  const clientId = env.TOO_LOST_CLIENT_ID || "a2786dc1-c223-4063-8c65-f50cbc0f8210";
+  const clientSecret = env.TOO_LOST_CLIENT_SECRET || "feNwLnJYreL3KhFbusQ0qRM1FqI4YEfMT7xgf4Jb";
+
+  // 2. Read refresh token from KV first, then env
+  let refreshToken = null;
+  if (env.AUDIORY_KV) {
+    refreshToken = await env.AUDIORY_KV.get("TOO_LOST_REFRESH_TOKEN");
+  }
+  if (!refreshToken) {
+    refreshToken = env.TOO_LOST_REFRESH_TOKEN;
+  }
+
+  let tokenData = null;
+
+  // 3. ATTEMPT 1: Refresh Token Flow
+  if (refreshToken) {
+    try {
+      const tokenRes = await fetch(tokenUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Accept": "application/json"
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken
+        })
+      });
+
+      const tokenText = await tokenRes.text();
+      try { tokenData = JSON.parse(tokenText); } catch { tokenData = { raw: tokenText }; }
+
+      if (!tokenRes.ok || !tokenData.access_token) {
+        if (env.AUDIORY_KV) await env.AUDIORY_KV.delete("TOO_LOST_REFRESH_TOKEN");
+        tokenData = null;
       }
-
-      const binary = atob(value);
-
-      const bytes = new Uint8Array(binary.length);
-
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-
-      return bytes;
+    } catch (e) {
+      tokenData = null;
     }
+  }
 
-    const signature =
-      decodeBase64Url(encodedSignature);
-
-    const key = await crypto.subtle.importKey(
-      "raw",
-      encoder.encode(secret),
-      {
-        name: "HMAC",
-        hash: "SHA-256"
+  // 4. ATTEMPT 2: Client Credentials Fallback
+  if (!tokenData || !tokenData.access_token) {
+    const fallbackRes = await fetch(tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json"
       },
-      false,
-      ["verify"]
-    );
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: clientId,
+        client_secret: clientSecret
+      })
+    });
 
-    const valid = await crypto.subtle.verify(
-      "HMAC",
-      key,
-      signature,
-      encoder.encode(unsignedToken)
-    );
+    const fallbackText = await fallbackRes.text();
+    try { tokenData = JSON.parse(fallbackText); } catch { tokenData = { raw: fallbackText }; }
 
-    if (!valid) {
-      return null;
+    if (!fallbackRes.ok || !tokenData.access_token) {
+      throw new Error(`Too Lost Auth Failed Completely: ${JSON.stringify(tokenData)}`);
+    }
+  }
+
+  // 5. Store active tokens in KV
+  if (env.AUDIORY_KV && tokenData.access_token) {
+    const ttl = Math.max((tokenData.expires_in || 3600) - 60, 60);
+    await env.AUDIORY_KV.put("TOO_LOST_ACCESS_TOKEN", tokenData.access_token, { expirationTtl: ttl });
+
+    if (tokenData.refresh_token) {
+      await env.AUDIORY_KV.put("TOO_LOST_REFRESH_TOKEN", tokenData.refresh_token);
+    }
+  }
+
+  return tokenData.access_token;
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const method = request.method;
+    const path = url.pathname;
+
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Custom-Auth",
+    };
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
     }
 
-    const payloadBytes =
-      decodeBase64Url(encodedPayload);
+    try {
+      const userId = parseUserIdFromToken(request);
 
-    const payload =
-      JSON.parse(
-        new TextDecoder().decode(payloadBytes)
+      // ------------------------------------------------------------------------
+      // 1. PUBLIC LANDING PAGE ROUTER: GET /s/:slug
+      // Renders the artist's smart link landing page directly in browser
+      // ------------------------------------------------------------------------
+      if (method === 'GET' && path.startsWith('/s/')) {
+        const slug = path.replace('/s/', '').trim();
+        if (!slug) {
+          return new Response('Invalid Link', { status: 400 });
+        }
+
+        // Fetch stored smart link JSON from AUDIORY_KV
+        const rawData = await env.AUDIORY_KV.get(`smartlink:${slug}`);
+        if (!rawData) {
+          return new Response('Smart Link Not Found', { status: 404 });
+        }
+
+        const smartLink = JSON.parse(rawData);
+
+        // Increment click count asynchronously in KV
+        if (ctx && typeof ctx.waitUntil === 'function') {
+          ctx.waitUntil(
+            (async () => {
+              smartLink.clicks = (smartLink.clicks || 0) + 1;
+              await env.AUDIORY_KV.put(`smartlink:${slug}`, JSON.stringify(smartLink));
+              if (smartLink.id) {
+                await env.AUDIORY_KV.put(`smartlink_meta:${smartLink.id}`, JSON.stringify(smartLink));
+              }
+            })()
+          );
+        } else {
+          smartLink.clicks = (smartLink.clicks || 0) + 1;
+          await env.AUDIORY_KV.put(`smartlink:${slug}`, JSON.stringify(smartLink));
+          if (smartLink.id) {
+            await env.AUDIORY_KV.put(`smartlink_meta:${smartLink.id}`, JSON.stringify(smartLink));
+          }
+        }
+
+        // Return standalone HTML Landing Page
+        return new Response(renderArtistLandingPage(smartLink), {
+          headers: { 'Content-Type': 'text/html;charset=UTF-8' }
+        });
+      }
+
+      // ------------------------------------------------------------------------
+      // 2. API ENDPOINTS FOR SMART LINKS MANAGEMENT
+      // ------------------------------------------------------------------------
+
+      // A. POST /api/smart-links/scan - Auto-Detect Platform Links
+      if (method === 'POST' && path === '/api/smart-links/scan') {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+        }
+
+        const body = await request.json().catch(() => ({}));
+        const { releaseId } = body;
+
+        // Extract release details from KV or database
+        const rawRelease = await env.AUDIORY_KV.get(`release:${releaseId}`);
+        let platforms = { spotify: '', apple: '', deezer: '', youtube: '', tidal: '', amazon: '' };
+
+        if (rawRelease) {
+          const release = JSON.parse(rawRelease);
+          // Pre-fill existing DSP URLs or UPC-based lookup
+          if (release.spotifyUrl) platforms.spotify = release.spotifyUrl;
+          if (release.appleUrl) platforms.apple = release.appleUrl;
+        }
+
+        return new Response(JSON.stringify({ success: true, platforms }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // B. POST /api/smart-links - Save/Update Smart Link in AUDIORY_KV
+      if (method === 'POST' && path === '/api/smart-links') {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+        }
+
+        const body = await request.json().catch(() => ({}));
+        const { releaseId, title, slug, coverUrl, platforms } = body;
+
+        if (!slug || !title) {
+          return new Response(JSON.stringify({ error: 'Missing title or slug' }), { status: 400, headers: corsHeaders });
+        }
+
+        const linkId = body.id || `sl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const shortUrl = `https://links.audiory.site/s/${slug}`;
+
+        // Retrieve existing clicks if updating
+        const existingRaw = await env.AUDIORY_KV.get(`smartlink:${slug}`);
+        const existing = existingRaw ? JSON.parse(existingRaw) : {};
+
+        const record = {
+          id: linkId,
+          userId: userId,
+          releaseId: releaseId || null,
+          title,
+          slug,
+          coverUrl: coverUrl || '',
+          shortUrl,
+          platforms: platforms || {},
+          clicks: existing.clicks || 0,
+          active: true,
+          createdAt: existing.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        // Store in KV under slug key AND user catalog index
+        await env.AUDIORY_KV.put(`smartlink:${slug}`, JSON.stringify(record));
+        await env.AUDIORY_KV.put(`smartlink_meta:${linkId}`, JSON.stringify(record));
+
+        // Append to User's list index
+        const userIndexKey = `user_smartlinks:${userId}`;
+        const userListRaw = await env.AUDIORY_KV.get(userIndexKey);
+        let userList = userListRaw ? JSON.parse(userListRaw) : [];
+
+        if (!userList.includes(linkId)) {
+          userList.push(linkId);
+          await env.AUDIORY_KV.put(userIndexKey, JSON.stringify(userList));
+        }
+
+        return new Response(JSON.stringify({ success: true, link: record }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 201
+        });
+      }
+
+      // C. GET /api/smart-links - Fetch User's Smart Links
+      if (method === 'GET' && path === '/api/smart-links') {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+        }
+
+        const userIndexKey = `user_smartlinks:${userId}`;
+        const userListRaw = await env.AUDIORY_KV.get(userIndexKey);
+        const userList = userListRaw ? JSON.parse(userListRaw) : [];
+
+        const results = [];
+        for (const id of userList) {
+          const itemRaw = await env.AUDIORY_KV.get(`smartlink_meta:${id}`);
+          if (itemRaw) {
+            results.push(JSON.parse(itemRaw));
+          }
+        }
+
+        return new Response(JSON.stringify(results), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // D. DELETE /api/smart-links/:id - Delete Smart Link
+      if (method === 'DELETE' && path.startsWith('/api/smart-links/')) {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+        }
+
+        const linkId = path.replace('/api/smart-links/', '').trim();
+
+        const itemRaw = await env.AUDIORY_KV.get(`smartlink_meta:${linkId}`);
+        if (itemRaw) {
+          const item = JSON.parse(itemRaw);
+          if (item.userId === userId) {
+            // Remove main KV keys
+            await env.AUDIORY_KV.delete(`smartlink:${item.slug}`);
+            await env.AUDIORY_KV.delete(`smartlink_meta:${linkId}`);
+
+            // Remove from user index
+            const userIndexKey = `user_smartlinks:${userId}`;
+            const userListRaw = await env.AUDIORY_KV.get(userIndexKey);
+            let userList = userListRaw ? JSON.parse(userListRaw) : [];
+            userList = userList.filter(id => id !== linkId);
+            await env.AUDIORY_KV.put(userIndexKey, JSON.stringify(userList));
+          }
+        }
+
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // =============================================================
+      // PILLAR: AUTHENTICATION & SECURITY (Change Password & 2FA)
+      // =============================================================
+
+      // NOTE: Firebase remains the source of truth for the user's password.
+      // This endpoint verifies the old password through Firebase Identity Toolkit
+      // and then changes it. Set FIREBASE_WEB_API_KEY in Worker secrets.
+      // Change password endpoint
+      if (url.pathname === "/api/auth/change-password" && request.method === "POST") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const body = await request.json().catch(() => ({}));
+        const { currentPassword, newPassword } = body;
+
+        if (!currentPassword || !newPassword) {
+          return new Response(JSON.stringify({ error: "Current password and new password are required." }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (String(newPassword).length < 8) {
+          return new Response(JSON.stringify({ error: "New password must be at least 8 characters long." }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (!env.FIREBASE_WEB_API_KEY) {
+          return new Response(JSON.stringify({ error: "FIREBASE_WEB_API_KEY is not configured on the Worker." }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // Extract email from Authorization Bearer token payload
+        const authHeader = request.headers.get("Authorization") || "";
+        const firebaseToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+        let email = null;
+
+        try {
+          const parts = firebaseToken.split(".");
+          if (parts.length >= 2) {
+            let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+            while (b64.length % 4) b64 += "=";
+            const payload = JSON.parse(atob(b64));
+            email = payload.email || null;
+          }
+        } catch (_) {}
+
+        if (!email) {
+          return new Response(JSON.stringify({ error: "The authenticated Firebase token does not contain an email address." }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // 1. Verify old password
+        const verifyRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: currentPassword, returnSecureToken: true })
+        });
+
+        const verifyData = await verifyRes.json().catch(() => ({}));
+        if (!verifyRes.ok || !verifyData.idToken) {
+          return new Response(JSON.stringify({ error: "Current password is incorrect." }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // 2. Update to new password (returnSecureToken MUST be true)
+        const updateRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken: verifyData.idToken, password: newPassword, returnSecureToken: true })
+        });
+
+        const updateData = await updateRes.json().catch(() => ({}));
+        if (!updateRes.ok) {
+          return new Response(JSON.stringify({ error: updateData?.error?.message || "Unable to update password." }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (env.AUDIORY_KV) {
+          await env.AUDIORY_KV.put(`PASSWORD_UPDATED_USER_${userId}`, JSON.stringify({ updatedAt: new Date().toISOString() }));
+        }
+
+        return new Response(JSON.stringify({ success: true, message: "Password updated successfully." }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+
+      // -------------------------
+      // TWO-FACTOR AUTHENTICATION
+      // -------------------------
+      if (url.pathname.startsWith("/api/auth/2fa")) {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const kv2FAKey = `2FA_USER_${userId}`;
+
+        if (url.pathname === "/api/auth/2fa/status" && request.method === "GET") {
+          let state = { is_2fa_enabled: false, method: null, createdAt: null, updatedAt: null };
+          if (env.AUDIORY_KV) {
+            const raw = await env.AUDIORY_KV.get(kv2FAKey);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              state = {
+                is_2fa_enabled: parsed.is_2fa_enabled === true,
+                method: parsed.method || null,
+                createdAt: parsed.createdAt || null,
+                updatedAt: parsed.updatedAt || null
+              };
+            }
+          }
+          return new Response(JSON.stringify(state), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
+        if (url.pathname === "/api/auth/2fa/setup" && request.method === "POST") {
+          // Generate a proper 160-bit Base32 TOTP secret.
+          const bytes = new Uint8Array(20);
+          crypto.getRandomValues(bytes);
+          const secret = base32Encode(bytes);
+          const label = encodeURIComponent(`Audiory:${userId}`);
+          const issuer = encodeURIComponent("Audiory");
+          const qrCodeUrl = `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
+
+          const recoveryCodes = Array.from({ length: 8 }, () =>
+            crypto.randomUUID().replace(/-/g, "").substring(0, 10).toUpperCase()
+          );
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(
+              `2FA_TEMP_SECRET_${userId}`,
+              JSON.stringify({ secret, recoveryCodes, createdAt: new Date().toISOString() }),
+              { expirationTtl: 600 }
+            );
+          }
+
+          return new Response(JSON.stringify({ success: true, secret, qrCodeUrl, recoveryCodes }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // Verify the code during setup. A six-digit code is NOT accepted merely
+        // because it has six digits; it must match the TOTP generated by the authenticator.
+        if (url.pathname === "/api/auth/2fa/verify" && request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          const code = normalizeTotpCode(body.code);
+          if (!code) {
+            return new Response(JSON.stringify({ error: "Invalid 6-digit verification code." }), {
+              status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
+          }
+
+          if (!env.AUDIORY_KV) {
+            return new Response(JSON.stringify({ error: "AUDIORY_KV is required for 2FA." }), {
+              status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
+          }
+
+          const rawTemp = await env.AUDIORY_KV.get(`2FA_TEMP_SECRET_${userId}`);
+          if (!rawTemp) {
+            return new Response(JSON.stringify({ error: "Setup session expired. Please start 2FA setup again." }), {
+              status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
+          }
+
+          const parsedTemp = JSON.parse(rawTemp);
+          const valid = await verifyTotpCode(parsedTemp.secret, code);
+          if (!valid) {
+            return new Response(JSON.stringify({ error: "Incorrect authenticator code." }), {
+              status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
+          }
+
+          const record = {
+            is_2fa_enabled: true,
+            totp_secret: parsedTemp.secret,
+            recovery_codes: parsedTemp.recoveryCodes || [],
+            method: "authenticator",
+            createdAt: parsedTemp.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+
+          await env.AUDIORY_KV.put(kv2FAKey, JSON.stringify(record));
+          await env.AUDIORY_KV.delete(`2FA_TEMP_SECRET_${userId}`);
+
+          return new Response(JSON.stringify({
+            success: true,
+            message: "Two-Factor Authentication enabled securely.",
+            is_2fa_enabled: true,
+            recovery_codes: record.recovery_codes
+          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
+        // Verify 2FA after Firebase login. The frontend should call this endpoint
+        // immediately after Firebase sign-in when 2FA is enabled.
+        if (url.pathname === "/api/auth/2fa/challenge" && request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          const code = normalizeTotpCode(body.code);
+          const recoveryCode = String(body.recoveryCode || "").trim().toUpperCase();
+          const raw = env.AUDIORY_KV ? await env.AUDIORY_KV.get(kv2FAKey) : null;
+          const record = raw ? JSON.parse(raw) : null;
+
+          if (!record?.is_2fa_enabled) {
+            return new Response(JSON.stringify({ success: true, required: false, verified: true }), {
+              status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
+          }
+
+          let verified = false;
+          if (code) verified = await verifyTotpCode(record.totp_secret, code);
+
+          if (!verified && recoveryCode) {
+            const codes = Array.isArray(record.recovery_codes) ? record.recovery_codes : [];
+            const index = codes.indexOf(recoveryCode);
+            if (index !== -1) {
+              codes.splice(index, 1); // recovery codes are single-use
+              record.recovery_codes = codes;
+              record.updatedAt = new Date().toISOString();
+              await env.AUDIORY_KV.put(kv2FAKey, JSON.stringify(record));
+              verified = true;
+            }
+          }
+
+          if (!verified) {
+            return new Response(JSON.stringify({ success: false, required: true, verified: false, error: "Invalid two-factor authentication code." }), {
+              status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
+          }
+
+          // Short-lived server-side 2FA session. Store only a random opaque token in
+          // the browser; the Worker keeps the user binding and expiration in KV.
+          const sessionToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+          await env.AUDIORY_KV.put(`2FA_SESSION_${sessionToken}`, JSON.stringify({ userId, verifiedAt: new Date().toISOString() }), { expirationTtl: 12 * 60 * 60 });
+
+          return new Response(JSON.stringify({ success: true, required: true, verified: true, sessionToken, expiresIn: 43200 }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (url.pathname === "/api/auth/2fa/disable" && request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          const code = normalizeTotpCode(body.code);
+          const raw = env.AUDIORY_KV ? await env.AUDIORY_KV.get(kv2FAKey) : null;
+          const record = raw ? JSON.parse(raw) : null;
+
+          if (record?.is_2fa_enabled) {
+            if (!code || !(await verifyTotpCode(record.totp_secret, code))) {
+              return new Response(JSON.stringify({ error: "A valid authenticator code is required to disable 2FA." }), {
+                status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+              });
+            }
+          }
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.delete(kv2FAKey);
+            await env.AUDIORY_KV.delete(`2FA_TEMP_SECRET_${userId}`);
+          }
+
+          return new Response(JSON.stringify({ success: true, message: "Two-Factor Authentication disabled." }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
+      // =============================================================
+      // NEW ROUTE: /api/user/preferences
+      // =============================================================
+      if (path === "/api/user/preferences") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized access" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // GET Preferences
+        if (request.method === "GET") {
+          const rawPrefs = env.AUDIORY_KV ? await env.AUDIORY_KV.get(`user_prefs_${userId}`) : null;
+          const userPrefs = rawPrefs ? JSON.parse(rawPrefs) : {
+            notificationsEmail: true,
+            notificationsPush: false,
+            defaultCurrency: "USD",
+            theme: "dark"
+          };
+
+          return new Response(JSON.stringify(userPrefs), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // POST / UPDATE Preferences
+        if (request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+
+          const updatedPrefs = {
+            notificationsEmail: body.notificationsEmail ?? true,
+            notificationsPush: body.notificationsPush ?? false,
+            defaultCurrency: body.defaultCurrency || "USD",
+            theme: body.theme || "dark",
+            updatedAt: new Date().toISOString()
+          };
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(`user_prefs_${userId}`, JSON.stringify(updatedPrefs));
+          }
+
+          return new Response(JSON.stringify({ success: true, preferences: updatedPrefs }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+    
+
+      // =============================================================
+      // PILLAR: INTEGRATIONS & OAUTH REDIRECTS
+      // =============================================================
+
+      async function createOAuthState(provider, uid) {
+        if (!env.AUDIORY_KV) throw new Error("AUDIORY_KV is required for OAuth state.");
+        const state = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+        await env.AUDIORY_KV.put(
+          `OAUTH_STATE_${provider}_${state}`,
+          JSON.stringify({ userId: uid, provider, createdAt: new Date().toISOString() }),
+          { expirationTtl: 600 }
+        );
+        return state;
+      }
+
+      async function consumeOAuthState(provider, state) {
+        if (!env.AUDIORY_KV || !state) return null;
+        const key = `OAUTH_STATE_${provider}_${state}`;
+        const raw = await env.AUDIORY_KV.get(key);
+        if (!raw) return null;
+        await env.AUDIORY_KV.delete(key);
+        return JSON.parse(raw);
+      }
+
+      const dashboardUrl = env.DASHBOARD_URL || `${url.origin}/dashboard/`;
+
+      // -------------------------
+      // SoundCloud connect
+      // -------------------------
+      if (url.pathname === "/api/integrations/soundcloud/connect" && request.method === "GET") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+        if (!env.SOUNDCLOUD_CLIENT_ID || !env.SOUNDCLOUD_CLIENT_SECRET) {
+          return new Response(JSON.stringify({ error: "SoundCloud OAuth is not configured. Set SOUNDCLOUD_CLIENT_ID and SOUNDCLOUD_CLIENT_SECRET." }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const state = await createOAuthState("soundcloud", userId);
+        const redirectUri = `${url.origin}/api/integrations/soundcloud/callback`;
+        const authUrl = new URL("https://secure.soundcloud.com/authorize");
+        authUrl.searchParams.set("client_id", env.SOUNDCLOUD_CLIENT_ID);
+        authUrl.searchParams.set("redirect_uri", redirectUri);
+        authUrl.searchParams.set("response_type", "code");
+        authUrl.searchParams.set("state", state);
+        return Response.redirect(authUrl.toString(), 302);
+      }
+
+      // SoundCloud OAuth callback and token exchange.
+      if (url.pathname === "/api/integrations/soundcloud/callback" && request.method === "GET") {
+        const state = url.searchParams.get("state");
+        const code = url.searchParams.get("code");
+        const error = url.searchParams.get("error");
+        if (error) return Response.redirect(`${dashboardUrl}?integration=soundcloud&status=cancelled`, 302);
+        if (!state || !code) return new Response("Missing SoundCloud OAuth state or code.", { status: 400 });
+
+        const stateData = await consumeOAuthState("soundcloud", state);
+        if (!stateData?.userId) return new Response("Invalid or expired OAuth state.", { status: 400 });
+
+        const tokenRes = await fetch("https://secure.soundcloud.com/oauth/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            client_id: env.SOUNDCLOUD_CLIENT_ID,
+            client_secret: env.SOUNDCLOUD_CLIENT_SECRET,
+            redirect_uri: `${url.origin}/api/integrations/soundcloud/callback`,
+            code
+          })
+        });
+        const tokenData = await tokenRes.json().catch(() => ({}));
+        if (!tokenRes.ok || !tokenData.access_token) {
+          return Response.redirect(`${dashboardUrl}?integration=soundcloud&status=failed`, 302);
+        }
+
+        await env.AUDIORY_KV.put(`INTEGRATION_SOUNDCLOUD_USER_${stateData.userId}`, JSON.stringify({
+          connected: true,
+          provider: "soundcloud",
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token || null,
+          expires_in: tokenData.expires_in || null,
+          connectedAt: new Date().toISOString()
+        }));
+
+        return Response.redirect(`${dashboardUrl}?integration=soundcloud&status=connected`, 302);
+      }
+
+      // -------------------------
+      // Audiomack connect
+      // -------------------------
+      if (url.pathname === "/api/integrations/audiomack/connect" && request.method === "GET") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+        if (!env.AUDIOMACK_CLIENT_ID) {
+          return new Response(JSON.stringify({ error: "Audiomack OAuth is not configured. Set AUDIOMACK_CLIENT_ID." }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const state = await createOAuthState("audiomack", userId);
+        const redirectUri = `${url.origin}/api/integrations/audiomack/callback`;
+        const authUrl = new URL(env.AUDIOMACK_AUTH_URL || "https://audiomack.com/oauth2/authenticate");
+        authUrl.searchParams.set("client_id", env.AUDIOMACK_CLIENT_ID);
+        authUrl.searchParams.set("redirect_uri", redirectUri);
+        authUrl.searchParams.set("response_type", "code");
+        authUrl.searchParams.set("state", state);
+        return Response.redirect(authUrl.toString(), 302);
+      }
+
+      if (url.pathname === "/api/integrations/audiomack/callback" && request.method === "GET") {
+        const state = url.searchParams.get("state");
+        const code = url.searchParams.get("code");
+        if (url.searchParams.get("error")) return Response.redirect(`${dashboardUrl}?integration=audiomack&status=cancelled`, 302);
+        if (!state || !code) return new Response("Missing Audiomack OAuth state or code.", { status: 400 });
+
+        const stateData = await consumeOAuthState("audiomack", state);
+        if (!stateData?.userId) return new Response("Invalid or expired OAuth state.", { status: 400 });
+
+        // Audiomack's token endpoint can vary by partner/application. Configure it
+        // explicitly rather than hard-coding an unverified endpoint.
+        if (!env.AUDIOMACK_TOKEN_URL) {
+          return new Response("Audiomack OAuth callback received. Set AUDIOMACK_TOKEN_URL to enable token exchange.", { status: 501 });
+        }
+
+        const tokenRes = await fetch(env.AUDIOMACK_TOKEN_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            client_id: env.AUDIOMACK_CLIENT_ID,
+            client_secret: env.AUDIOMACK_CLIENT_SECRET || "",
+            redirect_uri: `${url.origin}/api/integrations/audiomack/callback`,
+            code
+          })
+        });
+        const tokenData = await tokenRes.json().catch(() => ({}));
+        if (!tokenRes.ok || !tokenData.access_token) {
+          return Response.redirect(`${dashboardUrl}?integration=audiomack&status=failed`, 302);
+        }
+
+        await env.AUDIORY_KV.put(`INTEGRATION_AUDIOMACK_USER_${stateData.userId}`, JSON.stringify({
+          connected: true,
+          provider: "audiomack",
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token || null,
+          expires_in: tokenData.expires_in || null,
+          connectedAt: new Date().toISOString()
+        }));
+
+        return Response.redirect(`${dashboardUrl}?integration=audiomack&status=connected`, 302);
+      }
+
+      // -------------------------
+      // Apple ID / Apple Music for Artists connect
+      // -------------------------
+      if (url.pathname === "/api/integrations/apple-music/connect" && request.method === "GET") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+        if (!env.APPLE_MUSIC_CLIENT_ID) {
+          return new Response(JSON.stringify({ error: "Apple authentication is not configured. Set APPLE_MUSIC_CLIENT_ID." }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const state = await createOAuthState("apple", userId);
+        const redirectUri = `${url.origin}/api/integrations/apple-music/callback`;
+        const authUrl = new URL("https://appleid.apple.com/auth/authorize");
+        authUrl.searchParams.set("client_id", env.APPLE_MUSIC_CLIENT_ID);
+        authUrl.searchParams.set("redirect_uri", redirectUri);
+        authUrl.searchParams.set("response_type", "code");
+        authUrl.searchParams.set("response_mode", "query");
+        authUrl.searchParams.set("scope", "name email");
+        authUrl.searchParams.set("state", state);
+        return Response.redirect(authUrl.toString(), 302);
+      }
+
+      if (url.pathname === "/api/integrations/apple-music/callback" && request.method === "GET") {
+        const state = url.searchParams.get("state");
+        const code = url.searchParams.get("code");
+        if (url.searchParams.get("error")) return Response.redirect(`${dashboardUrl}?integration=apple-music&status=cancelled`, 302);
+        if (!state || !code) return new Response("Missing Apple OAuth state or code.", { status: 400 });
+
+        const stateData = await consumeOAuthState("apple", state);
+        if (!stateData?.userId) return new Response("Invalid or expired OAuth state.", { status: 400 });
+        const redirectUri = `${url.origin}/api/integrations/apple-music/callback`;
+
+        // Apple Sign in with Apple requires a valid client_secret JWT generated for
+        // the Apple Developer account. Configure APPLE_MUSIC_TOKEN_URL and
+        // APPLE_MUSIC_CLIENT_SECRET when your Apple application is configured.
+        if (!env.APPLE_MUSIC_TOKEN_URL || !env.APPLE_MUSIC_CLIENT_SECRET) {
+          await env.AUDIORY_KV.put(`INTEGRATION_APPLE_MUSIC_USER_${stateData.userId}`, JSON.stringify({
+            connected: false,
+            provider: "apple-music",
+            authorizationReceived: true,
+            authorizationCodeReceivedAt: new Date().toISOString(),
+            status: "authorization_received_token_exchange_not_configured"
+          }));
+          return Response.redirect(`${dashboardUrl}?integration=apple-music&status=authorization_received`, 302);
+        }
+
+        const tokenRes = await fetch(env.APPLE_MUSIC_TOKEN_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            client_id: env.APPLE_MUSIC_CLIENT_ID,
+            client_secret: env.APPLE_MUSIC_CLIENT_SECRET,
+            redirect_uri: redirectUri
+          })
+        });
+        const tokenData = await tokenRes.json().catch(() => ({}));
+        if (!tokenRes.ok || !tokenData.access_token) {
+          return Response.redirect(`${dashboardUrl}?integration=apple-music&status=failed`, 302);
+        }
+
+        await env.AUDIORY_KV.put(`INTEGRATION_APPLE_MUSIC_USER_${stateData.userId}`, JSON.stringify({
+          connected: true,
+          provider: "apple-music",
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token || null,
+          expires_in: tokenData.expires_in || null,
+          connectedAt: new Date().toISOString()
+        }));
+
+        return Response.redirect(`${dashboardUrl}?integration=apple-music&status=connected`, 302);
+      }
+
+      // Return integration status to the settings page.
+      if (url.pathname === "/api/integrations/status" && request.method === "GET") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+        const providers = ["soundcloud", "audiomack", "apple-music"];
+        const result = {};
+        for (const provider of providers) {
+          const raw = env.AUDIORY_KV ? await env.AUDIORY_KV.get(`INTEGRATION_${provider.toUpperCase().replace(/-/g, "_")}_USER_${userId}`) : null;
+          const data = raw ? JSON.parse(raw) : null;
+          result[provider] = data ? {
+            connected: data.connected === true,
+            provider,
+            connectedAt: data.connectedAt || null,
+            status: data.status || (data.connected ? "connected" : "disconnected")
+          } : { connected: false, provider, status: "disconnected" };
+        }
+        return new Response(JSON.stringify(result), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+
+      // =============================================================
+      // PILLAR 1: MY PROFILE API (/api/profile)
+      // =============================================================
+      if (url.pathname === "/api/profile") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const kvKey = `PROFILE_USER_${userId}`;
+
+        if (request.method === "GET") {
+          let profile = {};
+          if (env.AUDIORY_KV) {
+            profile = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "{}");
+          }
+          return new Response(JSON.stringify(profile), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (request.method === "POST" || request.method === "PUT") {
+          const body = await request.json().catch(() => ({}));
+          const displayName = String(body.displayName || "").trim();
+    
+          if (!displayName) {
+            return new Response(JSON.stringify({ error: "Profile name is required." }), {
+              status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
+          }
+    
+          if (displayName.length > 100) {
+            return new Response(JSON.stringify({ error: "Display name must be 100 characters or fewer." }), {
+              status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
+          }
+
+          const profileData = {
+            displayName,
+            updatedAt: new Date().toISOString()
+          };
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(profileData));
+          }
+
+          // Keep Firebase's displayName in sync (returnSecureToken MUST be true)
+          const authHeader = request.headers.get("Authorization") || "";
+          const firebaseToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    
+          if (env.FIREBASE_WEB_API_KEY && firebaseToken) {
+            await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ 
+                idToken: firebaseToken, 
+                displayName: displayName,
+                returnSecureToken: true 
+              })
+            }).catch(() => null);
+          }
+
+          return new Response(JSON.stringify({ success: true, profile: profileData }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
+// =============================================================
+// PILLAR 2: ACCOUNT MEMBERS & ACCESS CONTROL (/api/members)
+// =============================================================
+if (url.pathname === "/api/members" || url.pathname.startsWith("/api/members/")) {
+
+  // -----------------------------------------------------------
+  // PUBLIC ENDPOINT: ACCEPT INVITATION (No userId Auth Required)
+  // -----------------------------------------------------------
+  if (url.pathname === "/api/members/accept" && request.method === "POST") {
+    const { inviteId, ownerId } = await request.json().catch(() => ({}));
+
+    if (!inviteId || !ownerId) {
+      return new Response(
+        JSON.stringify({ error: "Missing required invitation parameters (inviteId or ownerId)." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
-
-    if (payload.exp < Math.floor(Date.now() / 1000)) {
-      return null;
     }
 
-    return payload;
+    const ownerKvKey = `MEMBERS_USER_${ownerId}`;
+    let members = [];
 
-  } catch {
-    return null;
-  }
-}
-
-function getBearerToken(request) {
-  const authHeader = request.headers.get("Authorization");
-
-  if (!authHeader) {
-    return null;
-  }
-
-  const parts = authHeader.trim().split(/\s+/);
-
-  if (parts.length !== 2) {
-    return null;
-  }
-
-  if (parts[0].toLowerCase() !== "bearer") {
-    return null;
-  }
-
-  return parts[1];
-}
-
-function validateSalesDate(value) {
-  if (!value) return true;
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-function getSalesDateFilters(url) {
-  const from = url.searchParams.get("from");
-  const to = url.searchParams.get("to");
-
-  if (from && !validateSalesDate(from)) {
-    throw new Error("Invalid from date. Expected YYYY-MM-DD");
-  }
-
-  if (to && !validateSalesDate(to)) {
-    throw new Error("Invalid to date. Expected YYYY-MM-DD");
-  }
-
-  return { from, to };
-}
-
-function addSalesDateConditions(conditions, params, from, to, column = "sd.event_date") {
-  if (from) {
-    conditions.push(`${column} >= ?`);
-    params.push(from);
-  }
-
-  if (to) {
-    conditions.push(`${column} <= ?`);
-    params.push(to);
-  }
-}
-
-function salesUserId(auth) {
-  return auth.sub || auth.user_id || auth.userId || auth.id;
-}
-
-function roundSalesMoney(value) {
-  return Math.round(Number(value || 0) * 100) / 100;
-}
-
-function getSalesPagination(url) {
-  let limit = Number(url.searchParams.get("limit") || 50);
-  let offset = Number(url.searchParams.get("offset") || 0);
-
-  if (!Number.isFinite(limit) || limit < 1) limit = 50;
-  if (limit > 100) limit = 100;
-
-  if (!Number.isFinite(offset) || offset < 0) offset = 0;
-
-  return {
-    limit: Math.floor(limit),
-    offset: Math.floor(offset)
-  };
-}
-
-function getSalesDateRange(url) {
-  const from = url.searchParams.get("from");
-  const to = url.searchParams.get("to");
-
-  if (from && !validateSalesDate(from)) {
-    return {
-      error: "Invalid from date. Expected YYYY-MM-DD"
-    };
-  }
-
-  if (to && !validateSalesDate(to)) {
-    return {
-      error: "Invalid to date. Expected YYYY-MM-DD"
-    };
-  }
-
-  if (from && to && from > to) {
-    return {
-      error: "The from date cannot be after the to date"
-    };
-  }
-
-  return { from, to };
-}
-
-function formatSalesSummary(rows) {
-  const currencies = {};
-
-  let streams = 0;
-  let downloads = 0;
-  let units = 0;
-
-  for (const row of rows || []) {
-    const currency = row.currency || "USD";
-
-    if (!currencies[currency]) {
-      currencies[currency] = {
-        currency,
-        streams: 0,
-        downloads: 0,
-        units: 0,
-        gross_revenue: 0,
-        net_revenue: 0
-      };
+    if (env.AUDIORY_KV) {
+      members = JSON.parse((await env.AUDIORY_KV.get(ownerKvKey)) || "[]");
     }
 
-    const item = currencies[currency];
+    // Locate target pending member record
+    const memberIndex = members.findIndex(m => String(m.id) === String(inviteId));
 
-    const rowStreams = Number(row.streams || 0);
-    const rowDownloads = Number(row.downloads || 0);
-    const rowUnits = Number(row.units || 0);
-    const rowGross = Number(row.gross_revenue || 0);
-    const rowNet = Number(row.net_revenue || 0);
+    if (memberIndex === -1) {
+      return new Response(
+        JSON.stringify({ error: "Invitation record not found or has expired." }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    streams += rowStreams;
-    downloads += rowDownloads;
-    units += rowUnits;
+    // Update status to Accepted
+    members[memberIndex].status = "Accepted";
+    members[memberIndex].acceptedAt = new Date().toISOString();
 
-    item.streams += rowStreams;
-    item.downloads += rowDownloads;
-    item.units += rowUnits;
-    item.gross_revenue += rowGross;
-    item.net_revenue += rowNet;
+    if (env.AUDIORY_KV) {
+      await env.AUDIORY_KV.put(ownerKvKey, JSON.stringify(members));
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: "Invitation accepted successfully.",
+        member: members[memberIndex]
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 
-  const byCurrency = Object.values(currencies).map(item => ({
-    currency: item.currency,
-    streams: item.streams,
-    downloads: item.downloads,
-    units: item.units,
-    gross_revenue: roundSalesMoney(item.gross_revenue),
-    net_revenue: roundSalesMoney(item.net_revenue)
-  }));
-
-  const currencyList = byCurrency.map(item => item.currency);
-
-  let grossRevenue = null;
-  let netRevenue = null;
-  let currency = null;
-
-  if (byCurrency.length === 1) {
-    currency = byCurrency[0].currency;
-    grossRevenue = byCurrency[0].gross_revenue;
-    netRevenue = byCurrency[0].net_revenue;
-  }
-
-  return {
-    streams,
-    downloads,
-    units,
-    gross_revenue: grossRevenue,
-    net_revenue: netRevenue,
-    currency,
-    currencies: currencyList,
-    by_currency: byCurrency
-  };
-}
-
-async function authenticateSalesRequest(request, env) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return {
-      ok: false,
-      response: json({
-        success: false,
-        error: "Authorization required"
-      }, 401)
-    };
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return {
-      ok: false,
-      response: json({
-        success: false,
-        error: "Invalid or expired token"
-      }, 401)
-    };
-  }
-
-  const userId = salesUserId(auth);
-
+  // -----------------------------------------------------------
+  // AUTH GUARD: All endpoints below require a valid userId
+  // -----------------------------------------------------------
   if (!userId) {
-    return {
-      ok: false,
-      response: json({
-        success: false,
-        error: "Unable to determine authenticated user"
-      }, 401)
+    return new Response(
+      JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const kvKey = `MEMBERS_USER_${userId}`;
+
+  // GET: List Members
+  if (url.pathname === "/api/members" && request.method === "GET") {
+    let members = [];
+    if (env.AUDIORY_KV) {
+      members = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+    }
+    return new Response(JSON.stringify(members), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+
+  // POST: Invite Member & Send Classic Invitation Email
+  if (url.pathname === "/api/members/invite" && request.method === "POST") {
+    const { email, roles } = await request.json().catch(() => ({}));
+    if (!email || !roles || !Array.isArray(roles) || roles.length === 0) {
+      return new Response(
+        JSON.stringify({ error: "Member email and at least one role are required." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    let members = [];
+    if (env.AUDIORY_KV) {
+      members = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+    }
+
+    const memberId = `mem_${Date.now()}`;
+    const inviteLink = `https://distro.audiory.site/accept-invite?id=${memberId}&owner=${userId}`;
+
+    const newMember = {
+      id: memberId,
+      email,
+      roles,
+      status: "Pending",
+      invitedAt: new Date().toISOString()
     };
+
+    // Format roles list for display
+    const formattedRoles = roles.map(r => `<li style="margin-bottom: 6px;"><strong>${r}</strong></li>`).join("");
+
+    // Classic Invitation Email Template
+    const emailHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Workspace Invitation</title>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #f4f5f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f4f5f7; padding: 40px 0;">
+          <tr>
+            <td align="center">
+              <table width="560" border="0" cellspacing="0" cellpadding="0" style="background-color: #ffffff; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);">
+                
+                <!-- Header -->
+                <tr>
+                  <td style="background-color: #0f172a; padding: 30px; text-align: center;">
+                    <h1 style="color: #ffffff; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 0.5px;">AUDIORY</h1>
+                  </td>
+                </tr>
+
+                <!-- Content -->
+                <tr>
+                  <td style="padding: 36px 32px; color: #334155;">
+                    <h2 style="font-size: 18px; color: #0f172a; margin-top: 0; margin-bottom: 16px;">You've Been Invited!</h2>
+                    <p style="font-size: 14px; line-height: 1.6; color: #475569; margin-bottom: 24px;">
+                      You have been invited to join an artist/label workspace on <strong>Audiory Distribution</strong>.
+                    </p>
+
+                    <!-- Assigned Roles Card -->
+                    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 20px; margin-bottom: 28px;">
+                      <p style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; margin: 0 0 10px 0;">Your Assigned Roles:</p>
+                      <ul style="margin: 0; padding-left: 20px; font-size: 14px; color: #0f172a;">
+                        ${formattedRoles}
+                      </ul>
+                    </div>
+
+                    <!-- Call to Action -->
+                    <div style="text-align: center; margin-bottom: 28px;">
+                      <a href="${inviteLink}" target="_blank" style="background-color: #6366f1; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 600; padding: 12px 28px; border-radius: 6px; display: inline-block;">
+                        Accept Invitation
+                      </a>
+                    </div>
+
+                    <p style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin-bottom: 0;">
+                      If the button above does not work, copy and paste this link into your browser:<br>
+                      <a href="${inviteLink}" style="color: #6366f1; word-break: break-all;">${inviteLink}</a>
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                  <td style="background-color: #f8fafc; padding: 20px; text-align: center; border-top: 1px solid #e2e8f0;">
+                    <p style="font-size: 11px; color: #94a3b8; margin: 0;">
+                      &copy; ${new Date().getFullYear()} Audiory. All rights reserved.
+                    </p>
+                  </td>
+                </tr>
+
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+
+    // Send invitation email using pre-existing helper
+    await sendResendEmail(env, {
+      to: email,
+      subject: "You've been invited to collaborate on Audiory",
+      html: emailHtml
+    });
+
+    members.unshift(newMember);
+
+    if (env.AUDIORY_KV) {
+      await env.AUDIORY_KV.put(kvKey, JSON.stringify(members));
+    }
+
+    return new Response(JSON.stringify({ success: true, member: newMember }), {
+      status: 201,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
   }
 
-  return {
-    ok: true,
-    auth,
-    userId
+  // DELETE: Remove Member
+  if (url.pathname.startsWith("/api/members/") && request.method === "DELETE") {
+    const memberId = url.pathname.split("/").pop();
+    let members = [];
+    if (env.AUDIORY_KV) {
+      members = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+      members = members.filter(m => String(m.id) !== String(memberId));
+      await env.AUDIORY_KV.put(kvKey, JSON.stringify(members));
+    }
+    return new Response(JSON.stringify({ success: true, removedId: memberId }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+}
+
+      // =============================================================
+      // PILLAR 3: TAX DETAILS & COMPLIANCE (/api/tax-details)
+      // =============================================================
+      if (url.pathname === "/api/tax-details") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const kvKey = `TAX_USER_${userId}`;
+
+        if (request.method === "GET") {
+          let taxData = {};
+          if (env.AUDIORY_KV) {
+            taxData = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "{}");
+          }
+          return new Response(JSON.stringify(taxData), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          const w9Details = body.w9Details || {};
+          const legalName = String(body.legalName || w9Details.legalName || "").trim();
+          const classification = body.classification || w9Details.classification || body.formType || "individual";
+          const country = String(body.country || w9Details.country || "").trim();
+          const tin = String(body.tin || w9Details.tin || "").trim();
+          const address = body.address || w9Details.address || "";
+          const formType = body.formType || "W-9";
+
+          if (!legalName || !country || !tin) {
+            return new Response(
+              JSON.stringify({ error: "Legal name, country, and Tax Identification Number (TIN) are required." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          const taxRecord = {
+            formType,
+            legalName,
+            classification: classification || "individual",
+            country,
+            tin,
+            address: address || "",
+            status: "Submitted",
+            updatedAt: new Date().toISOString()
+          };
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(taxRecord));
+          }
+
+          return new Response(JSON.stringify({ success: true, taxRecord }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
+      // =============================================================
+      // PILLAR 4: PAYOUT & PAYMENT PREFERENCES ALIAS (/api/payout-preferences)
+      // =============================================================
+      if (url.pathname === "/api/payout-preferences" || url.pathname === "/api/payout-settings") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const kvKey = `PAYOUT_SETTINGS_USER_${userId}`;
+
+        if (request.method === "GET") {
+          let payoutData = { payoutType: "bank", details: {} };
+          if (env.AUDIORY_KV) {
+            const raw = await env.AUDIORY_KV.get(kvKey);
+            payoutData = raw ? JSON.parse(raw) : payoutData;
+          }
+          return new Response(JSON.stringify(payoutData), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (request.method === "POST" || request.method === "PUT") {
+          const body = await request.json().catch(() => ({}));
+          const payoutType = body.payoutType || body.method || "bank";
+          const details = body.details || {};
+
+          const payoutRecord = {
+            payoutType,
+            details,
+            updatedAt: new Date().toISOString()
+          };
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(payoutRecord));
+          }
+
+          return new Response(JSON.stringify({ success: true, payoutSettings: payoutRecord }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
+      // =============================================================
+      // PILLAR 5: DYNAMIC SUBSCRIPTION & BILLING HISTORY WITH EXPIRY
+      // =============================================================
+
+      const PLANS = {
+        starter: { name: "Starter Plan", price: "0.00", description: "Starter Plan (Free Tier)", durationDays: 0 },
+        pro: { name: "Pro Artist Plan", price: "19.99", description: "Pro Artist Plan (Annual Subscription)", durationDays: 365 },
+        label: { name: "Label Partner", price: "49.99", description: "Label Partner Plan (Annual Subscription)", durationDays: 365 }
+      };
+
+      // Helper function: Checks subscription expiry and downgrades to starter if expired
+      async function checkAndProcessExpiry(userId, env, corsHeaders) {
+        if (!env.AUDIORY_KV || !userId) return null;
+
+        const subscriptionKvKey = `SUBSCRIPTION_USER_${userId}`;
+        const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
+        if (!rawSub) return null;
+
+        let currentSub = JSON.parse(rawSub);
+
+        // Free starter plan or non-active subscriptions do not expire automatically
+        if (currentSub.planId === "starter" || currentSub.status !== "Active" || !currentSub.expiresAt) {
+          return currentSub;
+        }
+
+        // Downgrade to starter tier if current date surpasses expiration date
+        if (new Date() > new Date(currentSub.expiresAt)) {
+          currentSub = {
+            planId: "starter",
+            planName: PLANS.starter.name,
+            amount: PLANS.starter.price,
+            status: "Active",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            downgradedFrom: currentSub.planId,
+            downgradedAt: new Date().toISOString()
+          };
+
+          await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+        }
+
+        return currentSub;
+      }
+
+      if (url.pathname === "/api/billing-history" && request.method === "GET") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const subscriptionKvKey = `SUBSCRIPTION_USER_${userId}`;
+        const billingKvKey = `BILLING_USER_${userId}`;
+
+        // Evaluate expiry before returning subscription state
+        let currentSub = await checkAndProcessExpiry(userId, env, corsHeaders);
+        let history = [];
+
+        if (env.AUDIORY_KV) {
+          const rawHistory = await env.AUDIORY_KV.get(billingKvKey);
+          history = rawHistory ? JSON.parse(rawHistory) : [];
+        }
+
+        // ACTIVE DARAJA STK QUERY FOR PENDING M-PESA TRANSACTIONS
+        if (currentSub && currentSub.status === "Pending" && currentSub.paymentMethod === "mpesa" && currentSub.transactionId) {
+          try {
+            const darajaAuthUrl = "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials";
+            const authRes = await fetch(darajaAuthUrl, {
+              headers: { Authorization: `Basic ${btoa(`${env.DARAJA_CONSUMER_KEY}:${env.DARAJA_CONSUMER_SECRET}`)}` }
+            }).then(r => r.json()).catch(() => null);
+
+            if (authRes?.access_token) {
+              const timestamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
+              const password = btoa(`${env.DARAJA_BUSINESS_SHORTCODE}${env.DARAJA_PASSKEY}${timestamp}`);
+
+              const queryRes = await fetch("https://api.safaricom.co.ke/mpesa/stkpushquery/v1/query", {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${authRes.access_token}`,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  BusinessShortCode: env.DARAJA_BUSINESS_SHORTCODE,
+                  Password: password,
+                  Timestamp: timestamp,
+                  CheckoutRequestID: currentSub.transactionId
+                })
+              }).then(r => r.json()).catch(() => null);
+
+              // ResultCode "0" = Success
+              // ResultCode "1032" (User cancelled), "1037" (Timeout), "1" (Insufficient funds) = Failed
+              if (queryRes && queryRes.ResultCode !== undefined) {
+                if (queryRes.ResultCode === "0" || queryRes.ResultCode === 0) {
+                  const now = new Date();
+                  currentSub.status = "Active";
+                  currentSub.updatedAt = now.toISOString();
+                  currentSub.expiresAt = new Date(now.getTime() + 365 * 86400000).toISOString();
+                  if (history.length > 0) history[0].status = "Paid";
+                } else if (queryRes.ResultCode !== "1036") { // 1036 means in-progress/processing; any other code is a definitive failure
+                  currentSub.status = "Failed";
+                  currentSub.updatedAt = new Date().toISOString();
+                  if (history.length > 0) history[0].status = "Failed";
+                }
+
+                if (env.AUDIORY_KV) {
+                  await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+                  await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(history));
+                }
+              }
+            }
+          } catch (e) {
+            console.error("Daraja verification query error:", e);
+          }
+        }
+
+        if (!currentSub) {
+          currentSub = {
+            planId: "starter",
+            planName: PLANS.starter.name,
+            amount: PLANS.starter.price,
+            status: "Active",
+            createdAt: new Date().toISOString()
+          };
+        }
+
+        return new Response(
+          JSON.stringify({ subscription: currentSub, history: history }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.pathname === "/api/subscription/status" && request.method === "GET") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        let currentSub = await checkAndProcessExpiry(userId, env, corsHeaders);
+
+        return new Response(
+          JSON.stringify({ 
+            status: currentSub ? currentSub.status : "Inactive", 
+            planId: currentSub ? currentSub.planId : "starter",
+            subscription: currentSub 
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.pathname === "/api/subscription/upgrade" && request.method === "POST") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const body = await request.json().catch(() => ({}));
+        const { planId, paymentMethod, phone, email, displayName } = body;
+
+        const selectedPlan = PLANS[planId] || PLANS.starter;
+        let transactionId = `TXN-${Date.now()}`;
+        let redirectUrl = null;
+        let requiresManualAction = false;
+
+        if (parseFloat(selectedPlan.price) > 0) {
+          // A. M-PESA DARAJA STK PUSH
+          if (paymentMethod === "mpesa") {
+            if (!phone) {
+              return new Response(
+                JSON.stringify({ error: "A valid phone number is required for M-Pesa payments." }),
+                { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
+            const darajaAuthUrl = "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials";
+      
+            const authRes = await fetch(darajaAuthUrl, {
+              headers: {
+                Authorization: `Basic ${btoa(`${env.DARAJA_CONSUMER_KEY}:${env.DARAJA_CONSUMER_SECRET}`)}`
+              }
+            }).then(r => r.json()).catch(() => null);
+
+            if (!authRes || !authRes.access_token) {
+              return new Response(
+                JSON.stringify({ error: "M-Pesa authorization failed. Verify Daraja Consumer Key and Secret." }),
+                { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
+            const timestamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
+            const password = btoa(`${env.DARAJA_BUSINESS_SHORTCODE}${env.DARAJA_PASSKEY}${timestamp}`);
+
+            const stkRes = await fetch("https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${authRes.access_token}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                BusinessShortCode: env.DARAJA_BUSINESS_SHORTCODE,
+                Password: password,
+                Timestamp: timestamp,
+                TransactionType: "CustomerPayBillOnline",
+                Amount: Math.round(parseFloat(selectedPlan.price) * 130),
+                PartyA: phone,
+                PartyB: env.DARAJA_BUSINESS_SHORTCODE,
+                PhoneNumber: phone,
+                CallBackURL: "https://distro.audiory.site/api/webhooks/mpesa",
+                AccountReference: "AudioryDistro",
+                TransactionDesc: `Subscription for ${selectedPlan.name}`
+              })
+            }).then(r => r.json()).catch(() => null);
+
+            if (!stkRes || !stkRes.CheckoutRequestID) {
+              return new Response(
+                JSON.stringify({ error: "Failed to initialize M-Pesa STK Push. Check phone format or Daraja credentials." }),
+                { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
+            transactionId = stkRes.CheckoutRequestID;
+            requiresManualAction = true;
+          }
+
+          // B. PAYPAL CHECKOUT
+          else if (paymentMethod === "paypal") {
+            const paypalBase = env.PAYPAL_MODE === "sandbox" 
+              ? "https://api-m.sandbox.paypal.com" 
+              : "https://api-m.paypal.com";
+
+            const authRes = await fetch(`${paypalBase}/v1/oauth2/token`, {
+              method: "POST",
+              headers: {
+                Authorization: `Basic ${btoa(`${env.PAYPAL_CLIENT_ID}:${env.PAYPAL_CLIENT_SECRET}`)}`,
+                "Content-Type": "application/x-www-form-urlencoded"
+              },
+              body: "grant_type=client_credentials"
+            }).then(r => r.json()).catch(() => null);
+
+            if (!authRes || !authRes.access_token) {
+              return new Response(
+                JSON.stringify({ error: "PayPal authorization failed. Check PayPal Client ID/Secret." }),
+                { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
+            const orderRes = await fetch(`${paypalBase}/v2/checkout/orders`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${authRes.access_token}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                intent: "CAPTURE",
+                purchase_units: [{
+                  reference_id: `SUB-${userId}-${Date.now()}`,
+                  description: selectedPlan.description,
+                  amount: { currency_code: "USD", value: selectedPlan.price }
+                }],
+                application_context: {
+                  return_url: "https://distro.audiory.site/dashboard/?payment=success",
+                  cancel_url: "https://distro.audiory.site/signup/?payment=cancelled",
+                  brand_name: "Audiory Distribution",
+                  user_action: "PAY_NOW"
+                }
+              })
+            }).then(r => r.json()).catch(() => null);
+
+            const approveLink = orderRes?.links?.find(link => link.rel === "approve");
+            if (!orderRes || !orderRes.id || !approveLink) {
+              return new Response(
+                JSON.stringify({ error: "Failed to generate PayPal payment link." }),
+                { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
+            transactionId = orderRes.id;
+            redirectUrl = approveLink.href;
+          }
+
+          // C. PESAPAL GATEWAY
+          else if (paymentMethod === "pesapal") {
+            const pesapalBase = env.PESAPAL_MODE === "sandbox" 
+              ? "https://cyb3r.pesapal.com/pesapalv3" 
+              : "https://pay.pesapal.com/v3";
+
+            const authRes = await fetch(`${pesapalBase}/api/Auth/RequestToken`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Accept": "application/json" },
+              body: JSON.stringify({
+                consumer_key: env.PESAPAL_CONSUMER_KEY,
+                consumer_secret: env.PESAPAL_CONSUMER_SECRET
+              })
+            }).then(r => r.json()).catch(() => null);
+
+            if (!authRes || !authRes.token) {
+              return new Response(
+                JSON.stringify({ error: "PesaPal authorization failed. Verify Consumer Key and Secret." }),
+                { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
+            let ipnId = env.PESAPAL_IPN_ID;
+            if (!ipnId) {
+              const ipnRes = await fetch(`${pesapalBase}/api/URLSetup/RegisterIPN`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${authRes.token}`,
+                  "Content-Type": "application/json",
+                  "Accept": "application/json"
+                },
+                body: JSON.stringify({
+                  url: "https://distro.audiory.site/api/webhooks/pesapal",
+                  ipn_notification_type: "GET"
+                })
+              }).then(r => r.json()).catch(() => null);
+
+              if (ipnRes && ipnRes.ipn_id) ipnId = ipnRes.ipn_id;
+            }
+
+            const names = (displayName || "Subscriber").trim().split(" ");
+            const firstName = names[0] || "Subscriber";
+            const lastName = names.slice(1).join(" ") || "Artist";
+
+            const orderRes = await fetch(`${pesapalBase}/api/Transactions/SubmitOrderRequest`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${authRes.token}`,
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+              },
+              body: JSON.stringify({
+                id: `PESA-${Date.now()}`,
+                currency: "USD",
+                amount: Number(parseFloat(selectedPlan.price).toFixed(2)),
+                description: selectedPlan.description || "Subscription Upgrade",
+                callback_url: "https://distro.audiory.site/dashboard/?payment=success",
+                notification_id: ipnId,
+                billing_address: {
+                  email_address: email || "billing@audiory.site",
+                  phone_number: phone || "",
+                  first_name: firstName,
+                  last_name: lastName
+                }
+              })
+            }).then(r => r.json()).catch(() => null);
+
+            if (!orderRes || !orderRes.redirect_url) {
+              return new Response(
+                JSON.stringify({ 
+                  error: orderRes?.error?.message || "Failed to generate PesaPal payment portal. Verify IPN ID and credentials." 
+                }),
+                { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
+            transactionId = orderRes.order_tracking_id;
+            redirectUrl = orderRes.redirect_url;
+          }
+        }
+
+        const subscriptionKvKey = `SUBSCRIPTION_USER_${userId}`;
+        const billingKvKey = `BILLING_USER_${userId}`;
+        const isFreePlan = parseFloat(selectedPlan.price) === 0;
+
+        // Calculate standard 365-day expiry for paid tiers
+        const now = new Date();
+        const expiresAt = isFreePlan ? null : new Date(now.getTime() + selectedPlan.durationDays * 24 * 60 * 60 * 1000).toISOString();
+
+        const activeSubData = {
+          planId: planId,
+          planName: selectedPlan.name,
+          amount: selectedPlan.price,
+          paymentMethod: paymentMethod || "card",
+          transactionId: transactionId,
+          status: isFreePlan ? "Active" : "Pending",
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+          expiresAt: expiresAt
+        };
+
+        if (env.AUDIORY_KV) {
+          await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(activeSubData));
+
+          if (paymentMethod === "mpesa" && transactionId) {
+            await env.AUDIORY_KV.put(`MPESA_TX_${transactionId}`, userId);
+          }
+
+          // FIX: Map transaction ID for PesaPal webhooks
+          if (paymentMethod === "pesapal" && transactionId) {
+            await env.AUDIORY_KV.put(`PESAPAL_TX_${transactionId}`, userId);
+          }
+
+          if (!isFreePlan) {
+            const rawHistory = await env.AUDIORY_KV.get(billingKvKey);
+            const history = rawHistory ? JSON.parse(rawHistory) : [];
+
+            history.unshift({
+              invoiceId: `INV-${Math.floor(10000 + Math.random() * 90000)}`,
+              date: now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+              description: selectedPlan.description,
+              amount: selectedPlan.price,
+              gateway: paymentMethod,
+              status: "Pending"
+            });
+
+            await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(history));
+          }
+        }
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          subscription: activeSubData,
+          redirectUrl: redirectUrl,
+          requiresManualAction: requiresManualAction
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+
+      // PAYPAL ORDER CAPTURE HANDLER
+      if (url.pathname === "/api/subscription/paypal-capture" && request.method === "POST") {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const { orderId } = await request.json().catch(() => ({}));
+        if (!orderId) {
+          return new Response(JSON.stringify({ error: "Order ID missing" }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const paypalBase = env.PAYPAL_MODE === "sandbox" ? "https://api-m.sandbox.paypal.com" : "https://api-m.paypal.com";
+
+        // Get Auth Token
+        const authRes = await fetch(`${paypalBase}/v1/oauth2/token`, {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${btoa(`${env.PAYPAL_CLIENT_ID}:${env.PAYPAL_CLIENT_SECRET}`)}`,
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body: "grant_type=client_credentials"
+        }).then(r => r.json()).catch(() => null);
+
+        if (!authRes?.access_token) {
+          return new Response(JSON.stringify({ error: "PayPal Auth Failed" }), {
+            status: 502,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // Capture Payment
+        const captureRes = await fetch(`${paypalBase}/v2/checkout/orders/${orderId}/capture`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${authRes.access_token}`,
+            "Content-Type": "application/json"
+          }
+        }).then(r => r.json()).catch(() => null);
+
+        if (captureRes?.status === "COMPLETED") {
+          const subscriptionKvKey = `SUBSCRIPTION_USER_${userId}`;
+          const billingKvKey = `BILLING_USER_${userId}`;
+
+          const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
+          const rawBilling = await env.AUDIORY_KV.get(billingKvKey);
+
+          let currentSub = rawSub ? JSON.parse(rawSub) : null;
+          let history = rawBilling ? JSON.parse(rawBilling) : [];
+
+          if (currentSub) {
+            const now = new Date();
+            const durationDays = PLANS[currentSub.planId]?.durationDays || 365;
+            currentSub.status = "Active";
+            currentSub.updatedAt = now.toISOString();
+            currentSub.expiresAt = new Date(now.getTime() + durationDays * 86400000).toISOString();
+            await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+          }
+
+          if (history.length > 0) {
+            history[0].status = "Paid";
+            await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(history));
+          }
+
+          return new Response(JSON.stringify({ success: true, subscription: currentSub }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        return new Response(JSON.stringify({ error: "Payment capture failed or incomplete" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+
+      // PESAPAL IPN WEBHOOK HANDLER
+      if (url.pathname === "/api/webhooks/pesapal" && (request.method === "GET" || request.method === "POST")) {
+        const OrderTrackingId = url.searchParams.get("OrderTrackingId");
+
+        if (OrderTrackingId && env.AUDIORY_KV) {
+          const targetUserId = await env.AUDIORY_KV.get(`PESAPAL_TX_${OrderTrackingId}`);
+
+          if (targetUserId) {
+            const pesapalBase = env.PESAPAL_MODE === "sandbox" ? "https://cyb3r.pesapal.com/pesapalv3" : "https://pay.pesapal.com/v3";
+
+            // 1. Get Token
+            const authRes = await fetch(`${pesapalBase}/api/Auth/RequestToken`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify({
+                consumer_key: env.PESAPAL_CONSUMER_KEY,
+                consumer_secret: env.PESAPAL_CONSUMER_SECRET
+              })
+            }).then(r => r.json()).catch(() => null);
+
+            if (authRes?.token) {
+              // 2. Query Status
+              const statusRes = await fetch(`${pesapalBase}/api/Transactions/GetTransactionStatus?orderTrackingId=${OrderTrackingId}`, {
+                headers: { Authorization: `Bearer ${authRes.token}`, Accept: "application/json" }
+              }).then(r => r.json()).catch(() => null);
+
+              const statusCode = statusRes?.payment_status_description;
+
+              const subscriptionKvKey = `SUBSCRIPTION_USER_${targetUserId}`;
+              const billingKvKey = `BILLING_USER_${targetUserId}`;
+
+              const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
+              const rawBilling = await env.AUDIORY_KV.get(billingKvKey);
+
+              let currentSub = rawSub ? JSON.parse(rawSub) : null;
+              let history = rawBilling ? JSON.parse(rawBilling) : [];
+
+              if (statusCode === "Completed") {
+                if (currentSub) {
+                  const now = new Date();
+                  const durationDays = PLANS[currentSub.planId]?.durationDays || 365;
+                  currentSub.status = "Active";
+                  currentSub.updatedAt = now.toISOString();
+                  currentSub.expiresAt = new Date(now.getTime() + durationDays * 86400000).toISOString();
+                  await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+                }
+                if (history.length > 0) {
+                  history[0].status = "Paid";
+                  await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(history));
+                }
+              } else if (statusCode === "Failed" || statusCode === "Reversed") {
+                if (currentSub) {
+                  currentSub.status = "Failed";
+                  currentSub.updatedAt = new Date().toISOString();
+                  await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+                }
+                if (history.length > 0) {
+                  history[0].status = "Failed";
+                  await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(history));
+                }
+              }
+            }
+          }
+        }
+
+        return new Response(JSON.stringify({ orderNotificationType: "IPNCHANGE", orderTrackingId: OrderTrackingId, status: 200 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      // M-PESA WEBHOOK CALLBACK HANDLER
+      if (url.pathname === "/api/webhooks/mpesa" && request.method === "POST") {
+        let body = {};
+        try {
+          body = await request.json();
+        } catch (err) {
+          body = {};
+        }
+
+        const stkCallback = body?.Body?.stkCallback;
+
+        if (stkCallback && env.AUDIORY_KV) {
+          const checkoutReqId = stkCallback.CheckoutRequestID;
+          const resultCode = stkCallback.ResultCode;
+
+          // Look up user ID using your existing key
+          const targetUserId = await env.AUDIORY_KV.get(`MPESA_TX_${checkoutReqId}`);
+
+          if (targetUserId) {
+            const subscriptionKvKey = `SUBSCRIPTION_USER_${targetUserId}`;
+            const billingKvKey = `BILLING_USER_${targetUserId}`;
+
+            const rawSub = await env.AUDIORY_KV.get(subscriptionKvKey);
+            const rawBilling = await env.AUDIORY_KV.get(billingKvKey);
+
+            let currentSub = rawSub ? JSON.parse(rawSub) : null;
+            let billingHistory = rawBilling ? JSON.parse(rawBilling) : [];
+
+            if (resultCode === 0) {
+              // --- 1. PAYMENT SUCCESS ---
+              if (currentSub) {
+                const now = new Date();
+                const durationDays = PLANS[currentSub.planId]?.durationDays || 365;
+
+                currentSub.status = "Active";
+                currentSub.updatedAt = now.toISOString();
+                currentSub.expiresAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+
+                await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+              }
+
+              if (billingHistory.length > 0) {
+                billingHistory[0].status = "Paid";
+                await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(billingHistory));
+              }
+            } else {
+              // --- 2. PAYMENT FAILED / CANCELLED BY USER ---
+              if (currentSub) {
+                currentSub.status = "Failed";
+                currentSub.updatedAt = new Date().toISOString();
+                // Added: Attach Safaricom's exact result description for UI error display
+                currentSub.errorMessage = stkCallback.ResultDesc || "Payment was cancelled or failed.";
+
+                await env.AUDIORY_KV.put(subscriptionKvKey, JSON.stringify(currentSub));
+              }
+
+              if (billingHistory.length > 0) {
+                billingHistory[0].status = "Failed";
+                billingHistory[0].errorMessage = stkCallback.ResultDesc || "Payment failed.";
+                await env.AUDIORY_KV.put(billingKvKey, JSON.stringify(billingHistory));
+              }
+            }
+
+            // Cleanup transaction mapping key
+            await env.AUDIORY_KV.delete(`MPESA_TX_${checkoutReqId}`);
+          }
+        }
+
+        return new Response(JSON.stringify({ ResultCode: 0, ResultDesc: "Accepted" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      // =============================================================
+      // PILLAR 6: LOGIN HISTORY & SESSION REVOCATION (/api/login-history)
+      // =============================================================
+      if (
+        url.pathname === "/api/login-history" ||
+        url.pathname === "/api/login-history/record" ||
+        url.pathname === "/api/login-history/revoke-all" ||
+        url.pathname.startsWith("/api/login-history/")
+      ) {
+        if (!userId) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const kvKey = `SESSIONS_USER_${userId}`;
+
+        // Called by the frontend immediately after a successful Firebase login.
+        if (url.pathname === "/api/login-history/record" && request.method === "POST") {
+          const session = await recordLoginSession(env, userId, request);
+          return new Response(JSON.stringify({ success: true, session }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (url.pathname === "/api/login-history" && request.method === "GET") {
+          let sessions = [];
+          if (env.AUDIORY_KV) {
+            const raw = await env.AUDIORY_KV.get(kvKey);
+            sessions = raw ? JSON.parse(raw) : [];
+          }
+
+          // Do not manufacture a fake current login. An empty array means there
+          // is genuinely no recorded login history yet.
+          return new Response(JSON.stringify(sessions), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (url.pathname === "/api/login-history/revoke-all" && request.method === "POST") {
+          let sessions = [];
+          if (env.AUDIORY_KV) {
+            const raw = await env.AUDIORY_KV.get(kvKey);
+            sessions = raw ? JSON.parse(raw) : [];
+            const now = new Date().toISOString();
+            sessions = sessions.map(s => s.isCurrent ? s : {
+              ...s,
+              revoked: true,
+              isCurrent: false,
+              logoutAt: s.logoutAt || now
+            });
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(sessions));
+          }
+
+          return new Response(JSON.stringify({ success: true, message: "All non-current sessions revoked." }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (url.pathname.startsWith("/api/login-history/") && request.method === "DELETE") {
+          const sessionId = decodeURIComponent(url.pathname.split("/").pop());
+          if (env.AUDIORY_KV) {
+            let sessions = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+            const target = sessions.find(s => String(s.id) === String(sessionId));
+            if (target?.isCurrent) {
+              return new Response(JSON.stringify({ error: "The current session cannot be revoked from this endpoint." }), {
+                status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+              });
+            }
+            sessions = sessions.map(s => String(s.id) === String(sessionId)
+              ? { ...s, revoked: true, isCurrent: false, logoutAt: s.logoutAt || new Date().toISOString() }
+              : s
+            );
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(sessions));
+          }
+
+          return new Response(JSON.stringify({ success: true, revokedId: sessionId }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
+// =============================================================
+// ROUTE: SUPPORT TICKETS & RESEND EMAIL AUTOMATION
+// =============================================================
+
+// Helper: Send email via Resend API
+async function sendResendEmail(env, { to, subject, html }) {
+  const resendApiKey = env.RESEND_API_KEY;
+  if (!resendApiKey) {
+    console.error("Missing RESEND_API_KEY environment variable");
+    return false;
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${resendApiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: "Audiory Support <support@distro.audiory.site>",
+      to: Array.isArray(to) ? to : [to],
+      subject: subject,
+      html: html
+    })
+  });
+
+  return response.ok;
+}
+
+// Handler: GET /api/support/tickets
+if (url.pathname === "/api/support/tickets" && request.method === "GET") {
+  const userKvKey = `TICKETS_USER_${userId || "GUEST"}`;
+  const ticketsRaw = await env.AUDIORY_KV.get(userKvKey);
+  const tickets = ticketsRaw ? JSON.parse(ticketsRaw) : [];
+
+  return new Response(JSON.stringify({ tickets }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" }
+  });
+}
+
+// Handler: POST /api/support/tickets
+if (url.pathname === "/api/support/tickets" && request.method === "POST") {
+  const payload = await request.json();
+  const { email, subject, priority, message } = payload;
+
+  if (!email || !subject || !message) {
+    return new Response(JSON.stringify({ error: "Missing required fields" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+
+  // 1. Generate unique ticket number (e.g., ADY-849201)
+  const ticketNumber = `ADY-${Math.floor(100000 + Math.random() * 900000)}`;
+
+  const newTicket = {
+    ticketNumber,
+    userEmail: email,
+    subject,
+    priority: priority || "Normal",
+    message,
+    status: "new", // Statuses: 'new', 'open', 'solved'
+    createdAt: new Date().toISOString()
   };
+
+  // 2. Persist to KV
+  const userKvKey = `TICKETS_USER_${userId || "GUEST"}`;
+  const existingTickets = JSON.parse((await env.AUDIORY_KV.get(userKvKey)) || "[]");
+  existingTickets.unshift(newTicket);
+  await env.AUDIORY_KV.put(userKvKey, JSON.stringify(existingTickets));
+
+  // 3. Email 1: Send internal ticket notification to support@audiory.site
+  await sendResendEmail(env, {
+    to: "support@distro.audiory.site",
+    subject: `[New Ticket #${ticketNumber}] ${subject}`,
+    html: `
+      <h2>New Support Ticket Received</h2>
+      <p><strong>Ticket Number:</strong> #${ticketNumber}</p>
+      <p><strong>From:</strong> ${email}</p>
+      <p><strong>Priority:</strong> ${priority}</p>
+      <p><strong>Message:</strong></p>
+      <blockquote style="background: #f4f4f4; padding: 10px; border-left: 4px solid #6366f1;">
+        ${message.replace(/\n/g, '<br>')}
+      </blockquote>
+    `
+  });
+
+  // 4. Email 2: Send confirmation email to the user
+  await sendResendEmail(env, {
+    to: email,
+    subject: `We received your request [Ticket #${ticketNumber}]`,
+    html: `
+      <div style="font-family: sans-serif; line-height: 1.5; color: #333;">
+        <h2>Hello,</h2>
+        <p>Thank you for reaching out to Audiory Support. We have received your message and generated ticket <strong>#${ticketNumber}</strong>.</p>
+        <p>Our support team will review your query and reply to you as soon as possible.</p>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+        <p style="font-size: 12px; color: #777;"><strong>Ticket Summary:</strong><br>${subject}</p>
+      </div>
+    `
+  });
+
+  return new Response(JSON.stringify({ success: true, ticket: newTicket }), {
+    status: 201,
+    headers: { ...corsHeaders, "Content-Type": "application/json" }
+  });
 }
 
-async function resolveSalesTrack(env, userId, isrc) {
-  const normalizedIsrc = decodeURIComponent(isrc)
-    .replace(/-/g, "")
-    .toUpperCase();
+// =============================================================
+// FIXED TOO LOST PREFERENCES ROUTES
+// =============================================================
+//
+// This version fixes the structural problem in the previous 2902-line block:
+// the route code must run inside an async Worker request handler.
+//
+// Call from your existing async fetch(request, env, ctx) handler:
+//
+//   const preferencesResponse = await handlePreferencesRoutes(
+//     request, env, url, userId, corsHeaders
+//   );
+//   if (preferencesResponse) return preferencesResponse;
+//
+// If the request is not a Preferences route, this function returns null.
+// =============================================================
 
-  return await env.DB.prepare(`
-    SELECT
-      t.id,
-      t.release_id,
-      t.title,
-      t.version,
-      t.isrc,
-      t.track_number,
-      t.disc_number,
-      t.duration_seconds,
-      t.genre,
-      t.language,
-      t.explicit,
-      r.title AS release_title,
-      r.release_type,
-      r.release_date,
-      a.name AS artist_name
-    FROM tracks t
-    JOIN releases r ON r.id = t.release_id
-    LEFT JOIN artists a ON a.id = r.artist_id
-    WHERE r.user_id = ?
-      AND t.isrc = ?
-    LIMIT 1
-  `).bind(userId, normalizedIsrc).first();
-}
-
-async function resolveSalesRelease(env, userId, releaseId) {
-  return await env.DB.prepare(`
-    SELECT
-      r.id,
-      r.title,
-      r.release_type,
-      r.release_date,
-      r.artist_id,
-      a.name AS artist_name
-    FROM releases r
-    LEFT JOIN artists a ON a.id = r.artist_id
-    WHERE r.user_id = ?
-      AND r.id = ?
-    LIMIT 1
-  `).bind(userId, releaseId).first();
-}
-
-async function resolveSalesArtist(env, userId, artistRef) {
-  const decoded = decodeURIComponent(artistRef);
-
-  return await env.DB.prepare(`
-    SELECT DISTINCT
-      a.id,
-      a.name
-    FROM artists a
-    JOIN releases r ON r.artist_id = a.id
-    WHERE r.user_id = ?
-      AND (
-        a.id = ?
-        OR a.name = ?
-      )
-    LIMIT 1
-  `).bind(userId, decoded, decoded).first();
-}
-
-// ============================================================
-// SALES IMPORT ENGINE
-// ============================================================
-
-const SALES_IMPORT_MAX_ROWS = 5000;
-
-function generateSalesImportId() {
-  return `import_${crypto.randomUUID()}`;
-}
-
-function generateSalesImportErrorId() {
-  return `import_error_${crypto.randomUUID()}`;
-}
-
-function normalizeImportSource(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
-function validateImportSource(source) {
-  if (!source) {
-    return {
-      valid: false,
-      error: "source is required"
-    };
-  }
-
-  if (source.length > 100) {
-    return {
-      valid: false,
-      error: "source is too long"
-    };
-  }
-
-  return {
-    valid: true
-  };
-}
-
-function validateImportReportId(value) {
-  if (!value) {
-    return {
-      valid: false,
-      error: "source_report_id is required"
-    };
-  }
-
-  if (String(value).length > 255) {
-    return {
-      valid: false,
-      error: "source_report_id is too long"
-    };
-  }
-
-  return {
-    valid: true
-  };
-}
-
-function normalizeImportRows(body) {
-  if (Array.isArray(body)) {
-    return body;
-  }
-
-  if (Array.isArray(body.rows)) {
-    return body.rows;
-  }
-
-  if (Array.isArray(body.events)) {
-    return body.events;
-  }
-
-  return [];
-}
-
-function normalizeImportedSalesRow(row, rowNumber) {
-  const streams = Number(row.streams || 0);
-  const downloads = Number(row.downloads || 0);
-  const units = Number(
-    row.units !== undefined
-      ? row.units
-      : streams + downloads
-  );
-
-  const grossRevenue = Number(
-    row.gross_revenue !== undefined
-      ? row.gross_revenue
-      : row.grossRevenue || 0
-  );
-
-  const netRevenue = Number(
-    row.net_revenue !== undefined
-      ? row.net_revenue
-      : row.netRevenue !== undefined
-        ? row.netRevenue
-        : grossRevenue
-  );
-
-  const normalized = {
-    release_id: row.release_id || null,
-    track_id: row.track_id || null,
-    isrc: row.isrc
-      ? String(row.isrc)
-          .replace(/-/g, "")
-          .trim()
-          .toUpperCase()
-      : null,
-
-    artist_id: row.artist_id || null,
-
-    channel: row.channel
-      ? String(row.channel).trim().toLowerCase()
-      : null,
-
-    territory: row.territory
-      ? String(row.territory).trim().toUpperCase()
-      : null,
-
-    sale_type: row.sale_type
-      ? String(row.sale_type).trim().toLowerCase()
-      : "stream",
-
-    event_date: row.event_date
-      ? String(row.event_date).trim()
-      : null,
-
-    streams,
-    downloads,
-    units,
-
-    gross_revenue: grossRevenue,
-    net_revenue: netRevenue,
-
-    currency: row.currency
-      ? String(row.currency).trim().toUpperCase()
-      : "USD",
-
-    stream_rate:
-      row.stream_rate !== undefined &&
-      row.stream_rate !== null &&
-      row.stream_rate !== ""
-        ? Number(row.stream_rate)
-        : null,
-
-    source_record_id:
-      row.source_record_id ||
-      row.sourceRecordId ||
-      null,
-
-    metadata_json:
-      row.metadata_json ||
-      row.metadata ||
-      null
-  };
-
-  return {
-    row_number: rowNumber,
-    data: normalized
-  };
-}
-
-function validateImportedSalesRow(row) {
-  const errors = [];
-
-  if (!row.source_record_id) {
-    errors.push({
-      code: "MISSING_SOURCE_RECORD_ID",
-      message: "source_record_id is required"
-    });
-  }
-
-  if (!row.channel) {
-    errors.push({
-      code: "MISSING_CHANNEL",
-      message: "channel is required"
-    });
-  }
-
-  if (!row.territory) {
-    errors.push({
-      code: "MISSING_TERRITORY",
-      message: "territory is required"
-    });
-  }
-
-  if (!row.event_date) {
-    errors.push({
-      code: "MISSING_EVENT_DATE",
-      message: "event_date is required"
-    });
-  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(row.event_date)) {
-    errors.push({
-      code: "INVALID_DATE",
-      message: "event_date must use YYYY-MM-DD format"
-    });
-  }
-
-  if (
-    row.isrc &&
-    !/^[A-Z]{2}[A-Z0-9]{3}[0-9]{2}[0-9]{5}$/.test(row.isrc)
-  ) {
-    errors.push({
-      code: "INVALID_ISRC",
-      message: "Invalid ISRC format"
-    });
-  }
-
-  if (!Number.isFinite(row.streams) || row.streams < 0) {
-    errors.push({
-      code: "INVALID_STREAMS",
-      message: "streams must be a non-negative number"
-    });
-  }
-
-  if (!Number.isFinite(row.downloads) || row.downloads < 0) {
-    errors.push({
-      code: "INVALID_DOWNLOADS",
-      message: "downloads must be a non-negative number"
-    });
-  }
-
-  if (!Number.isFinite(row.units) || row.units < 0) {
-    errors.push({
-      code: "INVALID_UNITS",
-      message: "units must be a non-negative number"
-    });
-  }
-
-  if (
-    !Number.isFinite(row.gross_revenue) ||
-    row.gross_revenue < 0
-  ) {
-    errors.push({
-      code: "INVALID_GROSS_REVENUE",
-      message: "gross_revenue must be a non-negative number"
-    });
-  }
-
-  if (
-    !Number.isFinite(row.net_revenue) ||
-    row.net_revenue < 0
-  ) {
-    errors.push({
-      code: "INVALID_NET_REVENUE",
-      message: "net_revenue must be a non-negative number"
-    });
-  }
-
-  if (!row.currency || !/^[A-Z]{3}$/.test(row.currency)) {
-    errors.push({
-      code: "INVALID_CURRENCY",
-      message: "currency must be a 3-letter ISO-style code"
-    });
-  }
-
-  if (
-    row.stream_rate !== null &&
-    (!Number.isFinite(row.stream_rate) ||
-      row.stream_rate < 0)
-  ) {
-    errors.push({
-      code: "INVALID_STREAM_RATE",
-      message: "stream_rate must be a non-negative number"
-    });
-  }
-
-  return errors;
-}
-
-async function findExistingSalesEvent(
+async function handlePreferencesRoutes(
+  request,
   env,
+  url,
   userId,
-  source,
-  sourceRecordId
+  corsHeaders
 ) {
-  if (!sourceRecordId) {
+// =============================================================
+// PREFERENCES — ARTIST & LABEL
+// =============================================================
+//
+// IMPORTANT SECURITY REQUIREMENT
+//
+// getAccessToken(env, userId) MUST return the Too Lost OAuth token
+// belonging to THIS authenticated user.
+//
+// If your existing getAccessToken() currently uses one global
+// client-credentials token for every Audiory user, that MUST be
+// changed. Otherwise one user's Too Lost preferences can be
+// returned to another user.
+//
+// JavaScript allows the extra userId argument even if your current
+// helper only accepts env, but for proper account isolation your
+// helper should actually use userId to retrieve that user's
+// OAuth access token.
+//
+// =============================================================
+
+
+// =============================================================
+// COMMON JSON RESPONSE HELPER
+// =============================================================
+
+function preferencesJSON(
+  data,
+  status,
+  corsHeaders
+) {
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+
+// =============================================================
+// COMMON VALUE HELPERS
+// =============================================================
+
+function toNullableString(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return null;
   }
 
-  return await env.DB.prepare(`
-    SELECT
-      id,
-      aggregation_status,
-      event_date,
-      streams,
-      gross_revenue,
-      net_revenue
-    FROM sales_events
-    WHERE user_id = ?
-      AND source = ?
-      AND source_record_id = ?
-    LIMIT 1
-  `)
-    .bind(
-      userId,
-      source,
-      sourceRecordId
-    )
-    .first();
-}
+  const text = String(value).trim();
 
-async function createSalesImportError(
-  env,
-  {
-    importId,
-    rowNumber,
-    sourceRecordId,
-    errorCode,
-    errorMessage,
-    rawData,
-    retryCount = 0
-  }
-) {
-  const id = generateSalesImportErrorId();
-
-  await env.DB.prepare(`
-    INSERT INTO sales_import_errors (
-      id,
-      import_id,
-      row_number,
-      source_record_id,
-      status,
-      error_code,
-      error_message,
-      raw_data_json,
-      retry_count
-    )
-    VALUES (?, ?, ?, ?, 'failed', ?, ?, ?, ?)
-  `)
-    .bind(
-      id,
-      importId,
-      rowNumber,
-      sourceRecordId || null,
-      errorCode,
-      errorMessage,
-      rawData
-        ? JSON.stringify(rawData)
-        : null,
-      retryCount
-    )
-    .run();
-
-  return id;
-}
-
-async function updateSalesImportStats(
-  env,
-  importId
-) {
-  const result = await env.DB.prepare(`
-    SELECT
-      COUNT(*) AS records,
-      COALESCE(SUM(gross_revenue), 0) AS gross_revenue,
-      COALESCE(SUM(net_revenue), 0) AS net_revenue,
-      MIN(event_date) AS period_start,
-      MAX(event_date) AS period_end,
-      currency
-    FROM sales_events
-    WHERE user_id = (
-      SELECT user_id
-      FROM sales_imports
-      WHERE id = ?
-    )
-      AND source = (
-        SELECT source
-        FROM sales_imports
-        WHERE id = ?
-      )
-      AND source_report_id = (
-        SELECT source_report_id
-        FROM sales_imports
-        WHERE id = ?
-      )
-  `)
-    .bind(
-      importId,
-      importId,
-      importId
-    )
-    .first();
-
-  return result;
-}
-
-async function aggregateAnalyticsEvent(env, eventId) {
-  const event = await env.DB.prepare(`
-    SELECT *
-    FROM analytics_events
-    WHERE id = ?
-    LIMIT 1
-  `).bind(eventId).first();
-
-  if (!event) {
-    throw new Error("Analytics event not found");
-  }
-
-  // Check if event was already processed
-  if (event.aggregation_status === "aggregated") {
-    return {
-      success: true,
-      event_id: event.id,
-      already_aggregated: true,
-      message: "Analytics event was already aggregated"
-    };
-  }
-
-  const streams = Number(event.streams || 0);
-  const downloads = Number(event.downloads || 0);
-  const revenue = Number(event.revenue_amount || 0);
-
-  /*
-   * ---------------------------------------------------------
-   * 1. analytics_daily
-   * ---------------------------------------------------------
-   */
-  const existingDaily = await env.DB.prepare(`
-    SELECT id
-    FROM analytics_daily
-    WHERE user_id = ?
-      AND event_date = ?
-      AND platform = ?
-      AND COALESCE(territory, '') = COALESCE(?, '')
-      AND COALESCE(release_id, '') = COALESCE(?, '')
-      AND COALESCE(track_id, '') = COALESCE(?, '')
-    LIMIT 1
-  `).bind(
-    event.user_id,
-    event.event_date,
-    event.platform,
-    event.territory || null,
-    event.release_id || null,
-    event.track_id || null
-  ).first();
-
-  if (existingDaily) {
-    await env.DB.prepare(`
-      UPDATE analytics_daily
-      SET
-        streams = streams + ?,
-        downloads = downloads + ?,
-        revenue_amount = revenue_amount + ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).bind(
-      streams,
-      downloads,
-      revenue,
-      existingDaily.id
-    ).run();
-  } else {
-    const dailyId = `daily_${crypto.randomUUID()}`;
-    await env.DB.prepare(`
-      INSERT INTO analytics_daily (
-        id,
-        user_id,
-        release_id,
-        track_id,
-        platform,
-        territory,
-        event_date,
-        streams,
-        downloads,
-        revenue_amount,
-        currency
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      dailyId,
-      event.user_id,
-      event.release_id || null,
-      event.track_id || null,
-      event.platform,
-      event.territory || null,
-      event.event_date,
-      streams,
-      downloads,
-      revenue,
-      event.currency || "USD"
-    ).run();
-  }
-
-  /*
-   * ---------------------------------------------------------
-   * 2. analytics_tracks
-   * ---------------------------------------------------------
-   */
-  if (event.track_id) {
-    const existingTrack = await env.DB.prepare(`
-      SELECT id
-      FROM analytics_tracks
-      WHERE user_id = ?
-        AND track_id = ?
-      LIMIT 1
-    `).bind(
-      event.user_id,
-      event.track_id
-    ).first();
-
-    if (existingTrack) {
-      await env.DB.prepare(`
-        UPDATE analytics_tracks
-        SET
-          total_streams = total_streams + ?,
-          total_downloads = total_downloads + ?,
-          total_revenue = total_revenue + ?,
-          last_stream_date = CASE
-            WHEN last_stream_date IS NULL
-              OR last_stream_date < ?
-            THEN ?
-            ELSE last_stream_date
-          END,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(
-        streams,
-        downloads,
-        revenue,
-        event.event_date,
-        event.event_date,
-        existingTrack.id
-      ).run();
-    } else {
-      const trackId = `analytics_track_${crypto.randomUUID()}`;
-      const track = await env.DB.prepare(`
-        SELECT id, release_id, isrc
-        FROM tracks
-        WHERE id = ?
-        LIMIT 1
-      `).bind(event.track_id).first();
-
-      await env.DB.prepare(`
-        INSERT INTO analytics_tracks (
-          id,
-          user_id,
-          track_id,
-          release_id,
-          isrc,
-          total_streams,
-          total_downloads,
-          total_revenue,
-          currency,
-          last_stream_date
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        trackId,
-        event.user_id,
-        event.track_id,
-        event.release_id || track?.release_id || null,
-        track?.isrc || null,
-        streams,
-        downloads,
-        revenue,
-        event.currency || "USD",
-        event.event_date
-      ).run();
-    }
-  }
-
-  /*
-   * ---------------------------------------------------------
-   * 3. analytics_platforms
-   * ---------------------------------------------------------
-   */
-  const existingPlatform = await env.DB.prepare(`
-    SELECT id
-    FROM analytics_platforms
-    WHERE user_id = ?
-      AND platform = ?
-    LIMIT 1
-  `).bind(
-    event.user_id,
-    event.platform
-  ).first();
-
-  if (existingPlatform) {
-    await env.DB.prepare(`
-      UPDATE analytics_platforms
-      SET
-        total_streams = total_streams + ?,
-        total_downloads = total_downloads + ?,
-        total_revenue = total_revenue + ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).bind(
-      streams,
-      downloads,
-      revenue,
-      existingPlatform.id
-    ).run();
-  } else {
-    const platformId = `analytics_platform_${crypto.randomUUID()}`;
-    await env.DB.prepare(`
-      INSERT INTO analytics_platforms (
-        id,
-        user_id,
-        platform,
-        total_streams,
-        total_downloads,
-        total_revenue,
-        currency
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      platformId,
-      event.user_id,
-      event.platform,
-      streams,
-      downloads,
-      revenue,
-      event.currency || "USD"
-    ).run();
-  }
-
-  /*
-   * ---------------------------------------------------------
-   * 4. analytics_territories
-   * ---------------------------------------------------------
-   */
-  if (event.territory) {
-    const existingTerritory = await env.DB.prepare(`
-      SELECT id
-      FROM analytics_territories
-      WHERE user_id = ?
-        AND territory = ?
-      LIMIT 1
-    `).bind(
-      event.user_id,
-      event.territory
-    ).first();
-
-    if (existingTerritory) {
-      await env.DB.prepare(`
-        UPDATE analytics_territories
-        SET
-          total_streams = total_streams + ?,
-          total_downloads = total_downloads + ?,
-          total_revenue = total_revenue + ?,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(
-        streams,
-        downloads,
-        revenue,
-        existingTerritory.id
-      ).run();
-    } else {
-      const territoryId = `analytics_territory_${crypto.randomUUID()}`;
-      await env.DB.prepare(`
-        INSERT INTO analytics_territories (
-          id,
-          user_id,
-          territory,
-          total_streams,
-          total_downloads,
-          total_revenue,
-          currency
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        territoryId,
-        event.user_id,
-        event.territory,
-        streams,
-        downloads,
-        revenue,
-        event.currency || "USD"
-      ).run();
-    }
-  }
-
-  // Update status to aggregated after successful execution
-  await env.DB.prepare(`
-    UPDATE analytics_events
-    SET
-      aggregation_status = 'aggregated',
-      aggregated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-      AND aggregation_status = 'pending'
-  `).bind(event.id).run();
-
-  return {
-    success: true,
-    event_id: event.id,
-    aggregated: {
-      daily: true,
-      track: Boolean(event.track_id),
-      platform: true,
-      territory: Boolean(event.territory)
-    }
-  };
-}
-
-async function updateDeliveryParentStatus(env, submissionId, releaseId) {
-  const jobsResult = await env.DB.prepare(`
-    SELECT status, COUNT(*) AS count
-    FROM delivery_jobs
-    WHERE submission_id = ?
-    GROUP BY status
-  `)
-    .bind(submissionId)
-    .all();
-
-  const counts = {
-    pending: 0,
-    delivering: 0,
-    delivered: 0,
-    failed: 0
-  };
-
-  for (const row of jobsResult.results || []) {
-    if (counts[row.status] !== undefined) {
-      counts[row.status] = Number(row.count);
-    }
-  }
-
-  const total =
-    counts.pending +
-    counts.delivering +
-    counts.delivered +
-    counts.failed;
-
-  let parentStatus = "delivering";
-
-  // Any failed delivery means the overall delivery has failed
-  if (total > 0 && counts.failed > 0) {
-    parentStatus = "failed";
-  }
-
-  // Only when ALL delivery jobs are delivered
-  else if (total > 0 && counts.delivered === total) {
-    parentStatus = "delivered";
-  }
-
-  await env.DB.prepare(`
-    UPDATE release_submissions
-    SET
-      status = ?,
-      updated_at = CURRENT_TIMESTAMP,
-      completed_at = CASE
-        WHEN ? IN ('delivered', 'failed')
-        THEN CURRENT_TIMESTAMP
-        ELSE completed_at
-      END
-    WHERE id = ?
-  `)
-    .bind(
-      parentStatus,
-      parentStatus,
-      submissionId
-    )
-    .run();
-
-  await env.DB.prepare(`
-    UPDATE releases
-    SET
-      status = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `)
-    .bind(
-      parentStatus,
-      releaseId
-    )
-    .run();
-
-  return {
-    status: parentStatus,
-    counts,
-    total
-  };
-}
-
-async function sandboxDeliveryAdapter({ job, package: distributionPackage, metadata, env }) {
-  // Sandbox-only delivery simulation.
-  // This does NOT contact Spotify, Apple Music, YouTube, or any other DSP.
-
-  const externalId =
-    `sandbox_${job.platform}_${crypto.randomUUID()}`;
-
-  return {
-    success: true,
-    external_id: externalId,
-    platform: job.platform,
-    mode: "sandbox",
-    message: "Sandbox delivery simulated successfully"
-  };
+  return text === ""
+    ? null
+    : text;
 }
 
 
-function getDeliveryAdapter(platform, mode) {
-  // Sandbox adapters
-  if (mode === "sandbox") {
-    const sandboxAdapters = {
-      spotify: sandboxDeliveryAdapter,
-      apple_music: sandboxDeliveryAdapter,
-      youtube_music: sandboxDeliveryAdapter,
-      amazon_music: sandboxDeliveryAdapter,
-      deezer: sandboxDeliveryAdapter,
-      tiktok_music: sandboxDeliveryAdapter
-    };
-
-    return sandboxAdapters[platform] || null;
+function toNullableBoolean(value) {
+  if (
+    value === true ||
+    value === "true"
+  ) {
+    return true;
   }
 
-  // Production adapters will be added here later.
-  const productionAdapters = {
-    spotify: null,
-    apple_music: null,
-    youtube_music: null,
-    amazon_music: null,
-    deezer: null,
-    tiktok_music: null
-  };
-
-  return productionAdapters[platform] || null;
-}
-
-function isValidPlatform(platform) {
-  return [
-    "spotify",
-    "apple_music",
-    "youtube_music",
-    "amazon_music",
-    "deezer",
-    "tiktok_music"
-  ].includes(platform);
-}
-
-function isValidIntegrationMode(mode) {
-  return ["sandbox", "production"].includes(mode);
-}
-
-async function getPlatformIntegration(env, platform) {
-  const integration = await env.DB.prepare(`
-    SELECT
-      id,
-      platform,
-      enabled,
-      mode,
-      adapter_version,
-      created_at,
-      updated_at
-    FROM platform_integrations
-    WHERE platform = ?
-    LIMIT 1
-  `)
-    .bind(platform)
-    .first();
-
-  return integration || null;
-}
-
-// ============================================================
-// ROYALTY CALCULATION HELPERS
-// ============================================================
-
-function generateRoyaltyId(prefix) {
-  return `${prefix}_${crypto.randomUUID()}`;
-}
-
-function roundMoney(value) {
-  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
-}
-
-async function getSalesEventForRoyalty(env, eventId, userId) {
-  const result = await env.DB.prepare(`
-    SELECT
-      se.*,
-      r.title AS release_title,
-      t.title AS track_title
-    FROM sales_events se
-    LEFT JOIN releases r
-      ON r.id = se.release_id
-    LEFT JOIN tracks t
-      ON t.id = se.track_id
-    WHERE se.id = ?
-      AND se.user_id = ?
-    LIMIT 1
-  `).bind(eventId, userId).all();
-
-  return result.results?.[0] || null;
-}
-
-async function getApplicableRoyaltyAgreement(
-  env,
-  userId,
-  salesEvent
-) {
-  // ----------------------------------------------------------
-  // Priority:
-  // 1. Track agreement
-  // 2. Release agreement
-  // 3. Artist agreement
-  // ----------------------------------------------------------
-
-  if (salesEvent.track_id) {
-    const trackAgreement = await env.DB.prepare(`
-      SELECT *
-      FROM royalty_agreements
-      WHERE user_id = ?
-        AND scope_type = 'track'
-        AND track_id = ?
-        AND status = 'active'
-        AND (effective_from IS NULL OR effective_from <= ?)
-        AND (effective_to IS NULL OR effective_to >= ?)
-      ORDER BY version DESC, created_at DESC
-      LIMIT 1
-    `).bind(
-      userId,
-      salesEvent.track_id,
-      salesEvent.event_date,
-      salesEvent.event_date
-    ).first();
-
-    if (trackAgreement) {
-      return trackAgreement;
-    }
-  }
-
-  if (salesEvent.release_id) {
-    const releaseAgreement = await env.DB.prepare(`
-      SELECT *
-      FROM royalty_agreements
-      WHERE user_id = ?
-        AND scope_type = 'release'
-        AND release_id = ?
-        AND status = 'active'
-        AND (effective_from IS NULL OR effective_from <= ?)
-        AND (effective_to IS NULL OR effective_to >= ?)
-      ORDER BY version DESC, created_at DESC
-      LIMIT 1
-    `).bind(
-      userId,
-      salesEvent.release_id,
-      salesEvent.event_date,
-      salesEvent.event_date
-    ).first();
-
-    if (releaseAgreement) {
-      return releaseAgreement;
-    }
-  }
-
-  if (salesEvent.artist_id) {
-    const artistAgreement = await env.DB.prepare(`
-      SELECT *
-      FROM royalty_agreements
-      WHERE user_id = ?
-        AND scope_type = 'artist'
-        AND artist_id = ?
-        AND status = 'active'
-        AND (effective_from IS NULL OR effective_from <= ?)
-        AND (effective_to IS NULL OR effective_to >= ?)
-      ORDER BY version DESC, created_at DESC
-      LIMIT 1
-    `).bind(
-      userId,
-      salesEvent.artist_id,
-      salesEvent.event_date,
-      salesEvent.event_date
-    ).first();
-
-    if (artistAgreement) {
-      return artistAgreement;
-    }
+  if (
+    value === false ||
+    value === "false"
+  ) {
+    return false;
   }
 
   return null;
 }
 
-async function getRoyaltySplitsForCalculation(env, agreementId) {
-  const result = await env.DB.prepare(`
-    SELECT
-      rs.*,
-      a.name AS linked_artist_name,
-      tc.name AS linked_contributor_name
-    FROM royalty_splits rs
-    LEFT JOIN artists a
-      ON a.id = rs.artist_id
-    LEFT JOIN track_contributors tc
-      ON tc.id = rs.contributor_id
-    WHERE rs.agreement_id = ?
-    ORDER BY rs.created_at ASC
-  `).bind(agreementId).all();
 
-  return result.results || [];
-}
+function normalizePlatform(value) {
+  const platform =
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
 
-function getRoyaltyRecipientType(split) {
-  if (split.artist_id) {
-    return "artist";
+  if (
+    platform === "applemusic" ||
+    platform === "apple_music"
+  ) {
+    return "apple";
   }
 
-  if (split.contributor_id) {
-    return "contributor";
+  if (
+    platform === "yt" ||
+    platform === "ytmusic" ||
+    platform === "youtube_music"
+  ) {
+    return "youtube";
   }
 
-  return "other";
+  return platform;
 }
 
-function getRoyaltyRecipientId(split) {
-  return split.artist_id || split.contributor_id || null;
-}
 
-function getRoyaltyRecipientName(split) {
-  return (
-    split.name ||
-    split.linked_artist_name ||
-    split.linked_contributor_name ||
-    "Unknown recipient"
+// =============================================================
+// TOO LOST API
+// =============================================================
+
+async function fetchTooLostAPI(
+  endpoint,
+  method = "GET",
+  body = null,
+  accessToken,
+  env
+) {
+  const baseUrl = (
+    env.TOO_LOST_BASE_URL ||
+    "https://api-sandbox.toolost.com/v1"
+  ).replace(/\/$/, "");
+
+  const options = {
+    method,
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    }
+  };
+
+  if (body !== null) {
+    options.body =
+      JSON.stringify(body);
+  }
+
+  return fetch(
+    `${baseUrl}${endpoint}`,
+    options
   );
 }
 
-// ============================================================
-// AUDIORY ROYALTY ENGINE - STAGE 1
-// ROYALTY AGREEMENTS + SPLITS
-// ============================================================
 
-const ROYALTY_SCOPE_TYPES = [
-  "track",
-  "release",
-  "artist"
-];
-
-const ROYALTY_AGREEMENT_STATUSES = [
-  "draft",
-  "active",
-  "expired",
-  "cancelled"
-];
-
-const ROYALTY_SPLIT_ROLES = [
-  "artist",
-  "featured_artist",
-  "producer",
-  "songwriter",
-  "composer",
-  "lyricist",
-  "remixer",
-  "engineer",
-  "vocalist",
-  "other"
-];
+// =============================================================
+// USER AUTHENTICATION
+// =============================================================
+//
+// Every route below requires the authenticated userId.
+//
+// The surrounding Worker must already set:
+//
+//   const userId = ...
+//
+// from the authenticated Audiory/Firebase user.
+//
+// =============================================================
 
 
-async function requireRoyaltyAuth(request, env) {
-  const token = getBearerToken(request);
+// =============================================================
+// TOO LOST ACCESS TOKEN
+// =============================================================
+//
+// IMPORTANT:
+//
+// Use the existing shared OAuth helper.
+//
+// Pass userId so the helper can return the OAuth token for the
+// CURRENT authenticated user.
+//
+// If your helper currently only accepts env, this call still works
+// syntactically because JavaScript ignores extra arguments.
+// However, the helper MUST actually use userId if it currently
+// returns one shared token for every user.
+//
+// =============================================================
 
-  if (!token) {
-    throw new Error("Authorization required");
-  }
-
-  const auth = await verifyToken(
-    token,
-    env.JWT_SECRET
-  );
-
-  if (!auth) {
-    throw new Error("Invalid or expired token");
-  }
-
-  const userId =
-    auth.sub ||
-    auth.user_id ||
-    auth.userId ||
-    auth.id;
-
+async function getUserTooLostAccessToken(
+  env,
+  userId
+) {
   if (!userId) {
-    throw new Error("Authenticated user ID not found");
+    throw new Error(
+      "Unauthenticated."
+    );
   }
 
-  return {
-    auth,
-    userId,
-    token
-  };
-}
-
-
-function isValidRoyaltyScopeType(value) {
-  return ROYALTY_SCOPE_TYPES.includes(value);
-}
-
-
-function isValidRoyaltyAgreementStatus(value) {
-  return ROYALTY_AGREEMENT_STATUSES.includes(value);
-}
-
-
-function isValidRoyaltySplitRole(value) {
-  return ROYALTY_SPLIT_ROLES.includes(value);
-}
-
-
-function validateRoyaltyPercentage(value) {
-  const percentage = Number(value);
-
-  if (!Number.isFinite(percentage)) {
-    return {
-      valid: false,
-      error: "split_percentage must be a number"
-    };
-  }
-
-  if (percentage < 0 || percentage > 100) {
-    return {
-      valid: false,
-      error: "split_percentage must be between 0 and 100"
-    };
-  }
-
-  return {
-    valid: true,
-    value: percentage
-  };
-}
-
-
-async function getRoyaltyAgreement(
-  env,
-  userId,
-  agreementId
-) {
-  return await env.DB.prepare(`
-    SELECT
-      ra.*,
-
-      r.title AS release_title,
-      r.release_type,
-
-      t.title AS track_title,
-      t.isrc,
-
-      a.name AS artist_name
-
-    FROM royalty_agreements ra
-
-    LEFT JOIN releases r
-      ON r.id = ra.release_id
-
-    LEFT JOIN tracks t
-      ON t.id = ra.track_id
-
-    LEFT JOIN artists a
-      ON a.id = ra.artist_id
-
-    WHERE ra.id = ?
-      AND ra.user_id = ?
-
-    LIMIT 1
-  `)
-    .bind(
-      agreementId,
-      userId
-    )
-    .first();
-}
-
-
-async function getRoyaltyAgreementSplits(
-  env,
-  userId,
-  agreementId
-) {
-  const result = await env.DB.prepare(`
-    SELECT
-      rs.*,
-      a.name AS artist_name
-
-    FROM royalty_splits rs
-
-    LEFT JOIN artists a
-      ON a.id = rs.artist_id
-
-    INNER JOIN royalty_agreements ra
-      ON ra.id = rs.agreement_id
-
-    WHERE rs.agreement_id = ?
-      AND rs.user_id = ?
-      AND ra.user_id = ?
-
-    ORDER BY
-      rs.created_at ASC
-  `)
-    .bind(
-      agreementId,
-      userId,
-      userId
-    )
-    .all();
-
-  return result.results || [];
-}
-
-
-function calculateRoyaltySplitTotal(splits) {
-  return Number(
-    (splits || [])
-      .reduce(
-        (total, split) =>
-          total +
-          Number(
-            split.split_percentage || 0
-          ),
-        0
-      )
-      .toFixed(6)
+  // This helper MUST resolve a Too Lost OAuth token for THIS user.
+  // Never silently fall back to a global client-credentials token
+  // for user-owned preference reads or writes.
+  return getAccessToken(
+    env,
+    userId
   );
 }
 
+// Platform searches do not expose Audiory/Too Lost preference data.
+// They can therefore use the existing application-level Too Lost token
+// while user-owned preference endpoints remain strictly user-scoped.
+async function getTooLostSearchAccessToken(env) {
+  return getAccessToken(env);
+}
 
-async function validateRoyaltyTarget(
+async function proxyTooLostPublicGET(
+  request,
   env,
+  corsHeaders,
   userId,
-  scopeType,
-  releaseId,
-  trackId,
-  artistId
+  tooLostPath
 ) {
-
-  if (scopeType === "track") {
-
-    if (!trackId) {
-      return {
-        valid: false,
-        error: "track_id is required for track scope"
-      };
-    }
-
-    const track =
-      await env.DB.prepare(`
-        SELECT
-          t.id,
-          t.release_id,
-          t.title,
-          t.isrc,
-          r.user_id
-        FROM tracks t
-        INNER JOIN releases r
-          ON r.id = t.release_id
-        WHERE t.id = ?
-        LIMIT 1
-      `)
-        .bind(trackId)
-        .first();
-
-    if (!track) {
-      return {
-        valid: false,
-        error: "Track not found"
-      };
-    }
-
-    if (track.user_id !== userId) {
-      return {
-        valid: false,
-        error:
-          "You do not have permission to use this track"
-      };
-    }
-
-    return {
-      valid: true,
-      target: track
-    };
-  }
-
-
-  if (scopeType === "release") {
-
-    if (!releaseId) {
-      return {
-        valid: false,
-        error:
-          "release_id is required for release scope"
-      };
-    }
-
-    const release =
-      await env.DB.prepare(`
-        SELECT
-          id,
-          user_id,
-          title,
-          release_type,
-          artist_id
-        FROM releases
-        WHERE id = ?
-        LIMIT 1
-      `)
-        .bind(releaseId)
-        .first();
-
-    if (!release) {
-      return {
-        valid: false,
-        error: "Release not found"
-      };
-    }
-
-    if (release.user_id !== userId) {
-      return {
-        valid: false,
-        error:
-          "You do not have permission to use this release"
-      };
-    }
-
-    return {
-      valid: true,
-      target: release
-    };
-  }
-
-
-  if (scopeType === "artist") {
-
-    if (!artistId) {
-      return {
-        valid: false,
-        error:
-          "artist_id is required for artist scope"
-      };
-    }
-
-    const artist =
-      await env.DB.prepare(`
-        SELECT
-          id,
-          user_id,
-          name
-        FROM artists
-        WHERE id = ?
-        LIMIT 1
-      `)
-        .bind(artistId)
-        .first();
-
-    if (!artist) {
-      return {
-        valid: false,
-        error: "Artist not found"
-      };
-    }
-
-    if (artist.user_id !== userId) {
-      return {
-        valid: false,
-        error:
-          "You do not have permission to use this artist"
-      };
-    }
-
-    return {
-      valid: true,
-      target: artist
-    };
-  }
-
-
-  return {
-    valid: false,
-    error: "Invalid royalty scope type"
-  };
-}
-
-
-// -------------------------
-// Main Worker
-// -------------------------
-
-export default {
-  async fetch(request, env) {
-
-    const url = new URL(request.url);
-
-    // OPTIONS
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        headers: corsHeaders
-      });
-    }
-
-    // -------------------------
-    // HOME
-    // -------------------------
-
-    if (
-      url.pathname === "/" &&
-      request.method === "GET"
-    ) {
-      return json({
-        name: "Audiory API",
-        version: "1.0.0",
-        status: "online"
-      });
-    }
-
-    // -------------------------
-    // HEALTH
-    // -------------------------
-
-    if (
-      url.pathname === "/v1/health" &&
-      request.method === "GET"
-    ) {
-      return json({
-        status: "ok",
-        service: "Audiory API",
-        version: "1.0.0"
-      });
-    }
-
-    // -------------------------
-    // DATABASE TEST
-    // -------------------------
-
-    if (
-      url.pathname === "/v1/database" &&
-      request.method === "GET"
-    ) {
-      const result = await env.DB
-        .prepare("SELECT 1 AS connected")
-        .first();
-
-      return json({
-        database: "Audiory D1",
-        status: "connected",
-        result
-      });
-    }
-
-    // -------------------------
-    // REGISTER
-    // -------------------------
-
-    if (
-      url.pathname === "/v1/auth/register" &&
-      request.method === "POST"
-    ) {
-
-      try {
-
-        const body = await request.json();
-
-        const email =
-          String(body.email || "")
-            .trim()
-            .toLowerCase();
-
-        const password =
-          String(body.password || "");
-
-        const role =
-          body.role === "label"
-            ? "label"
-            : "artist";
-
-        if (!email || !password) {
-          return json({
-            success: false,
-            error: "Email and password are required"
-          }, 400);
-        }
-
-        if (password.length < 8) {
-          return json({
-            success: false,
-            error: "Password must be at least 8 characters"
-          }, 400);
-        }
-
-        // Check existing account
-
-        const existing = await env.DB
-          .prepare(
-            "SELECT id FROM users WHERE email = ?"
-          )
-          .bind(email)
-          .first();
-
-        if (existing) {
-          return json({
-            success: false,
-            error: "An account with this email already exists"
-          }, 409);
-        }
-
-        const userId =
-          generateId("user");
-
-        const passwordHash =
-          await hashPassword(password);
-
-        await env.DB
-          .prepare(`
-            INSERT INTO users (
-              id,
-              email,
-              password_hash,
-              role
-            )
-            VALUES (?, ?, ?, ?)
-          `)
-          .bind(
-            userId,
-            email,
-            passwordHash,
-            role
-          )
-          .run();
-
-        return json({
-          success: true,
-          message: "Account created successfully",
-          user: {
-            id: userId,
-            email,
-            role
-          }
-        }, 201);
-
-      } catch (error) {
-
-        return json({
-          success: false,
-          error: "Unable to create account"
-        }, 500);
-      }
-    }
-
-    // -------------------------
-    // LOGIN
-    // -------------------------
-
-    if (
-      url.pathname === "/v1/auth/login" &&
-      request.method === "POST"
-    ) {
-
-      try {
-
-        const body = await request.json();
-
-        const email =
-          String(body.email || "")
-            .trim()
-            .toLowerCase();
-
-        const password =
-          String(body.password || "");
-
-        if (!email || !password) {
-          return json({
-            success: false,
-            error: "Email and password are required"
-          }, 400);
-        }
-
-        const user = await env.DB
-          .prepare(`
-            SELECT
-              id,
-              email,
-              password_hash,
-              role
-            FROM users
-            WHERE email = ?
-          `)
-          .bind(email)
-          .first();
-
-        if (!user) {
-          return json({
-            success: false,
-            error: "Invalid email or password"
-          }, 401);
-        }
-
-        const valid =
-          await verifyPassword(
-            password,
-            user.password_hash
-          );
-
-        if (!valid) {
-          return json({
-            success: false,
-            error: "Invalid email or password"
-          }, 401);
-        }
-
-        const token =
-          await createToken(
-            user,
-            env.JWT_SECRET
-          );
-
-        return json({
-          success: true,
-          token,
-          token_type: "Bearer",
-          expires_in: 86400,
-          user: {
-            id: user.id,
-            email: user.email,
-            role: user.role
-          }
-        });
-
-      } catch (error) {
-
-        return json({
-          success: false,
-          error: "Unable to login"
-        }, 500);
-      }
-    }
-
-    // -------------------------
-    // GET CURRENT USER
-    // -------------------------
-
-    if (
-      url.pathname === "/v1/auth/me" &&
-      request.method === "GET"
-    ) {
-
-      const authorization =
-        request.headers.get("Authorization");
-
-      if (!authorization) {
-        return json({
-          success: false,
-          error: "Authorization required"
-        }, 401);
-      }
-
-      const token =
-        authorization.replace(
-          "Bearer ",
-          ""
-        );
-
-      const payload =
-        await verifyToken(
-          token,
-          env.JWT_SECRET
-        );
-
-      if (!payload) {
-        return json({
-          success: false,
-          error: "Invalid or expired token"
-        }, 401);
-      }
-
-      return json({
-        success: true,
-        user: {
-          id: payload.sub,
-          email: payload.email,
-          role: payload.role
-        }
-      });
-    }
-
-    // -------------------------
-    // GET ARTISTS
-    // -------------------------
-
-    if (
-      url.pathname === "/v1/artists" &&
-      request.method === "GET"
-    ) {
-
-      const { results } =
-        await env.DB
-          .prepare(`
-            SELECT
-              id,
-              user_id,
-              name,
-              bio,
-              country,
-              created_at
-            FROM artists
-            ORDER BY created_at DESC
-          `)
-          .all();
-
-      return json({
-        success: true,
-        artists: results
-      });
-    }
-
-    // -------------------------
-    // CREATE ARTIST
-    // -------------------------
-
-    if (
-      url.pathname === "/v1/artists" &&
-      request.method === "POST"
-    ) {
-      try {
-        // Get Authorization header
-        const authorization =
-          request.headers.get("Authorization");
-
-        if (!authorization) {
-          return json({
-            success: false,
-            error: "Authorization required"
-          }, 401);
-        }
-
-        // Make sure it's a Bearer token
-        if (!authorization.startsWith("Bearer ")) {
-          return json({
-            success: false,
-            error: "Invalid authorization format"
-          }, 401);
-        }
-
-        const token =
-          authorization.substring(7);
-
-        // Verify JWT
-        const user =
-          await verifyToken(
-            token,
-            env.JWT_SECRET
-          );
-
-        if (!user) {
-          return json({
-            success: false,
-            error: "Invalid or expired token"
-          }, 401);
-        }
-
-        // Read request body
-        const body =
-          await request.json();
-
-        const name =
-          String(body.name || "").trim();
-
-        const bio =
-          body.bio
-            ? String(body.bio).trim()
-            : null;
-
-        const country =
-          body.country
-            ? String(body.country).trim()
-            : null;
-
-        // Validate artist name
-        if (!name) {
-          return json({
-            success: false,
-            error: "Artist name is required"
-          }, 400);
-        }
-
-        // Generate artist ID
-        const artistId =
-          generateId("artist");
-
-        // Create artist using
-        // authenticated user's ID
-        await env.DB
-          .prepare(`
-            INSERT INTO artists (
-              id,
-              user_id,
-              name,
-              bio,
-              country
-            )
-            VALUES (?, ?, ?, ?, ?)
-          `)
-          .bind(
-            artistId,
-            user.sub,
-            name,
-            bio,
-            country
-          )
-          .run();
-
-        return json({
-          success: true,
-          message: "Artist created successfully",
-          artist: {
-            id: artistId,
-            user_id: user.sub,
-            name,
-            bio,
-            country
-          }
-        }, 201);
-
-      } catch (error) {
-
-        return json({
-          success: false,
-          error: "Unable to create artist"
-        }, 500);
-
-      }
-    }
-
-    // -------------------------
-    // CREATE RELEASE
-    // -------------------------
-
-    if (
-      url.pathname === "/v1/releases" &&
-      request.method === "POST"
-    ) {
-      try {
-        // -------------------------
-        // Authentication
-        // -------------------------
-
-        const authorization =
-          request.headers.get("Authorization");
-
-        if (!authorization) {
-          return json({
-            success: false,
-            error: "Authorization required"
-          }, 401);
-        }
-
-        if (!authorization.startsWith("Bearer ")) {
-          return json({
-            success: false,
-            error: "Invalid authorization format"
-          }, 401);
-        }
-
-        const token =
-          authorization.substring(7);
-
-        const user =
-          await verifyToken(
-            token,
-            env.JWT_SECRET
-          );
-
-        if (!user) {
-          return json({
-            success: false,
-            error: "Invalid or expired token"
-          }, 401);
-        }
-
-        // -------------------------
-        // Read request body
-        // -------------------------
-
-        const body =
-          await request.json();
-
-        const artistId =
-          String(body.artist_id || "").trim();
-
-        const title =
-          String(body.title || "").trim();
-
-        const releaseType =
-          String(body.release_type || "single")
-            .trim()
-            .toLowerCase();
-
-        const version =
-          body.version
-            ? String(body.version).trim()
-            : null;
-
-        const genre =
-          body.genre
-            ? String(body.genre).trim()
-            : null;
-
-        const subgenre =
-          body.subgenre
-            ? String(body.subgenre).trim()
-            : null;
-
-        const language =
-          body.language
-            ? String(body.language).trim()
-            : null;
-
-        const releaseDate =
-          body.release_date
-            ? String(body.release_date).trim()
-            : null;
-
-        const originalReleaseDate =
-          body.original_release_date
-            ? String(body.original_release_date).trim()
-            : null;
-
-        const upc =
-          body.upc
-            ? String(body.upc).trim()
-            : null;
-
-        const copyrightLine =
-          body.copyright_line
-            ? String(body.copyright_line).trim()
-            : null;
-
-        const phonographicCopyrightLine =
-          body.phonographic_copyright_line
-            ? String(body.phonographic_copyright_line).trim()
-            : null;
-
-        const labelName =
-          body.label_name
-            ? String(body.label_name).trim()
-            : null;
-
-        const explicit =
-          body.explicit === true ? 1 : 0;
-
-        // -------------------------
-        // Validation
-        // -------------------------
-
-        if (!artistId) {
-          return json({
-            success: false,
-            error: "artist_id is required"
-          }, 400);
-        }
-
-        if (!title) {
-          return json({
-            success: false,
-            error: "Release title is required"
-          }, 400);
-        }
-
-        const allowedReleaseTypes = [
-          "single",
-          "ep",
-          "album"
-        ];
-
-        if (!allowedReleaseTypes.includes(releaseType)) {
-          return json({
-            success: false,
-            error: "release_type must be single, ep, or album"
-          }, 400);
-        }
-
-        // -------------------------
-        // Verify artist ownership
-        // -------------------------
-
-        const artist =
-          await env.DB
-            .prepare(`
-              SELECT
-                id,
-                user_id,
-                name
-              FROM artists
-              WHERE id = ?
-            `)
-            .bind(artistId)
-            .first();
-
-        if (!artist) {
-          return json({
-            success: false,
-            error: "Artist not found"
-          }, 404);
-        }
-
-        if (artist.user_id !== user.sub) {
-          return json({
-            success: false,
-            error: "You do not have permission to create a release for this artist"
-          }, 403);
-        }
-
-        // -------------------------
-        // Generate release ID
-        // -------------------------
-
-        const releaseId =
-          generateId("release");
-
-        // -------------------------
-        // Create release
-        // -------------------------
-
-        await env.DB
-          .prepare(`
-            INSERT INTO releases (
-              id,
-              user_id,
-              artist_id,
-              title,
-              release_type,
-              version,
-              genre,
-              subgenre,
-              language,
-              release_date,
-              original_release_date,
-              upc,
-              copyright_line,
-              phonographic_copyright_line,
-              label_name,
-              explicit,
-              status
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `)
-          .bind(
-            releaseId,
-            user.sub,
-            artistId,
-            title,
-            releaseType,
-            version,
-            genre,
-            subgenre,
-            language,
-            releaseDate,
-            originalReleaseDate,
-            upc,
-            copyrightLine,
-            phonographicCopyrightLine,
-            labelName,
-            explicit,
-            "draft"
-          )
-          .run();
-
-        // -------------------------
-        // Response
-        // -------------------------
-
-        return json({
-          success: true,
-          message: "Release created successfully",
-          release: {
-            id: releaseId,
-            user_id: user.sub,
-            artist_id: artistId,
-            artist_name: artist.name,
-            title,
-            release_type: releaseType,
-            version,
-            genre,
-            subgenre,
-            language,
-            release_date: releaseDate,
-            original_release_date: originalReleaseDate,
-            upc,
-            copyright_line: copyrightLine,
-            phonographic_copyright_line:
-              phonographicCopyrightLine,
-            label_name: labelName,
-            explicit: Boolean(explicit),
-            status: "draft"
-          }
-        }, 201);
-
-      } catch (error) {
-
-        return json({
-          success: false,
-          error: "Unable to create release"
-        }, 500);
-      }
-    }
-
-    // -------------------------
-    // CREATE TRACK
-    // POST /v1/releases/:release_id/tracks
-    // -------------------------
-
-    if (
-      request.method === "POST" &&
-      url.pathname.match(/^\/v1\/releases\/[^/]+\/tracks$/)
-    ) {
-      try {
-        // -------------------------
-        // Authentication
-        // -------------------------
-
-        const authorization =
-          request.headers.get("Authorization");
-
-        if (!authorization) {
-          return json({
-            success: false,
-            error: "Authorization required"
-          }, 401);
-        }
-
-        if (!authorization.startsWith("Bearer ")) {
-          return json({
-            success: false,
-            error: "Invalid authorization format"
-          }, 401);
-        }
-
-        const token =
-          authorization.substring(7);
-
-        const user =
-          await verifyToken(
-            token,
-            env.JWT_SECRET
-          );
-
-        if (!user) {
-          return json({
-            success: false,
-            error: "Invalid or expired token"
-          }, 401);
-        }
-
-        // -------------------------
-        // Get release ID
-        // -------------------------
-
-        const releaseId =
-          url.pathname.split("/")[3];
-
-        if (!releaseId) {
-          return json({
-            success: false,
-            error: "Release ID is required"
-          }, 400);
-        }
-
-        // -------------------------
-        // Find release
-        // -------------------------
-
-        const release =
-          await env.DB
-            .prepare(`
-              SELECT
-                id,
-                user_id,
-                artist_id,
-                title,
-                release_type,
-                status
-              FROM releases
-              WHERE id = ?
-            `)
-            .bind(releaseId)
-            .first();
-
-        if (!release) {
-          return json({
-            success: false,
-            error: "Release not found"
-          }, 404);
-        }
-
-        // -------------------------
-        // Verify ownership
-        // -------------------------
-
-        if (release.user_id !== user.sub) {
-          return json({
-            success: false,
-            error: "You do not have permission to modify this release"
-          }, 403);
-        }
-
-        // -------------------------
-        // Read request body
-        // -------------------------
-
-        const body =
-          await request.json();
-
-        const title =
-          String(body.title || "").trim();
-
-        const version =
-          body.version
-            ? String(body.version).trim()
-            : null;
-
-        const isrc =
-          body.isrc
-            ? String(body.isrc).trim().toUpperCase()
-            : null;
-
-        const trackNumber =
-          Number(body.track_number);
-
-        const discNumber =
-          body.disc_number !== undefined
-            ? Number(body.disc_number)
-            : 1;
-
-        const durationSeconds =
-          body.duration_seconds !== undefined
-            ? Number(body.duration_seconds)
-            : null;
-
-        const genre =
-          body.genre
-            ? String(body.genre).trim()
-            : null;
-
-        const language =
-          body.language
-            ? String(body.language).trim()
-            : null;
-
-        const explicit =
-          body.explicit === true ? 1 : 0;
-
-        const lyrics =
-          body.lyrics
-            ? String(body.lyrics)
-            : null;
-
-        // -------------------------
-        // Validate title
-        // -------------------------
-
-        if (!title) {
-          return json({
-            success: false,
-            error: "Track title is required"
-          }, 400);
-        }
-
-        // -------------------------
-        // Validate track number
-        // -------------------------
-
-        if (
-          !Number.isInteger(trackNumber) ||
-          trackNumber < 1
-        ) {
-          return json({
-            success: false,
-            error: "track_number must be a positive integer"
-          }, 400);
-        }
-
-        // -------------------------
-        // Validate disc number
-        // -------------------------
-
-        if (
-          !Number.isInteger(discNumber) ||
-          discNumber < 1
-        ) {
-          return json({
-            success: false,
-            error: "disc_number must be a positive integer"
-          }, 400);
-        }
-
-        // -------------------------
-        // Validate duration
-        // -------------------------
-
-        if (
-          durationSeconds !== null &&
-          (
-            !Number.isInteger(durationSeconds) ||
-            durationSeconds < 0
-          )
-        ) {
-          return json({
-            success: false,
-            error: "duration_seconds must be a non-negative integer"
-          }, 400);
-        }
-
-        // -------------------------
-        // Check duplicate track
-        // -------------------------
-
-        const existingTrack =
-          await env.DB
-            .prepare(`
-              SELECT id
-              FROM tracks
-              WHERE release_id = ?
-                AND track_number = ?
-                AND disc_number = ?
-            `)
-            .bind(
-              releaseId,
-              trackNumber,
-              discNumber
-            )
-            .first();
-
-        if (existingTrack) {
-          return json({
-            success: false,
-            error: "A track with this track number already exists on this release"
-          }, 409);
-        }
-
-        // -------------------------
-        // Validate ISRC format
-        // -------------------------
-
-        if (isrc) {
-          const isrcPattern =
-            /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/;
-
-          if (!isrcPattern.test(isrc)) {
-            return json({
-              success: false,
-              error: "Invalid ISRC format"
-            }, 400);
-          }
-        }
-
-        // -------------------------
-        // Generate track ID
-        // -------------------------
-
-        const trackId =
-          generateId("track");
-
-        // -------------------------
-        // Create track
-        // -------------------------
-
-        await env.DB
-          .prepare(`
-            INSERT INTO tracks (
-              id,
-              release_id,
-              title,
-              version,
-              isrc,
-              track_number,
-              disc_number,
-              duration_seconds,
-              genre,
-              language,
-              explicit,
-              lyrics
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `)
-          .bind(
-            trackId,
-            releaseId,
-            title,
-            version,
-            isrc,
-            trackNumber,
-            discNumber,
-            durationSeconds,
-            genre,
-            language,
-            explicit,
-            lyrics
-          )
-          .run();
-
-        // -------------------------
-        // Return created track
-        // -------------------------
-
-        return json({
-          success: true,
-          message: "Track created successfully",
-          track: {
-            id: trackId,
-            release_id: releaseId,
-            title,
-            version,
-            isrc,
-            track_number: trackNumber,
-            disc_number: discNumber,
-            duration_seconds: durationSeconds,
-            genre,
-            language,
-            explicit: Boolean(explicit),
-            lyrics,
-            audio_asset_id: null
-          }
-        }, 201);
-
-      } catch (error) {
-
-        console.error(error);
-
-        return json({
-          success: false,
-          error: "Unable to create track"
-        }, 500);
-      }
-    }
-
-    // -------------------------
-// UPLOAD AUDIO
-// POST /v1/uploads/audio
-// -------------------------
-
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/uploads/audio"
-) {
-  try {
-    // -------------------------
-    // Authentication
-    // -------------------------
-
-    const authorization =
-      request.headers.get("Authorization");
-
-    if (!authorization) {
-      return json({
-        success: false,
-        error: "Authorization required"
-      }, 401);
-    }
-
-    if (!authorization.startsWith("Bearer ")) {
-      return json({
-        success: false,
-        error: "Invalid authorization format"
-      }, 401);
-    }
-
-    const token =
-      authorization.substring(7);
-
-    const user =
-      await verifyToken(
-        token,
-        env.JWT_SECRET
-      );
-
-    if (!user) {
-      return json({
-        success: false,
-        error: "Invalid or expired token"
-      }, 401);
-    }
-
-    // -------------------------
-    // Get track ID
-    // -------------------------
-
-    const trackId =
-      url.searchParams.get("track_id");
-
-    if (!trackId) {
-      return json({
-        success: false,
-        error: "track_id is required"
-      }, 400);
-    }
-
-    // -------------------------
-    // Find track + release
-    // -------------------------
-
-    const track =
-      await env.DB
-        .prepare(`
-          SELECT
-            tracks.id,
-            tracks.release_id,
-            tracks.title,
-            releases.user_id,
-            releases.title AS release_title
-          FROM tracks
-          INNER JOIN releases
-            ON tracks.release_id = releases.id
-          WHERE tracks.id = ?
-        `)
-        .bind(trackId)
-        .first();
-
-    if (!track) {
-      return json({
-        success: false,
-        error: "Track not found"
-      }, 404);
-    }
-
-    // -------------------------
-    // Verify ownership
-    // -------------------------
-
-    if (track.user_id !== user.sub) {
-      return json({
-        success: false,
-        error: "You do not have permission to upload audio for this track"
-      }, 403);
-    }
-
-    // -------------------------
-    // Validate content type
-    // -------------------------
-
-    const contentType =
-      request.headers.get("Content-Type") || "";
-
-    const allowedTypes = [
-      "audio/wav",
-      "audio/x-wav",
-      "audio/wave",
-      "audio/flac",
-      "audio/mpeg",
-      "audio/mp4",
-      "audio/aac",
-      "audio/x-m4a"
-    ];
-
-    if (!allowedTypes.includes(contentType)) {
-      return json({
-        success: false,
-        error: "Unsupported audio format",
-        allowed_formats: [
-          "WAV",
-          "FLAC",
-          "MP3",
-          "M4A",
-          "AAC"
-        ]
-      }, 400);
-    }
-
-    // -------------------------
-    // Validate file size
-    // -------------------------
-
-    const contentLength =
-      request.headers.get("Content-Length");
-
-    const sizeBytes =
-      Number(contentLength);
-
-    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
-      return json({
-        success: false,
-        error: "Content-Length header is required"
-      }, 400);
-    }
-
-    // 500 MB maximum for now
-    const maxSize =
-      500 * 1024 * 1024;
-
-    if (sizeBytes > maxSize) {
-      return json({
-        success: false,
-        error: "Audio file is too large. Maximum size is 500 MB"
-      }, 413);
-    }
-
-    // -------------------------
-    // Generate asset ID
-    // -------------------------
-
-    const assetId =
-      generateId("asset");
-
-    // -------------------------
-    // Determine extension
-    // -------------------------
-
-    let extension = "audio";
-
-    if (
-      contentType === "audio/wav" ||
-      contentType === "audio/x-wav" ||
-      contentType === "audio/wave"
-    ) {
-      extension = "wav";
-    } else if (contentType === "audio/flac") {
-      extension = "flac";
-    } else if (contentType === "audio/mpeg") {
-      extension = "mp3";
-    } else if (
-      contentType === "audio/mp4" ||
-      contentType === "audio/x-m4a"
-    ) {
-      extension = "m4a";
-    } else if (contentType === "audio/aac") {
-      extension = "aac";
-    }
-
-    // -------------------------
-    // Generate R2 key
-    // -------------------------
-
-    const r2Key =
-      `audio/${user.sub}/${track.release_id}/${trackId}/${assetId}.${extension}`;
-
-    // -------------------------
-    // Upload to R2
-    // -------------------------
-
-    await env.MEDIA.put(
-      r2Key,
-      request.body,
-      {
-        httpMetadata: {
-          contentType
-        },
-
-        customMetadata: {
-          asset_id: assetId,
-          user_id: user.sub,
-          release_id: track.release_id,
-          track_id: trackId
-        }
-      }
+  if (!userId) {
+    return preferencesJSON(
+      { error: "Unauthenticated." },
+      401,
+      corsHeaders
     );
-
-    // -------------------------
-    // Create D1 asset record
-    // -------------------------
-
-    await env.DB
-      .prepare(`
-        INSERT INTO assets (
-          id,
-          user_id,
-          release_id,
-          track_id,
-          type,
-          filename,
-          content_type,
-          size_bytes,
-          r2_key,
-          status
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .bind(
-        assetId,
-        user.sub,
-        track.release_id,
-        trackId,
-        "audio",
-        track.title,
-        contentType,
-        sizeBytes,
-        r2Key,
-        "uploaded"
-      )
-      .run();
-
-    // -------------------------
-    // Connect asset to track
-    // -------------------------
-
-    await env.DB
-      .prepare(`
-        UPDATE tracks
-        SET audio_asset_id = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(
-        assetId,
-        trackId
-      )
-      .run();
-
-    // -------------------------
-    // Response
-    // -------------------------
-
-    return json({
-      success: true,
-      message: "Audio uploaded successfully",
-
-      asset: {
-        id: assetId,
-        type: "audio",
-        track_id: trackId,
-        release_id: track.release_id,
-        filename: track.title,
-        content_type: contentType,
-        size_bytes: sizeBytes,
-        r2_key: r2Key,
-        status: "uploaded"
-      }
-    }, 201);
-
-  } catch (error) {
-
-    console.error(error);
-
-    return json({
-      success: false,
-      error: "Unable to upload audio"
-    }, 500);
   }
-}
 
-// -------------------------
-// UPLOAD ARTWORK
-// POST /v1/uploads/artwork?release_id=...
-// -------------------------
+  let accessToken;
 
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/uploads/artwork"
-) {
   try {
-    // -------------------------
-    // Authentication
-    // -------------------------
-
-    const authorization =
-      request.headers.get("Authorization");
-
-    if (!authorization) {
-      return json({
-        success: false,
-        error: "Authorization required"
-      }, 401);
-    }
-
-    if (!authorization.startsWith("Bearer ")) {
-      return json({
-        success: false,
-        error: "Invalid authorization format"
-      }, 401);
-    }
-
-    const token =
-      authorization.substring(7);
-
-    const user =
-      await verifyToken(
-        token,
-        env.JWT_SECRET
-      );
-
-    if (!user) {
-      return json({
-        success: false,
-        error: "Invalid or expired token"
-      }, 401);
-    }
-
-    // -------------------------
-    // Get release ID
-    // -------------------------
-
-    const releaseId =
-      url.searchParams.get("release_id");
-
-    if (!releaseId) {
-      return json({
-        success: false,
-        error: "release_id is required"
-      }, 400);
-    }
-
-    // -------------------------
-    // Find release
-    // -------------------------
-
-    const release =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            user_id,
-            title,
-            artwork_asset_id
-          FROM releases
-          WHERE id = ?
-        `)
-        .bind(releaseId)
-        .first();
-
-    if (!release) {
-      return json({
-        success: false,
-        error: "Release not found"
-      }, 404);
-    }
-
-    // -------------------------
-    // Verify ownership
-    // -------------------------
-
-    if (release.user_id !== user.sub) {
-      return json({
-        success: false,
-        error: "You do not have permission to upload artwork for this release"
-      }, 403);
-    }
-
-    // -------------------------
-    // Validate content type
-    // -------------------------
-
-    const contentType =
-      request.headers.get("Content-Type") || "";
-
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/webp"
-    ];
-
-    if (!allowedTypes.includes(contentType)) {
-      return json({
-        success: false,
-        error: "Unsupported artwork format",
-        allowed_formats: [
-          "JPEG",
-          "PNG",
-          "WebP"
-        ]
-      }, 400);
-    }
-
-    // -------------------------
-    // Validate file size
-    // -------------------------
-
-    const contentLength =
-      request.headers.get("Content-Length");
-
-    const sizeBytes =
-      Number(contentLength);
-
-    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
-      return json({
-        success: false,
-        error: "Content-Length header is required"
-      }, 400);
-    }
-
-    // 20 MB maximum
-    const maxSize =
-      20 * 1024 * 1024;
-
-    if (sizeBytes > maxSize) {
-      return json({
-        success: false,
-        error: "Artwork file is too large. Maximum size is 20 MB"
-      }, 413);
-    }
-
-    // -------------------------
-    // Generate asset ID
-    // -------------------------
-
-    const assetId =
-      generateId("asset");
-
-    // -------------------------
-    // Determine extension
-    // -------------------------
-
-    let extension = "jpg";
-
-    if (contentType === "image/png") {
-      extension = "png";
-    }
-
-    if (contentType === "image/webp") {
-      extension = "webp";
-    }
-
-    // -------------------------
-    // Generate R2 key
-    // -------------------------
-
-    const r2Key =
-      `artwork/${user.sub}/${releaseId}/${assetId}.${extension}`;
-
-    // -------------------------
-    // Upload to R2
-    // -------------------------
-
-    await env.MEDIA.put(
-      r2Key,
-      request.body,
-      {
-        httpMetadata: {
-          contentType
-        },
-
-        customMetadata: {
-          asset_id: assetId,
-          user_id: user.sub,
-          release_id: releaseId,
-          type: "artwork"
-        }
-      }
-    );
-
-    // -------------------------
-    // Create asset record
-    // -------------------------
-
-    await env.DB
-      .prepare(`
-        INSERT INTO assets (
-          id,
-          user_id,
-          release_id,
-          track_id,
-          type,
-          filename,
-          content_type,
-          size_bytes,
-          r2_key,
-          status
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .bind(
-        assetId,
-        user.sub,
-        releaseId,
-        null,
-        "artwork",
-        `${release.title} artwork`,
-        contentType,
-        sizeBytes,
-        r2Key,
-        "uploaded"
-      )
-      .run();
-
-    // -------------------------
-    // Connect artwork to release
-    // -------------------------
-
-    await env.DB
-      .prepare(`
-        UPDATE releases
-        SET artwork_asset_id = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(
-        assetId,
-        releaseId
-      )
-      .run();
-
-    // -------------------------
-    // Response
-    // -------------------------
-
-    return json({
-      success: true,
-      message: "Artwork uploaded successfully",
-
-      asset: {
-        id: assetId,
-        type: "artwork",
-        release_id: releaseId,
-        filename: `${release.title} artwork`,
-        content_type: contentType,
-        size_bytes: sizeBytes,
-        r2_key: r2Key,
-        status: "uploaded"
-      }
-    }, 201);
-
-  } catch (error) {
-
-    console.error(error);
-
-    return json({
-      success: false,
-      error: "Unable to upload artwork"
-    }, 500);
-  }
-}
-
-// -------------------------
-// GET RELEASE
-// GET /v1/releases/:release_id
-// -------------------------
-
-if (
-  request.method === "GET" &&
-  url.pathname.match(/^\/v1\/releases\/[^/]+$/)
-) {
-  try {
-    // -------------------------
-    // Authentication
-    // -------------------------
-
-    const authorization =
-      request.headers.get("Authorization");
-
-    if (!authorization) {
-      return json({
-        success: false,
-        error: "Authorization required"
-      }, 401);
-    }
-
-    if (!authorization.startsWith("Bearer ")) {
-      return json({
-        success: false,
-        error: "Invalid authorization format"
-      }, 401);
-    }
-
-    const token =
-      authorization.substring(7);
-
-    const user =
-      await verifyToken(
-        token,
-        env.JWT_SECRET
-      );
-
-    if (!user) {
-      return json({
-        success: false,
-        error: "Invalid or expired token"
-      }, 401);
-    }
-
-    // -------------------------
-    // Get release ID
-    // -------------------------
-
-    const releaseId =
-      url.pathname.split("/")[3];
-
-    if (!releaseId) {
-      return json({
-        success: false,
-        error: "Release ID is required"
-      }, 400);
-    }
-
-    // -------------------------
-    // Get release
-    // -------------------------
-
-    const release =
-      await env.DB
-        .prepare(`
-          SELECT
-            releases.id,
-            releases.user_id,
-            releases.artist_id,
-            releases.title,
-            releases.release_type,
-            releases.version,
-            releases.genre,
-            releases.subgenre,
-            releases.language,
-            releases.release_date,
-            releases.original_release_date,
-            releases.upc,
-            releases.copyright_line,
-            releases.phonographic_copyright_line,
-            releases.label_name,
-            releases.artwork_asset_id,
-            releases.explicit,
-            releases.status,
-            releases.created_at,
-            releases.updated_at,
-
-            artists.name AS artist_name,
-            artists.bio AS artist_bio,
-            artists.country AS artist_country
-
-          FROM releases
-
-          INNER JOIN artists
-            ON releases.artist_id = artists.id
-
-          WHERE releases.id = ?
-        `)
-        .bind(releaseId)
-        .first();
-
-    if (!release) {
-      return json({
-        success: false,
-        error: "Release not found"
-      }, 404);
-    }
-
-    // -------------------------
-    // Verify ownership
-    // -------------------------
-
-    if (release.user_id !== user.sub) {
-      return json({
-        success: false,
-        error: "You do not have permission to view this release"
-      }, 403);
-    }
-
-    // -------------------------
-    // Get tracks
-    // -------------------------
-
-    const tracksResult =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            release_id,
-            title,
-            version,
-            isrc,
-            track_number,
-            disc_number,
-            duration_seconds,
-            genre,
-            language,
-            explicit,
-            lyrics,
-            audio_asset_id,
-            created_at,
-            updated_at
-
-          FROM tracks
-
-          WHERE release_id = ?
-
-          ORDER BY
-            disc_number ASC,
-            track_number ASC
-        `)
-        .bind(releaseId)
-        .all();
-
-    // -------------------------
-    // Get artwork asset
-    // -------------------------
-
-    let artwork = null;
-
-    if (release.artwork_asset_id) {
-
-      artwork =
-        await env.DB
-          .prepare(`
-            SELECT
-              id,
-              type,
-              filename,
-              content_type,
-              size_bytes,
-              r2_key,
-              status,
-              created_at
-
-            FROM assets
-
-            WHERE id = ?
-              AND user_id = ?
-          `)
-          .bind(
-            release.artwork_asset_id,
-            user.sub
-          )
-          .first();
-    }
-
-    // -------------------------
-    // Get audio assets
-    // -------------------------
-
-    const tracks =
-      await Promise.all(
-        (tracksResult.results || []).map(
-          async (track) => {
-
-            let audio = null;
-
-            if (track.audio_asset_id) {
-
-              audio =
-                await env.DB
-                  .prepare(`
-                    SELECT
-                      id,
-                      type,
-                      filename,
-                      content_type,
-                      size_bytes,
-                      r2_key,
-                      status,
-                      created_at
-
-                    FROM assets
-
-                    WHERE id = ?
-                      AND user_id = ?
-                  `)
-                  .bind(
-                    track.audio_asset_id,
-                    user.sub
-                  )
-                  .first();
-            }
-
-            return {
-              ...track,
-              explicit: Boolean(track.explicit),
-              audio_asset: audio
-            };
-          }
-        )
-      );
-
-    // -------------------------
-    // Response
-    // -------------------------
-
-    return json({
-      success: true,
-
-      release: {
-        id: release.id,
-        user_id: release.user_id,
-        artist_id: release.artist_id,
-
-        artist: {
-          id: release.artist_id,
-          name: release.artist_name,
-          bio: release.artist_bio,
-          country: release.artist_country
-        },
-
-        title: release.title,
-        release_type: release.release_type,
-        version: release.version,
-
-        genre: release.genre,
-        subgenre: release.subgenre,
-        language: release.language,
-
-        release_date: release.release_date,
-        original_release_date:
-          release.original_release_date,
-
-        upc: release.upc,
-
-        copyright_line:
-          release.copyright_line,
-
-        phonographic_copyright_line:
-          release.phonographic_copyright_line,
-
-        label_name:
-          release.label_name,
-
-        explicit:
-          Boolean(release.explicit),
-
-        status:
-          release.status,
-
-        artwork_asset:
-          artwork,
-
-        tracks,
-
-        created_at:
-          release.created_at,
-
-        updated_at:
-          release.updated_at
-      }
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    return json({
-      success: false,
-      error: "Unable to retrieve release"
-    }, 500);
-  }
-}
-
-// -------------------------
-// GET RELEASE TRACKS
-// GET /v1/releases/:release_id/tracks
-// -------------------------
-
-if (
-  request.method === "GET" &&
-  url.pathname.match(/^\/v1\/releases\/[^/]+\/tracks$/)
-) {
-  try {
-    // -------------------------
-    // Authentication
-    // -------------------------
-
-    const authorization =
-      request.headers.get("Authorization");
-
-    if (!authorization) {
-      return json({
-        success: false,
-        error: "Authorization required"
-      }, 401);
-    }
-
-    if (!authorization.startsWith("Bearer ")) {
-      return json({
-        success: false,
-        error: "Invalid authorization format"
-      }, 401);
-    }
-
-    const token =
-      authorization.substring(7);
-
-    const user =
-      await verifyToken(
-        token,
-        env.JWT_SECRET
-      );
-
-    if (!user) {
-      return json({
-        success: false,
-        error: "Invalid or expired token"
-      }, 401);
-    }
-
-    // -------------------------
-    // Get release ID
-    // -------------------------
-
-    const releaseId =
-      url.pathname.split("/")[3];
-
-    if (!releaseId) {
-      return json({
-        success: false,
-        error: "Release ID is required"
-      }, 400);
-    }
-
-    // -------------------------
-    // Verify release ownership
-    // -------------------------
-
-    const release =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            user_id,
-            title
-          FROM releases
-          WHERE id = ?
-        `)
-        .bind(releaseId)
-        .first();
-
-    if (!release) {
-      return json({
-        success: false,
-        error: "Release not found"
-      }, 404);
-    }
-
-    if (release.user_id !== user.sub) {
-      return json({
-        success: false,
-        error: "You do not have permission to view this release"
-      }, 403);
-    }
-
-    // -------------------------
-    // Get tracks
-    // -------------------------
-
-    const result =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            release_id,
-            title,
-            version,
-            isrc,
-            track_number,
-            disc_number,
-            duration_seconds,
-            genre,
-            language,
-            explicit,
-            lyrics,
-            audio_asset_id,
-            created_at,
-            updated_at
-
-          FROM tracks
-
-          WHERE release_id = ?
-
-          ORDER BY
-            disc_number ASC,
-            track_number ASC
-        `)
-        .bind(releaseId)
-        .all();
-
-    // -------------------------
-    // Attach audio assets
-    // -------------------------
-
-    const tracks =
-      await Promise.all(
-        (result.results || []).map(
-          async (track) => {
-
-            let audioAsset = null;
-
-            if (track.audio_asset_id) {
-
-              audioAsset =
-                await env.DB
-                  .prepare(`
-                    SELECT
-                      id,
-                      type,
-                      filename,
-                      content_type,
-                      size_bytes,
-                      r2_key,
-                      status,
-                      created_at
-
-                    FROM assets
-
-                    WHERE id = ?
-                      AND user_id = ?
-                  `)
-                  .bind(
-                    track.audio_asset_id,
-                    user.sub
-                  )
-                  .first();
-            }
-
-            return {
-              ...track,
-
-              explicit:
-                Boolean(track.explicit),
-
-              audio_asset:
-                audioAsset
-            };
-          }
-        )
-      );
-
-    // -------------------------
-    // Response
-    // -------------------------
-
-    return json({
-      success: true,
-
-      release: {
-        id: release.id,
-        title: release.title
-      },
-
-      tracks
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    return json({
-      success: false,
-      error: "Unable to retrieve tracks"
-    }, 500);
-  }
-}
-
-// -------------------------
-// VALIDATE RELEASE
-// POST /v1/releases/:release_id/validate
-// -------------------------
-
-if (
-  request.method === "POST" &&
-  url.pathname.match(/^\/v1\/releases\/[^/]+\/validate$/)
-) {
-  try {
-    // -------------------------
-    // Authentication
-    // -------------------------
-
-    const authorization =
-      request.headers.get("Authorization");
-
-    if (!authorization) {
-      return json({
-        success: false,
-        error: "Authorization required"
-      }, 401);
-    }
-
-    if (!authorization.startsWith("Bearer ")) {
-      return json({
-        success: false,
-        error: "Invalid authorization format"
-      }, 401);
-    }
-
-    const token =
-      authorization.substring(7);
-
-    const user =
-      await verifyToken(
-        token,
-        env.JWT_SECRET
-      );
-
-    if (!user) {
-      return json({
-        success: false,
-        error: "Invalid or expired token"
-      }, 401);
-    }
-
-    // -------------------------
-    // Get release ID
-    // -------------------------
-
-    const releaseId =
-      url.pathname.split("/")[3];
-
-    if (!releaseId) {
-      return json({
-        success: false,
-        error: "Release ID is required"
-      }, 400);
-    }
-
-    // -------------------------
-    // Get release
-    // -------------------------
-
-    const release =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            user_id,
-            artist_id,
-            title,
-            release_type,
-            version,
-            genre,
-            subgenre,
-            language,
-            release_date,
-            original_release_date,
-            upc,
-            copyright_line,
-            phonographic_copyright_line,
-            label_name,
-            artwork_asset_id,
-            explicit,
-            status
-          FROM releases
-          WHERE id = ?
-        `)
-        .bind(releaseId)
-        .first();
-
-    if (!release) {
-      return json({
-        success: false,
-        error: "Release not found"
-      }, 404);
-    }
-
-    // -------------------------
-    // Ownership
-    // -------------------------
-
-    if (release.user_id !== user.sub) {
-      return json({
-        success: false,
-        error: "You do not have permission to validate this release"
-      }, 403);
-    }
-
-    // -------------------------
-    // Validation containers
-    // -------------------------
-
-    const errors = [];
-    const warnings = [];
-
-    // -------------------------
-    // RELEASE METADATA
-    // -------------------------
-
-    if (!release.title || !release.title.trim()) {
-      errors.push({
-        code: "MISSING_RELEASE_TITLE",
-        field: "title",
-        message: "Release title is required"
-      });
-    }
-
-    if (!release.artist_id) {
-      errors.push({
-        code: "MISSING_ARTIST",
-        field: "artist_id",
-        message: "An artist is required"
-      });
-    }
-
-    const validReleaseTypes = [
-      "single",
-      "album",
-      "ep",
-      "compilation"
-    ];
-
-    if (
-      !release.release_type ||
-      !validReleaseTypes.includes(
-        String(release.release_type).toLowerCase()
-      )
-    ) {
-      errors.push({
-        code: "INVALID_RELEASE_TYPE",
-        field: "release_type",
-        message: "Release type must be single, album, ep, or compilation"
-      });
-    }
-
-    if (!release.genre || !release.genre.trim()) {
-      errors.push({
-        code: "MISSING_GENRE",
-        field: "genre",
-        message: "Genre is required"
-      });
-    }
-
-    if (!release.language || !release.language.trim()) {
-      errors.push({
-        code: "MISSING_LANGUAGE",
-        field: "language",
-        message: "Language is required"
-      });
-    }
-
-    if (!release.release_date) {
-      errors.push({
-        code: "MISSING_RELEASE_DATE",
-        field: "release_date",
-        message: "Release date is required"
-      });
-    }
-
-    if (
-      !release.copyright_line ||
-      !release.copyright_line.trim()
-    ) {
-      errors.push({
-        code: "MISSING_COPYRIGHT",
-        field: "copyright_line",
-        message: "Copyright line is required"
-      });
-    }
-
-    if (
-      !release.phonographic_copyright_line ||
-      !release.phonographic_copyright_line.trim()
-    ) {
-      errors.push({
-        code: "MISSING_PHONOGRAPHIC_COPYRIGHT",
-        field: "phonographic_copyright_line",
-        message: "Phonographic copyright line is required"
-      });
-    }
-
-    // -------------------------
-    // ARTIST
-    // -------------------------
-
-    const artist =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            user_id,
-            name
-          FROM artists
-          WHERE id = ?
-        `)
-        .bind(release.artist_id)
-        .first();
-
-    if (!artist) {
-      errors.push({
-        code: "ARTIST_NOT_FOUND",
-        field: "artist_id",
-        message: "The selected artist does not exist"
-      });
-    } else if (artist.user_id !== user.sub) {
-      errors.push({
-        code: "INVALID_ARTIST_OWNER",
-        field: "artist_id",
-        message: "The selected artist does not belong to this account"
-      });
-    } else if (!artist.name || !artist.name.trim()) {
-      errors.push({
-        code: "MISSING_ARTIST_NAME",
-        field: "artist_id",
-        message: "Artist name is required"
-      });
-    }
-
-    // -------------------------
-    // ARTWORK
-    // -------------------------
-
-    if (!release.artwork_asset_id) {
-
-      errors.push({
-        code: "MISSING_ARTWORK",
-        field: "artwork_asset_id",
-        message: "Release artwork is required"
-      });
-
-    } else {
-
-      const artwork =
-        await env.DB
-          .prepare(`
-            SELECT
-              id,
-              type,
-              content_type,
-              size_bytes,
-              r2_key,
-              status
-            FROM assets
-            WHERE id = ?
-              AND user_id = ?
-              AND release_id = ?
-          `)
-          .bind(
-            release.artwork_asset_id,
-            user.sub,
-            releaseId
-          )
-          .first();
-
-      if (!artwork) {
-
-        errors.push({
-          code: "ARTWORK_ASSET_NOT_FOUND",
-          field: "artwork_asset_id",
-          message: "Artwork asset could not be found"
-        });
-
-      } else {
-
-        if (artwork.type !== "artwork") {
-          errors.push({
-            code: "INVALID_ARTWORK_ASSET",
-            field: "artwork_asset_id",
-            message: "The selected asset is not artwork"
-          });
-        }
-
-        const allowedArtworkTypes = [
-          "image/jpeg",
-          "image/png",
-          "image/webp"
-        ];
-
-        if (
-          !allowedArtworkTypes.includes(
-            artwork.content_type
-          )
-        ) {
-          errors.push({
-            code: "INVALID_ARTWORK_FORMAT",
-            field: "artwork",
-            message: "Artwork must be JPEG, PNG, or WebP"
-          });
-        }
-
-        if (artwork.status !== "uploaded") {
-          errors.push({
-            code: "ARTWORK_NOT_UPLOADED",
-            field: "artwork",
-            message: "Artwork has not been successfully uploaded"
-          });
-        }
-      }
-    }
-
-    // -------------------------
-    // GET TRACKS
-    // -------------------------
-
-    const tracksResult =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            title,
-            version,
-            isrc,
-            track_number,
-            disc_number,
-            duration_seconds,
-            genre,
-            language,
-            explicit,
-            audio_asset_id
-          FROM tracks
-          WHERE release_id = ?
-          ORDER BY
-            disc_number ASC,
-            track_number ASC
-        `)
-        .bind(releaseId)
-        .all();
-
-    const tracks =
-      tracksResult.results || [];
-
-    // -------------------------
-    // TRACK COUNT
-    // -------------------------
-
-    if (tracks.length === 0) {
-
-      errors.push({
-        code: "NO_TRACKS",
-        field: "tracks",
-        message: "At least one track is required"
-      });
-    }
-
-    // -------------------------
-    // RELEASE TYPE / TRACK COUNT
-    // -------------------------
-
-    if (
-      release.release_type === "single" &&
-      tracks.length > 1
-    ) {
-      warnings.push({
-        code: "SINGLE_HAS_MULTIPLE_TRACKS",
-        field: "tracks",
-        message: "A single normally contains one main track"
-      });
-    }
-
-    if (
-      release.release_type === "album" &&
-      tracks.length < 2
-    ) {
-      warnings.push({
-        code: "ALBUM_HAS_ONE_TRACK",
-        field: "tracks",
-        message: "An album normally contains multiple tracks"
-      });
-    }
-
-    // -------------------------
-    // TRACK VALIDATION
-    // -------------------------
-
-    const trackNumbers = new Set();
-
-    for (const track of tracks) {
-
-      // Track title
-      if (
-        !track.title ||
-        !track.title.trim()
-      ) {
-        errors.push({
-          code: "MISSING_TRACK_TITLE",
-          track_id: track.id,
-          field: "title",
-          message: "Track title is required"
-        });
-      }
-
-      // Track number
-      if (
-        !Number.isInteger(
-          Number(track.track_number)
-        ) ||
-        Number(track.track_number) < 1
-      ) {
-        errors.push({
-          code: "INVALID_TRACK_NUMBER",
-          track_id: track.id,
-          field: "track_number",
-          message: "Track number must be a positive integer"
-        });
-      }
-
-      // Duplicate track numbers
-      const trackKey =
-        `${track.disc_number}:${track.track_number}`;
-
-      if (trackNumbers.has(trackKey)) {
-
-        errors.push({
-          code: "DUPLICATE_TRACK_NUMBER",
-          track_id: track.id,
-          field: "track_number",
-          message: "Duplicate track number detected"
-        });
-
-      } else {
-
-        trackNumbers.add(trackKey);
-      }
-
-      // Audio
-      if (!track.audio_asset_id) {
-
-        errors.push({
-          code: "MISSING_AUDIO",
-          track_id: track.id,
-          field: "audio_asset_id",
-          message: "Track audio is required"
-        });
-
-      } else {
-
-        const audio =
-          await env.DB
-            .prepare(`
-              SELECT
-                id,
-                type,
-                content_type,
-                size_bytes,
-                r2_key,
-                status
-              FROM assets
-              WHERE id = ?
-                AND user_id = ?
-                AND track_id = ?
-            `)
-            .bind(
-              track.audio_asset_id,
-              user.sub,
-              track.id
-            )
-            .first();
-
-        if (!audio) {
-
-          errors.push({
-            code: "AUDIO_ASSET_NOT_FOUND",
-            track_id: track.id,
-            field: "audio_asset_id",
-            message: "Audio asset could not be found"
-          });
-
-        } else {
-
-          if (audio.type !== "audio") {
-
-            errors.push({
-              code: "INVALID_AUDIO_ASSET",
-              track_id: track.id,
-              field: "audio_asset_id",
-              message: "Selected asset is not an audio asset"
-            });
-          }
-
-          const allowedAudioTypes = [
-            "audio/wav",
-            "audio/x-wav",
-            "audio/wave",
-            "audio/flac",
-            "audio/mpeg",
-            "audio/mp4",
-            "audio/aac",
-            "audio/x-m4a"
-          ];
-
-          if (
-            !allowedAudioTypes.includes(
-              audio.content_type
-            )
-          ) {
-            errors.push({
-              code: "INVALID_AUDIO_FORMAT",
-              track_id: track.id,
-              field: "audio",
-              message: "Unsupported audio format"
-            });
-          }
-
-          if (audio.status !== "uploaded") {
-
-            errors.push({
-              code: "AUDIO_NOT_UPLOADED",
-              track_id: track.id,
-              field: "audio",
-              message: "Audio has not been successfully uploaded"
-            });
-          }
-        }
-      }
-
-      // ISRC
-      if (!track.isrc) {
-
-        warnings.push({
-          code: "MISSING_ISRC",
-          track_id: track.id,
-          field: "isrc",
-          message: "Track ISRC is missing"
-        });
-      } else {
-
-        const isrcPattern =
-          /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/;
-
-        if (!isrcPattern.test(track.isrc)) {
-
-          errors.push({
-            code: "INVALID_ISRC",
-            track_id: track.id,
-            field: "isrc",
-            message: "Invalid ISRC format"
-          });
-        }
-      }
-
-      // Duration
-      if (
-        track.duration_seconds === null ||
-        track.duration_seconds === undefined
-      ) {
-
-        warnings.push({
-          code: "MISSING_DURATION",
-          track_id: track.id,
-          field: "duration_seconds",
-          message: "Track duration has not been provided"
-        });
-      }
-
-      // Track genre
-      if (
-        !track.genre ||
-        !track.genre.trim()
-      ) {
-
-        warnings.push({
-          code: "MISSING_TRACK_GENRE",
-          track_id: track.id,
-          field: "genre",
-          message: "Track genre is not specified"
-        });
-      }
-
-      // Track language
-      if (
-        !track.language ||
-        !track.language.trim()
-      ) {
-
-        warnings.push({
-          code: "MISSING_TRACK_LANGUAGE",
-          track_id: track.id,
-          field: "language",
-          message: "Track language is not specified"
-        });
-      }
-    }
-
-    // -------------------------
-// CONTRIBUTOR VALIDATION
-// -------------------------
-
-for (const track of tracks) {
-
-  const contributorsResult =
-    await env.DB
-      .prepare(`
-        SELECT
-          id,
-          name,
-          role,
-          artist_id
-        FROM track_contributors
-        WHERE track_id = ?
-      `)
-      .bind(track.id)
-      .all();
-
-  const contributors =
-    contributorsResult.results || [];
-
-  // -------------------------
-  // Basic contributor check
-  // -------------------------
-
-  if (contributors.length === 0) {
-
-    errors.push({
-      code: "MISSING_CONTRIBUTORS",
-      track_id: track.id,
-      message: "At least one contributor is required"
-    });
-
-    continue;
-  }
-
-  // -------------------------
-  // Primary artist
-  // -------------------------
-
-  const primaryArtists =
-    contributors.filter(
-      contributor =>
-        contributor.role === "primary_artist"
-    );
-
-  if (primaryArtists.length === 0) {
-
-    errors.push({
-      code: "MISSING_PRIMARY_ARTIST",
-      track_id: track.id,
-      field: "contributors",
-      message: "At least one primary artist is required"
-    });
-
-  } else {
-
-    // Check linked artist ownership
-    for (const contributor of primaryArtists) {
-
-      if (contributor.artist_id) {
-
-        const artist =
-          await env.DB
-            .prepare(`
-              SELECT
-                id,
-                user_id,
-                name
-              FROM artists
-              WHERE id = ?
-            `)
-            .bind(contributor.artist_id)
-            .first();
-
-        if (!artist) {
-
-          errors.push({
-            code: "PRIMARY_ARTIST_NOT_FOUND",
-            track_id: track.id,
-            contributor_id: contributor.id,
-            message: "Linked primary artist does not exist"
-          });
-
-        } else if (artist.user_id !== user.sub) {
-
-          errors.push({
-            code: "INVALID_PRIMARY_ARTIST_OWNER",
-            track_id: track.id,
-            contributor_id: contributor.id,
-            message: "Primary artist does not belong to this account"
-          });
-        }
-      }
-    }
-  }
-
-  // -------------------------
-  // Songwriter / Composer
-  // -------------------------
-
-  const writers =
-    contributors.filter(
-      contributor =>
-        contributor.role === "songwriter" ||
-        contributor.role === "composer"
-    );
-
-  if (writers.length === 0) {
-
-    errors.push({
-      code: "MISSING_SONGWRITER",
-      track_id: track.id,
-      field: "contributors",
-      message: "At least one songwriter or composer is required"
-    });
-  }
-
-  // -------------------------
-  // Producer
-  // -------------------------
-
-  const producers =
-    contributors.filter(
-      contributor =>
-        contributor.role === "producer"
-    );
-
-  if (producers.length === 0) {
-
-    warnings.push({
-      code: "MISSING_PRODUCER",
-      track_id: track.id,
-      field: "contributors",
-      message: "No producer has been added to this track"
-    });
-  }
-
-  // -------------------------
-  // Contributor names
-  // -------------------------
-
-  for (const contributor of contributors) {
-
-    if (
-      !contributor.name ||
-      !contributor.name.trim()
-    ) {
-
-      errors.push({
-        code: "INVALID_CONTRIBUTOR_NAME",
-        track_id: track.id,
-        contributor_id: contributor.id,
-        message: "Contributor name cannot be empty"
-      });
-    }
-  }
-}
-
-    // -------------------------
-    // FINAL STATUS
-    // -------------------------
-
-    const valid =
-      errors.length === 0;
-
-    const status =
-      valid
-        ? "ready"
-        : "incomplete";
-
-    // -------------------------
-    // Update release status
-    // -------------------------
-
-    await env.DB
-      .prepare(`
-        UPDATE releases
-        SET status = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(
-        status,
-        releaseId
-      )
-      .run();
-
-    // -------------------------
-    // Response
-    // -------------------------
-
-    return json({
-      success: true,
-
-      release_id: releaseId,
-
-      valid,
-
-      status,
-
-      summary: {
-        errors: errors.length,
-        warnings: warnings.length,
-        tracks: tracks.length
-      },
-
-      errors,
-
-      warnings
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    return json({
-      success: false,
-      error: "Unable to validate release"
-    }, 500);
-  }
-}
-
-// -------------------------
-// ADD TRACK CONTRIBUTOR
-// POST /v1/tracks/:track_id/contributors
-// -------------------------
-
-if (
-  request.method === "POST" &&
-  url.pathname.match(/^\/v1\/tracks\/[^/]+\/contributors$/)
-) {
-  try {
-    // -------------------------
-    // Authentication
-    // -------------------------
-
-    const authorization =
-      request.headers.get("Authorization");
-
-    if (!authorization) {
-      return json({
-        success: false,
-        error: "Authorization required"
-      }, 401);
-    }
-
-    if (!authorization.startsWith("Bearer ")) {
-      return json({
-        success: false,
-        error: "Invalid authorization format"
-      }, 401);
-    }
-
-    const token = authorization.substring(7);
-
-    const user =
-      await verifyToken(token, env.JWT_SECRET);
-
-    if (!user) {
-      return json({
-        success: false,
-        error: "Invalid or expired token"
-      }, 401);
-    }
-
-    // -------------------------
-    // Get track ID
-    // -------------------------
-
-    const trackId =
-      url.pathname.split("/")[3];
-
-    if (!trackId) {
-      return json({
-        success: false,
-        error: "Track ID is required"
-      }, 400);
-    }
-
-    // -------------------------
-    // Get track + verify ownership
-    // -------------------------
-
-    const track =
-      await env.DB
-        .prepare(`
-          SELECT
-            tracks.id,
-            tracks.release_id,
-            releases.user_id
-          FROM tracks
-          INNER JOIN releases
-            ON tracks.release_id = releases.id
-          WHERE tracks.id = ?
-        `)
-        .bind(trackId)
-        .first();
-
-    if (!track) {
-      return json({
-        success: false,
-        error: "Track not found"
-      }, 404);
-    }
-
-    if (track.user_id !== user.sub) {
-      return json({
-        success: false,
-        error: "You do not have permission to modify this track"
-      }, 403);
-    }
-
-    // -------------------------
-    // Parse request body
-    // -------------------------
-
-    let body;
-
-    try {
-      body = await request.json();
-    } catch {
-      return json({
-        success: false,
-        error: "Invalid JSON body"
-      }, 400);
-    }
-
-    const name =
-      typeof body.name === "string"
-        ? body.name.trim()
-        : "";
-
-    const role =
-      typeof body.role === "string"
-        ? body.role.trim().toLowerCase()
-        : "";
-
-    const artistId =
-      typeof body.artist_id === "string" &&
-      body.artist_id.trim()
-        ? body.artist_id.trim()
-        : null;
-
-    // -------------------------
-    // Validate name
-    // -------------------------
-
-    if (!name) {
-      return json({
-        success: false,
-        error: "Contributor name is required"
-      }, 400);
-    }
-
-    if (name.length > 200) {
-      return json({
-        success: false,
-        error: "Contributor name is too long"
-      }, 400);
-    }
-
-    // -------------------------
-    // Validate role
-    // -------------------------
-
-    const allowedRoles = [
-      "primary_artist",
-      "featured_artist",
-      "remixer",
-      "producer",
-      "songwriter",
-      "composer",
-      "lyricist",
-      "arranger",
-      "engineer",
-      "vocalist"
-    ];
-
-    if (!allowedRoles.includes(role)) {
-      return json({
-        success: false,
-        error: "Invalid contributor role",
-        allowed_roles: allowedRoles
-      }, 400);
-    }
-
-    // -------------------------
-    // Validate artist_id
-    // -------------------------
-
-    if (artistId) {
-
-      const artist =
-        await env.DB
-          .prepare(`
-            SELECT
-              id,
-              user_id,
-              name
-            FROM artists
-            WHERE id = ?
-          `)
-          .bind(artistId)
-          .first();
-
-      if (!artist) {
-        return json({
-          success: false,
-          error: "Artist not found"
-        }, 404);
-      }
-
-      if (artist.user_id !== user.sub) {
-        return json({
-          success: false,
-          error: "You do not have permission to use this artist"
-        }, 403);
-      }
-    }
-
-    // -------------------------
-    // Prevent exact duplicate
-    // -------------------------
-
-    const existing =
-      await env.DB
-        .prepare(`
-          SELECT
-            id
-          FROM track_contributors
-          WHERE track_id = ?
-            AND name = ?
-            AND role = ?
-        `)
-        .bind(
-          trackId,
-          name,
-          role
-        )
-        .first();
-
-    if (existing) {
-      return json({
-        success: false,
-        error: "This contributor already exists on this track"
-      }, 409);
-    }
-
-    // -------------------------
-    // Create contributor
-    // -------------------------
-
-    const contributorId =
-      `contributor_${crypto.randomUUID()}`;
-
-    await env.DB
-      .prepare(`
-        INSERT INTO track_contributors (
-          id,
-          track_id,
-          name,
-          role,
-          artist_id
-        )
-        VALUES (?, ?, ?, ?, ?)
-      `)
-      .bind(
-        contributorId,
-        trackId,
-        name,
-        role,
-        artistId
-      )
-      .run();
-
-    // -------------------------
-    // Get created contributor
-    // -------------------------
-
-    const contributor =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            track_id,
-            name,
-            role,
-            artist_id,
-            created_at
-          FROM track_contributors
-          WHERE id = ?
-        `)
-        .bind(contributorId)
-        .first();
-
-    // -------------------------
-    // Response
-    // -------------------------
-
-    return json({
-      success: true,
-      message: "Contributor added successfully",
-      contributor
-    }, 201);
-
-  } catch (error) {
-
-    console.error(error);
-
-    return json({
-      success: false,
-      error: "Unable to add contributor"
-    }, 500);
-  }
-}
-
-// -------------------------
-// GET TRACK CONTRIBUTORS
-// GET /v1/tracks/:track_id/contributors
-// -------------------------
-
-if (
-  request.method === "GET" &&
-  url.pathname.match(/^\/v1\/tracks\/[^/]+\/contributors$/)
-) {
-  try {
-    // -------------------------
-    // Authentication
-    // -------------------------
-
-    const authorization =
-      request.headers.get("Authorization");
-
-    if (!authorization) {
-      return json({
-        success: false,
-        error: "Authorization required"
-      }, 401);
-    }
-
-    if (!authorization.startsWith("Bearer ")) {
-      return json({
-        success: false,
-        error: "Invalid authorization format"
-      }, 401);
-    }
-
-    const token = authorization.substring(7);
-
-    const user =
-      await verifyToken(token, env.JWT_SECRET);
-
-    if (!user) {
-      return json({
-        success: false,
-        error: "Invalid or expired token"
-      }, 401);
-    }
-
-    // -------------------------
-    // Track ID
-    // -------------------------
-
-    const trackId =
-      url.pathname.split("/")[3];
-
-    // -------------------------
-    // Verify ownership
-    // -------------------------
-
-    const track =
-      await env.DB
-        .prepare(`
-          SELECT
-            tracks.id,
-            tracks.title,
-            releases.user_id
-          FROM tracks
-          INNER JOIN releases
-            ON tracks.release_id = releases.id
-          WHERE tracks.id = ?
-        `)
-        .bind(trackId)
-        .first();
-
-    if (!track) {
-      return json({
-        success: false,
-        error: "Track not found"
-      }, 404);
-    }
-
-    if (track.user_id !== user.sub) {
-      return json({
-        success: false,
-        error: "You do not have permission to view this track"
-      }, 403);
-    }
-
-    // -------------------------
-    // Get contributors
-    // -------------------------
-
-    const result =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            track_id,
-            name,
-            role,
-            artist_id,
-            created_at
-          FROM track_contributors
-          WHERE track_id = ?
-          ORDER BY created_at ASC
-        `)
-        .bind(trackId)
-        .all();
-
-    return json({
-      success: true,
-
-      track: {
-        id: track.id,
-        title: track.title
-      },
-
-      contributors:
-        result.results || []
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    return json({
-      success: false,
-      error: "Unable to retrieve contributors"
-    }, 500);
-  }
-}
-
-// -------------------------
-// DELETE TRACK CONTRIBUTOR
-// DELETE /v1/tracks/:track_id/contributors/:contributor_id
-// -------------------------
-
-if (
-  request.method === "DELETE" &&
-  url.pathname.match(
-    /^\/v1\/tracks\/[^/]+\/contributors\/[^/]+$/
-  )
-) {
-  try {
-    // -------------------------
-    // Authentication
-    // -------------------------
-
-    const authorization =
-      request.headers.get("Authorization");
-
-    if (!authorization) {
-      return json({
-        success: false,
-        error: "Authorization required"
-      }, 401);
-    }
-
-    if (!authorization.startsWith("Bearer ")) {
-      return json({
-        success: false,
-        error: "Invalid authorization format"
-      }, 401);
-    }
-
-    const token = authorization.substring(7);
-
-    const user =
-      await verifyToken(token, env.JWT_SECRET);
-
-    if (!user) {
-      return json({
-        success: false,
-        error: "Invalid or expired token"
-      }, 401);
-    }
-
-    // -------------------------
-    // IDs
-    // -------------------------
-
-    const parts =
-      url.pathname.split("/");
-
-    const trackId = parts[3];
-    const contributorId = parts[5];
-
-    // -------------------------
-    // Verify track ownership
-    // -------------------------
-
-    const track =
-      await env.DB
-        .prepare(`
-          SELECT
-            tracks.id,
-            releases.user_id
-          FROM tracks
-          INNER JOIN releases
-            ON tracks.release_id = releases.id
-          WHERE tracks.id = ?
-        `)
-        .bind(trackId)
-        .first();
-
-    if (!track) {
-      return json({
-        success: false,
-        error: "Track not found"
-      }, 404);
-    }
-
-    if (track.user_id !== user.sub) {
-      return json({
-        success: false,
-        error: "You do not have permission to modify this track"
-      }, 403);
-    }
-
-    // -------------------------
-    // Find contributor
-    // -------------------------
-
-    const contributor =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            name,
-            role
-          FROM track_contributors
-          WHERE id = ?
-            AND track_id = ?
-        `)
-        .bind(
-          contributorId,
-          trackId
-        )
-        .first();
-
-    if (!contributor) {
-      return json({
-        success: false,
-        error: "Contributor not found"
-      }, 404);
-    }
-
-    // -------------------------
-    // Delete
-    // -------------------------
-
-    await env.DB
-      .prepare(`
-        DELETE FROM track_contributors
-        WHERE id = ?
-          AND track_id = ?
-      `)
-      .bind(
-        contributorId,
-        trackId
-      )
-      .run();
-
-    return json({
-      success: true,
-      message: "Contributor deleted successfully",
-      contributor: {
-        id: contributor.id,
-        name: contributor.name,
-        role: contributor.role
-      }
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    return json({
-      success: false,
-      error: "Unable to delete contributor"
-    }, 500);
-  }
-}
-
-// =====================================================
-// UPDATE TRACK
-// PATCH /v1/tracks/:track_id
-// =====================================================
-
-if (
-  request.method === "PATCH" &&
-  url.pathname.match(/^\/v1\/tracks\/[^/]+$/)
-) {
-  try {
-    // -------------------------------------------------
-    // Authentication
-    // -------------------------------------------------
-
-    const authorization =
-      request.headers.get("Authorization");
-
-    if (!authorization) {
-      return json({
-        success: false,
-        error: "Authorization required"
-      }, 401);
-    }
-
-    if (!authorization.startsWith("Bearer ")) {
-      return json({
-        success: false,
-        error: "Invalid authorization format"
-      }, 401);
-    }
-
-    const token = authorization.substring(7);
-
-    const user =
-      await verifyToken(token, env.JWT_SECRET);
-
-    if (!user) {
-      return json({
-        success: false,
-        error: "Invalid or expired token"
-      }, 401);
-    }
-
-    // -------------------------------------------------
-    // Get track ID
-    // -------------------------------------------------
-
-    const trackId =
-      url.pathname.split("/")[3];
-
-    if (!trackId) {
-      return json({
-        success: false,
-        error: "Track ID is required"
-      }, 400);
-    }
-
-    // -------------------------------------------------
-    // Find track and verify ownership
-    // -------------------------------------------------
-
-    const track =
-      await env.DB
-        .prepare(`
-          SELECT
-            tracks.*,
-            releases.user_id,
-            releases.id AS release_id
-          FROM tracks
-          INNER JOIN releases
-            ON tracks.release_id = releases.id
-          WHERE tracks.id = ?
-        `)
-        .bind(trackId)
-        .first();
-
-    if (!track) {
-      return json({
-        success: false,
-        error: "Track not found"
-      }, 404);
-    }
-
-    if (track.user_id !== user.sub) {
-      return json({
-        success: false,
-        error: "You do not have permission to modify this track"
-      }, 403);
-    }
-
-    // -------------------------------------------------
-    // Parse JSON body
-    // -------------------------------------------------
-
-    let body;
-
-    try {
-      body = await request.json();
-    } catch {
-      return json({
-        success: false,
-        error: "Invalid JSON body"
-      }, 400);
-    }
-
-    if (
-      !body ||
-      typeof body !== "object" ||
-      Array.isArray(body)
-    ) {
-      return json({
-        success: false,
-        error: "Request body must be a JSON object"
-      }, 400);
-    }
-
-    // -------------------------------------------------
-    // Allowed fields
-    // -------------------------------------------------
-
-    const allowedFields = [
-      "title",
-      "version",
-      "isrc",
-      "track_number",
-      "disc_number",
-      "duration_seconds",
-      "genre",
-      "language",
-      "explicit",
-      "lyrics"
-    ];
-
-    const suppliedFields =
-      Object.keys(body);
-
-    const unknownFields =
-      suppliedFields.filter(
-        field => !allowedFields.includes(field)
-      );
-
-    if (unknownFields.length > 0) {
-      return json({
-        success: false,
-        error: "Unknown field(s)",
-        fields: unknownFields,
-        allowed_fields: allowedFields
-      }, 400);
-    }
-
-    if (suppliedFields.length === 0) {
-      return json({
-        success: false,
-        error: "No fields provided for update"
-      }, 400);
-    }
-
-    // -------------------------------------------------
-    // Prepare update values
-    // -------------------------------------------------
-
-    const updates = [];
-    const values = [];
-
-    // -------------------------------------------------
-    // TITLE
-    // -------------------------------------------------
-
-    if (Object.prototype.hasOwnProperty.call(body, "title")) {
-
-      if (
-        typeof body.title !== "string" ||
-        !body.title.trim()
-      ) {
-        return json({
-          success: false,
-          error: "Title must be a non-empty string"
-        }, 400);
-      }
-
-      const title =
-        body.title.trim();
-
-      if (title.length > 300) {
-        return json({
-          success: false,
-          error: "Title is too long"
-        }, 400);
-      }
-
-      updates.push("title = ?");
-      values.push(title);
-    }
-
-    // -------------------------------------------------
-    // VERSION
-    // -------------------------------------------------
-
-    if (Object.prototype.hasOwnProperty.call(body, "version")) {
-
-      if (
-        body.version !== null &&
-        typeof body.version !== "string"
-      ) {
-        return json({
-          success: false,
-          error: "Version must be a string or null"
-        }, 400);
-      }
-
-      const version =
-        body.version === null
-          ? null
-          : body.version.trim();
-
-      if (
-        version !== null &&
-        version.length > 100
-      ) {
-        return json({
-          success: false,
-          error: "Version is too long"
-        }, 400);
-      }
-
-      updates.push("version = ?");
-      values.push(version);
-    }
-
-    // -------------------------------------------------
-    // ISRC
-    // -------------------------------------------------
-
-    if (Object.prototype.hasOwnProperty.call(body, "isrc")) {
-
-      if (
-        body.isrc !== null &&
-        typeof body.isrc !== "string"
-      ) {
-        return json({
-          success: false,
-          error: "ISRC must be a string or null"
-        }, 400);
-      }
-
-      let isrc =
-        body.isrc === null
-          ? null
-          : body.isrc
-              .trim()
-              .toUpperCase()
-              .replace(/-/g, "");
-
-      if (isrc !== null) {
-
-        /*
-         * ISRC format:
-         *
-         * Country      2 letters
-         * Registrant   3 letters/numbers
-         * Year         2 digits
-         * Designation  5 digits
-         *
-         * Example:
-         * USRC17607839
-         */
-
-        const isrcRegex =
-          /^[A-Z]{2}[A-Z0-9]{3}[0-9]{2}[0-9]{5}$/;
-
-        if (!isrcRegex.test(isrc)) {
-          return json({
-            success: false,
-            error: "Invalid ISRC format",
-            message:
-              "ISRC must contain 12 characters in the format CCXXXYYNNNNN"
-          }, 400);
-        }
-
-        // ---------------------------------------------
-        // Check whether ISRC is already used
-        // ---------------------------------------------
-
-        const existingIsrc =
-          await env.DB
-            .prepare(`
-              SELECT
-                id,
-                title
-              FROM tracks
-              WHERE isrc = ?
-                AND id != ?
-            `)
-            .bind(isrc, trackId)
-            .first();
-
-        if (existingIsrc) {
-          return json({
-            success: false,
-            error: "ISRC already exists",
-            message:
-              "This ISRC is already assigned to another track"
-          }, 409);
-        }
-      }
-
-      updates.push("isrc = ?");
-      values.push(isrc);
-    }
-
-    // -------------------------------------------------
-    // TRACK NUMBER
-    // -------------------------------------------------
-
-    if (
-      Object.prototype.hasOwnProperty.call(
-        body,
-        "track_number"
-      )
-    ) {
-
-      const trackNumber =
-        body.track_number;
-
-      if (
-        !Number.isInteger(trackNumber) ||
-        trackNumber < 1
-      ) {
-        return json({
-          success: false,
-          error:
-            "track_number must be a positive integer"
-        }, 400);
-      }
-
-      // -----------------------------------------------
-      // Prevent duplicate track number on release
-      // -----------------------------------------------
-
-      const duplicate =
-        await env.DB
-          .prepare(`
-            SELECT id
-            FROM tracks
-            WHERE release_id = ?
-              AND track_number = ?
-              AND id != ?
-          `)
-          .bind(
-            track.release_id,
-            trackNumber,
-            trackId
-          )
-          .first();
-
-      if (duplicate) {
-        return json({
-          success: false,
-          error:
-            "A track with this track number already exists on this release"
-        }, 409);
-      }
-
-      updates.push("track_number = ?");
-      values.push(trackNumber);
-    }
-
-    // -------------------------------------------------
-    // DISC NUMBER
-    // -------------------------------------------------
-
-    if (
-      Object.prototype.hasOwnProperty.call(
-        body,
-        "disc_number"
-      )
-    ) {
-
-      const discNumber =
-        body.disc_number;
-
-      if (
-        !Number.isInteger(discNumber) ||
-        discNumber < 1
-      ) {
-        return json({
-          success: false,
-          error:
-            "disc_number must be a positive integer"
-        }, 400);
-      }
-
-      updates.push("disc_number = ?");
-      values.push(discNumber);
-    }
-
-    // -------------------------------------------------
-    // DURATION
-    // -------------------------------------------------
-
-    if (
-      Object.prototype.hasOwnProperty.call(
-        body,
-        "duration_seconds"
-      )
-    ) {
-
-      const duration =
-        body.duration_seconds;
-
-      if (
-        duration !== null &&
-        (
-          typeof duration !== "number" ||
-          !Number.isFinite(duration) ||
-          duration <= 0
-        )
-      ) {
-        return json({
-          success: false,
-          error:
-            "duration_seconds must be a positive number or null"
-        }, 400);
-      }
-
-      updates.push("duration_seconds = ?");
-      values.push(duration);
-    }
-
-    // -------------------------------------------------
-    // GENRE
-    // -------------------------------------------------
-
-    if (
-      Object.prototype.hasOwnProperty.call(
-        body,
-        "genre"
-      )
-    ) {
-
-      if (
-        body.genre !== null &&
-        typeof body.genre !== "string"
-      ) {
-        return json({
-          success: false,
-          error: "Genre must be a string or null"
-        }, 400);
-      }
-
-      const genre =
-        body.genre === null
-          ? null
-          : body.genre.trim();
-
-      if (
-        genre !== null &&
-        genre.length > 100
-      ) {
-        return json({
-          success: false,
-          error: "Genre is too long"
-        }, 400);
-      }
-
-      updates.push("genre = ?");
-      values.push(genre);
-    }
-
-    // -------------------------------------------------
-    // LANGUAGE
-    // -------------------------------------------------
-
-    if (
-      Object.prototype.hasOwnProperty.call(
-        body,
-        "language"
-      )
-    ) {
-
-      if (
-        body.language !== null &&
-        typeof body.language !== "string"
-      ) {
-        return json({
-          success: false,
-          error: "Language must be a string or null"
-        }, 400);
-      }
-
-      const language =
-        body.language === null
-          ? null
-          : body.language.trim();
-
-      if (
-        language !== null &&
-        language.length > 100
-      ) {
-        return json({
-          success: false,
-          error: "Language is too long"
-        }, 400);
-      }
-
-      updates.push("language = ?");
-      values.push(language);
-    }
-
-    // -------------------------------------------------
-    // EXPLICIT
-    // -------------------------------------------------
-
-    if (
-      Object.prototype.hasOwnProperty.call(
-        body,
-        "explicit"
-      )
-    ) {
-
-      if (typeof body.explicit !== "boolean") {
-        return json({
-          success: false,
-          error: "explicit must be true or false"
-        }, 400);
-      }
-
-      updates.push("explicit = ?");
-      values.push(body.explicit ? 1 : 0);
-    }
-
-    // -------------------------------------------------
-    // LYRICS
-    // -------------------------------------------------
-
-    if (
-      Object.prototype.hasOwnProperty.call(
-        body,
-        "lyrics"
-      )
-    ) {
-
-      if (
-        body.lyrics !== null &&
-        typeof body.lyrics !== "string"
-      ) {
-        return json({
-          success: false,
-          error: "Lyrics must be a string or null"
-        }, 400);
-      }
-
-      if (
-        body.lyrics !== null &&
-        body.lyrics.length > 50000
-      ) {
-        return json({
-          success: false,
-          error: "Lyrics are too long"
-        }, 400);
-      }
-
-      updates.push("lyrics = ?");
-      values.push(body.lyrics);
-    }
-
-    // -------------------------------------------------
-    // Nothing to update
-    // -------------------------------------------------
-
-    if (updates.length === 0) {
-      return json({
-        success: false,
-        error: "No valid fields provided for update"
-      }, 400);
-    }
-
-    // -------------------------------------------------
-    // Add updated_at
-    // -------------------------------------------------
-
-    updates.push("updated_at = CURRENT_TIMESTAMP");
-
-    // -------------------------------------------------
-    // Execute update
-    // -------------------------------------------------
-
-    values.push(trackId);
-
-    await env.DB
-      .prepare(`
-        UPDATE tracks
-        SET ${updates.join(", ")}
-        WHERE id = ?
-      `)
-      .bind(...values)
-      .run();
-
-    // -------------------------------------------------
-    // Return updated track
-    // -------------------------------------------------
-
-    const updatedTrack =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            release_id,
-            title,
-            version,
-            isrc,
-            track_number,
-            disc_number,
-            duration_seconds,
-            genre,
-            language,
-            explicit,
-            lyrics,
-            audio_asset_id,
-            created_at,
-            updated_at
-          FROM tracks
-          WHERE id = ?
-        `)
-        .bind(trackId)
-        .first();
-
-    return json({
-      success: true,
-      message: "Track updated successfully",
-      track: updatedTrack
-    });
-
-  } catch (error) {
-
+    accessToken = await getTooLostSearchAccessToken(env);
+  } catch (authError) {
     console.error(
-      "Update track error:",
+      "Too Lost public lookup authentication failed:",
+      authError
+    );
+
+    return preferencesJSON(
+      {
+        error: "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          "Unable to authenticate with Too Lost."
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  try {
+    const upstream = await fetchTooLostAPI(
+      tooLostPath,
+      "GET",
+      null,
+      accessToken,
+      env
+    );
+
+    const text = await upstream.text();
+    let data = {};
+
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
+
+    return preferencesJSON(
+      data,
+      upstream.status,
+      corsHeaders
+    );
+  } catch (error) {
+    console.error(
+      "Too Lost public lookup failed:",
       error
     );
 
-    return json({
-      success: false,
-      error: "Unable to update track"
-    }, 500);
+    return preferencesJSON(
+      {
+        error: "Could not connect to Too Lost.",
+        details: error?.message || String(error)
+      },
+      502,
+      corsHeaders
+    );
   }
 }
 
-// ============================================================
-// POST /v1/releases/:release_id/submit
-// Submit release for distribution
-// ============================================================
 
-if (
-  request.method === "POST" &&
-  url.pathname.startsWith("/v1/releases/") &&
-  url.pathname.endsWith("/submit")
+async function proxyTooLostPublicPOST(
+  request,
+  env,
+  corsHeaders,
+  userId,
+  tooLostPath
 ) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
+  if (!userId) {
+    return preferencesJSON(
+      { error: "Unauthenticated." },
+      401,
+      corsHeaders
     );
   }
 
-  const auth = await verifyToken(token, env.JWT_SECRET);
+  const body = await request.json().catch(() => ({}));
+  let accessToken;
 
-  if (!auth) {
-    return json(
+  try {
+    accessToken = await getTooLostSearchAccessToken(env);
+  } catch (authError) {
+    return preferencesJSON(
       {
-        success: false,
-        error: "Invalid or expired token"
+        error: "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          "Unable to authenticate with Too Lost."
       },
-      401
+      401,
+      corsHeaders
     );
   }
 
-  const parts = url.pathname.split("/");
-  const releaseId = parts[3];
-
-  if (!releaseId) {
-    return json(
-      {
-        success: false,
-        error: "Release ID is required"
-      },
-      400
+  try {
+    const upstream = await fetchTooLostAPI(
+      tooLostPath,
+      "POST",
+      body,
+      accessToken,
+      env
     );
-  }
 
-  // ----------------------------------------------------------
-  // Load release
-  // ----------------------------------------------------------
+    const text = await upstream.text();
+    let data = {};
 
-  const release = await env.DB
-    .prepare(`
-      SELECT *
-      FROM releases
-      WHERE id = ?
-        AND user_id = ?
-    `)
-    .bind(releaseId, auth.sub)
-    .first();
-
-  if (!release) {
-    return json(
-      {
-        success: false,
-        error: "Release not found"
-      },
-      404
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Check release status
-  // ----------------------------------------------------------
-
-  const blockedStatuses = [
-    "submitted",
-    "processing",
-    "delivered",
-    "live"
-  ];
-
-  if (blockedStatuses.includes(release.status)) {
-    return json(
-      {
-        success: false,
-        error: `Release cannot be submitted while status is '${release.status}'`
-      },
-      409
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Load tracks
-  // ----------------------------------------------------------
-
-  const tracksResult = await env.DB
-    .prepare(`
-      SELECT *
-      FROM tracks
-      WHERE release_id = ?
-      ORDER BY disc_number ASC, track_number ASC
-    `)
-    .bind(releaseId)
-    .all();
-
-  const tracks = tracksResult.results || [];
-
-  if (tracks.length === 0) {
-    return json(
-      {
-        success: false,
-        error: "Release must contain at least one track"
-      },
-      422
-    );
-  }
-
-  const errors = [];
-  const warnings = [];
-
-  // ----------------------------------------------------------
-  // Album warning
-  // ----------------------------------------------------------
-
-  if (
-    release.release_type === "album" &&
-    tracks.length === 1
-  ) {
-    warnings.push({
-      code: "ALBUM_HAS_ONE_TRACK",
-      field: "tracks",
-      message: "An album normally contains multiple tracks"
-    });
-  }
-
-  // ----------------------------------------------------------
-  // Validate artwork
-  // ----------------------------------------------------------
-
-  const artwork = await env.DB
-    .prepare(`
-      SELECT *
-      FROM assets
-      WHERE release_id = ?
-        AND type = 'artwork'
-        AND status = 'uploaded'
-      ORDER BY created_at DESC
-      LIMIT 1
-    `)
-    .bind(releaseId)
-    .first();
-
-  if (!artwork) {
-    errors.push({
-      code: "MISSING_ARTWORK",
-      field: "artwork",
-      message: "Release artwork is required"
-    });
-  }
-
-  // ----------------------------------------------------------
-  // Validate tracks
-  // ----------------------------------------------------------
-
-  for (const track of tracks) {
-
-    const trackPrefix = `tracks.${track.track_number}`;
-
-    // Audio
-    const audio = await env.DB
-      .prepare(`
-        SELECT *
-        FROM assets
-        WHERE id = ?
-          AND track_id = ?
-          AND release_id = ?
-          AND type = 'audio'
-          AND status = 'uploaded'
-        LIMIT 1
-      `)
-      .bind(
-        track.audio_asset_id,
-        track.id,
-        releaseId
-      )
-      .first();
-
-    if (!audio) {
-      errors.push({
-        code: "MISSING_AUDIO",
-        field: `${trackPrefix}.audio`,
-        message: `Audio file is required for track '${track.title}'`
-      });
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
     }
 
-    // ISRC
-    if (!track.isrc) {
-      errors.push({
-        code: "MISSING_ISRC",
-        field: `${trackPrefix}.isrc`,
-        message: `ISRC is required for track '${track.title}'`
-      });
-    }
-
-    // Duration
-    if (
-      !track.duration_seconds ||
-      Number(track.duration_seconds) <= 0
-    ) {
-      errors.push({
-        code: "MISSING_DURATION",
-        field: `${trackPrefix}.duration_seconds`,
-        message: `Track duration is required for '${track.title}'`
-      });
-    }
-
-    // --------------------------------------------------------
-    // Contributors
-    // --------------------------------------------------------
-
-    const contributorsResult = await env.DB
-      .prepare(`
-        SELECT *
-        FROM track_contributors
-        WHERE track_id = ?
-      `)
-      .bind(track.id)
-      .all();
-
-    const contributors =
-      contributorsResult.results || [];
-
-    // Primary artist
-    const primaryArtist = contributors.find(
-      c => c.role === "primary_artist"
+    return preferencesJSON(
+      data,
+      upstream.status,
+      corsHeaders
+    );
+  } catch (error) {
+    console.error(
+      "Too Lost public POST lookup failed:",
+      error
     );
 
-    if (!primaryArtist) {
-      errors.push({
-        code: "MISSING_PRIMARY_ARTIST",
-        field: `${trackPrefix}.contributors`,
-        message: `Primary artist is required for '${track.title}'`
-      });
-    }
-
-    // Songwriter/composer
-    const songwriter = contributors.find(
-      c =>
-        c.role === "songwriter" ||
-        c.role === "composer"
-    );
-
-    if (!songwriter) {
-      errors.push({
-        code: "MISSING_SONGWRITER",
-        field: `${trackPrefix}.contributors`,
-        message: `Songwriter or composer is required for '${track.title}'`
-      });
-    }
-
-    // Producer
-    const producer = contributors.find(
-      c => c.role === "producer"
-    );
-
-    if (!producer) {
-      warnings.push({
-        code: "MISSING_PRODUCER",
-        field: `${trackPrefix}.contributors`,
-        message: `Producer is recommended for '${track.title}'`
-      });
-    }
-  }
-
-  // ----------------------------------------------------------
-  // Stop if validation failed
-  // ----------------------------------------------------------
-
-  if (errors.length > 0) {
-    return json(
+    return preferencesJSON(
       {
-        success: false,
-        message: "Release validation failed",
-        release_id: releaseId,
-        validation: {
-          valid: false,
-          errors: errors.length,
-          warnings: warnings.length
-        },
-        errors,
-        warnings
+        error: "Could not connect to Too Lost.",
+        details: error?.message || String(error)
       },
-      422
+      502,
+      corsHeaders
     );
   }
-
-  // ----------------------------------------------------------
-  // Check for existing submission
-  // ----------------------------------------------------------
-
-  const existingSubmission = await env.DB
-    .prepare(`
-      SELECT *
-      FROM release_submissions
-      WHERE release_id = ?
-        AND status IN ('queued', 'processing')
-      ORDER BY created_at DESC
-      LIMIT 1
-    `)
-    .bind(releaseId)
-    .first();
-
-  if (existingSubmission) {
-    return json(
-      {
-        success: false,
-        error: "Release already has an active submission",
-        submission: existingSubmission
-      },
-      409
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Create submission ID
-  // ----------------------------------------------------------
-
-  const submissionId =
-    `submission_${crypto.randomUUID()}`;
-
-  // ----------------------------------------------------------
-  // Create submission job
-  // ----------------------------------------------------------
-
-  await env.DB
-    .prepare(`
-      INSERT INTO release_submissions (
-        id,
-        release_id,
-        user_id,
-        status,
-        submitted_at,
-        created_at,
-        updated_at
-      )
-      VALUES (
-        ?,
-        ?,
-        ?,
-        'queued',
-        CURRENT_TIMESTAMP,
-        CURRENT_TIMESTAMP,
-        CURRENT_TIMESTAMP
-      )
-    `)
-    .bind(
-      submissionId,
-      releaseId,
-      auth.sub
-    )
-    .run();
-
-  // ----------------------------------------------------------
-  // Update release
-  // ----------------------------------------------------------
-
-  await env.DB
-    .prepare(`
-      UPDATE releases
-      SET
-        status = 'submitted',
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-        AND user_id = ?
-    `)
-    .bind(
-      releaseId,
-      auth.sub
-    )
-    .run();
-
-  // ----------------------------------------------------------
-  // Get created submission
-  // ----------------------------------------------------------
-
-  const submission = await env.DB
-    .prepare(`
-      SELECT *
-      FROM release_submissions
-      WHERE id = ?
-    `)
-    .bind(submissionId)
-    .first();
-
-  // ----------------------------------------------------------
-  // Response
-  // ----------------------------------------------------------
-
-  return json({
-    success: true,
-
-    message: "Release submitted successfully",
-
-    release: {
-      ...release,
-      status: "submitted"
-    },
-
-    submission,
-
-    validation: {
-      valid: true,
-      errors: 0,
-      warnings: warnings.length
-    },
-
-    next_step:
-      "Submission has been queued for distribution processing"
-  });
 }
 
-// ============================================================
-// GET /v1/releases/:release_id/submission
-// Get latest submission status
-// ============================================================
 
-if (
-  request.method === "GET" &&
-  url.pathname.startsWith("/v1/releases/") &&
-  url.pathname.endsWith("/submission")
+// =============================================================
+// ADDITIONAL TOO LOST GET HELPER
+// =============================================================
+
+async function proxyTooLostPreferencesGET(
+  request,
+  env,
+  corsHeaders,
+  userId,
+  tooLostPath
 ) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
+  if (!userId) {
+    return preferencesJSON(
       {
-        success: false,
-        error: "Authorization required"
+        error:
+          "Unauthenticated."
       },
-      401
+      401,
+      corsHeaders
     );
   }
 
-  const auth = await verifyToken(token, env.JWT_SECRET);
+  let accessToken;
 
-  if (!auth) {
-    return json(
+  try {
+    accessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
+      );
+  } catch (authError) {
+    console.error(
+      "Too Lost Preferences authentication failed:",
+      authError
+    );
+
+    return preferencesJSON(
       {
-        success: false,
-        error: "Invalid or expired token"
+        error:
+          "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          "Unable to authenticate with Too Lost."
       },
-      401
+      401,
+      corsHeaders
     );
   }
 
-  const parts = url.pathname.split("/");
-  const releaseId = parts[3];
+  try {
+    const upstream =
+      await fetchTooLostAPI(
+        tooLostPath,
+        "GET",
+        null,
+        accessToken,
+        env
+      );
 
-  if (!releaseId) {
-    return json(
+    const rawText =
+      await upstream.text();
+
+    let responseData = {};
+
+    try {
+      responseData =
+        rawText
+          ? JSON.parse(rawText)
+          : {};
+    } catch {
+      responseData = {
+        raw: rawText
+      };
+    }
+
+    return preferencesJSON(
+      responseData,
+      upstream.status,
+      corsHeaders
+    );
+
+  } catch (error) {
+    console.error(
+      "Too Lost Preferences GET request failed:",
+      error
+    );
+
+    return preferencesJSON(
       {
-        success: false,
-        error: "Release ID is required"
+        error:
+          "Could not connect to Too Lost.",
+        details:
+          error?.message ||
+          String(error)
       },
-      400
+      502,
+      corsHeaders
     );
   }
-
-  // ----------------------------------------------------------
-  // Verify release ownership
-  // ----------------------------------------------------------
-
-  const release = await env.DB
-    .prepare(`
-      SELECT id, title, status
-      FROM releases
-      WHERE id = ?
-        AND user_id = ?
-    `)
-    .bind(
-      releaseId,
-      auth.sub
-    )
-    .first();
-
-  if (!release) {
-    return json(
-      {
-        success: false,
-        error: "Release not found"
-      },
-      404
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Get latest submission
-  // ----------------------------------------------------------
-
-  const submission = await env.DB
-    .prepare(`
-      SELECT *
-      FROM release_submissions
-      WHERE release_id = ?
-        AND user_id = ?
-      ORDER BY created_at DESC
-      LIMIT 1
-    `)
-    .bind(
-      releaseId,
-      auth.sub
-    )
-    .first();
-
-  if (!submission) {
-    return json(
-      {
-        success: true,
-        release,
-        submission: null,
-        message: "This release has not been submitted yet"
-      }
-    );
-  }
-
-  return json({
-    success: true,
-
-    release,
-
-    submission
-  });
 }
 
-// ============================================================
-// POST /v1/submissions/:submission_id/process
-// Process a queued release submission
-// ============================================================
+
+// =============================================================
+// ADDITIONAL TOO LOST POST HELPER
+// =============================================================
+
+async function proxyTooLostPreferencesPOST(
+  request,
+  env,
+  corsHeaders,
+  userId,
+  tooLostPath
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthenticated."
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  const body =
+    await request
+      .json()
+      .catch(() => ({}));
+
+  let accessToken;
+
+  try {
+    accessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
+      );
+  } catch (authError) {
+    console.error(
+      "Too Lost Preferences authentication failed:",
+      authError
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          "Unable to authenticate with Too Lost."
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  try {
+    const upstream =
+      await fetchTooLostAPI(
+        tooLostPath,
+        "POST",
+        body,
+        accessToken,
+        env
+      );
+
+    const rawText =
+      await upstream.text();
+
+    let responseData = {};
+
+    try {
+      responseData =
+        rawText
+          ? JSON.parse(rawText)
+          : {};
+    } catch {
+      responseData = {
+        raw: rawText
+      };
+    }
+
+    return preferencesJSON(
+      responseData,
+      upstream.status,
+      corsHeaders
+    );
+
+  } catch (error) {
+    console.error(
+      "Too Lost Preferences POST request failed:",
+      error
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Could not connect to Too Lost.",
+        details:
+          error?.message ||
+          String(error)
+      },
+      502,
+      corsHeaders
+    );
+  }
+}
+
+
+// =============================================================
+// =============================================================
+// GET /api/preferences/artists
+// =============================================================
+//
+// IMPORTANT SECURITY RULE:
+// This endpoint MUST NEVER proxy the shared Too Lost account.
+// It returns only the artist preference owned by this Audiory user.
+// =============================================================
 
 if (
-  request.method === "POST" &&
-  url.pathname.startsWith("/v1/submissions/") &&
-  url.pathname.endsWith("/process")
+  url.pathname ===
+    "/api/preferences/artists" &&
+  request.method === "GET"
 ) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
+  if (!userId) {
+    return preferencesJSON(
+      { error: "Unauthenticated." },
+      401,
+      corsHeaders
     );
   }
 
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Get submission ID
-  // URL:
-  // /v1/submissions/:submission_id/process
-  // ----------------------------------------------------------
-
-  const parts = url.pathname.split("/");
-  const submissionId = parts[3];
-
-  if (!submissionId) {
-    return json(
-      {
-        success: false,
-        error: "Submission ID is required"
-      },
-      400
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Load submission
-  // ----------------------------------------------------------
-
-  const submission = await env.DB
-    .prepare(`
-      SELECT *
-      FROM release_submissions
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-    .bind(
-      submissionId,
-      auth.sub
-    )
-    .first();
-
-  if (!submission) {
-    return json(
-      {
-        success: false,
-        error: "Submission not found"
-      },
-      404
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Check submission status
-  // ----------------------------------------------------------
-
-  if (submission.status === "processing") {
-    return json(
-      {
-        success: false,
-        error: "Submission is already being processed",
-        submission
-      },
-      409
-    );
-  }
-
-  if (submission.status === "ready") {
-    return json(
-      {
-        success: false,
-        error: "Submission has already been processed",
-        submission
-      },
-      409
-    );
-  }
-
-  if (submission.status === "delivered") {
-    return json(
-      {
-        success: false,
-        error: "Submission has already been delivered",
-        submission
-      },
-      409
-    );
-  }
-
-  if (submission.status === "rejected") {
-    return json(
-      {
-        success: false,
-        error: "Submission was rejected and cannot be processed",
-        submission
-      },
-      409
-    );
-  }
-
-  if (submission.status !== "queued") {
-    return json(
-      {
-        success: false,
-        error: `Submission cannot be processed from status '${submission.status}'`
-      },
-      409
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Mark submission as processing
-  // ----------------------------------------------------------
-
-  await env.DB
-    .prepare(`
-      UPDATE release_submissions
-      SET
-        status = 'processing',
-        started_at = CURRENT_TIMESTAMP,
-        error_code = NULL,
-        error_message = NULL,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-        AND user_id = ?
-    `)
-    .bind(
-      submissionId,
-      auth.sub
-    )
-    .run();
-
-  // ----------------------------------------------------------
-  // Load release
-  // ----------------------------------------------------------
-
-  const release = await env.DB
-    .prepare(`
-      SELECT *
-      FROM releases
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-    .bind(
-      submission.release_id,
-      auth.sub
-    )
-    .first();
-
-  if (!release) {
-    await env.DB
-      .prepare(`
-        UPDATE release_submissions
-        SET
-          status = 'rejected',
-          error_code = 'RELEASE_NOT_FOUND',
-          error_message = 'Release associated with submission was not found',
-          completed_at = CURRENT_TIMESTAMP,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(submissionId)
-      .run();
-
-    return json(
-      {
-        success: false,
-        error: "Release associated with submission was not found"
-      },
-      404
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Load artist
-  // ----------------------------------------------------------
+  const artistKey =
+    `PREFERENCES_ARTIST_${userId}`;
 
   let artist = null;
 
-  if (release.artist_id) {
-    artist = await env.DB
-      .prepare(`
-        SELECT *
-        FROM artists
-        WHERE id = ?
-        LIMIT 1
-      `)
-      .bind(release.artist_id)
-      .first();
-  }
-
-  // ----------------------------------------------------------
-  // Load artwork
-  // ----------------------------------------------------------
-
-  const artwork = await env.DB
-    .prepare(`
-      SELECT *
-      FROM assets
-      WHERE release_id = ?
-        AND type = 'artwork'
-        AND status = 'uploaded'
-      ORDER BY created_at DESC
-      LIMIT 1
-    `)
-    .bind(release.id)
-    .first();
-
-  // ----------------------------------------------------------
-  // Load tracks
-  // ----------------------------------------------------------
-
-  const tracksResult = await env.DB
-    .prepare(`
-      SELECT *
-      FROM tracks
-      WHERE release_id = ?
-      ORDER BY disc_number ASC, track_number ASC
-    `)
-    .bind(release.id)
-    .all();
-
-  const tracks = tracksResult.results || [];
-
-  if (tracks.length === 0) {
-    await env.DB
-      .prepare(`
-        UPDATE release_submissions
-        SET
-          status = 'rejected',
-          error_code = 'NO_TRACKS',
-          error_message = 'Release contains no tracks',
-          completed_at = CURRENT_TIMESTAMP,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(submissionId)
-      .run();
-
-    return json(
-      {
-        success: false,
-        error: "Release contains no tracks"
-      },
-      422
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Build distribution tracks
-  // ----------------------------------------------------------
-
-  const distributionTracks = [];
-
-  for (const track of tracks) {
-
-    // Get audio asset
-    let audioAsset = null;
-
-    if (track.audio_asset_id) {
-      audioAsset = await env.DB
-        .prepare(`
-          SELECT *
-          FROM assets
-          WHERE id = ?
-            AND track_id = ?
-            AND release_id = ?
-          LIMIT 1
-        `)
-        .bind(
-          track.audio_asset_id,
-          track.id,
-          release.id
-        )
-        .first();
-    }
-
-    // Get contributors
-    const contributorsResult = await env.DB
-      .prepare(`
-        SELECT *
-        FROM track_contributors
-        WHERE track_id = ?
-      `)
-      .bind(track.id)
-      .all();
-
-    const contributors =
-      contributorsResult.results || [];
-
-    distributionTracks.push({
-      id: track.id,
-      title: track.title,
-      version: track.version || null,
-
-      track_number: track.track_number,
-      disc_number: track.disc_number,
-
-      isrc: track.isrc || null,
-
-      duration_seconds:
-        track.duration_seconds
-          ? Number(track.duration_seconds)
-          : null,
-
-      genre: track.genre || null,
-      language: track.language || null,
-
-      explicit:
-        Boolean(track.explicit),
-
-      lyrics: track.lyrics || null,
-
-      audio_asset: audioAsset
-        ? {
-            id: audioAsset.id,
-            filename: audioAsset.filename,
-            content_type: audioAsset.content_type,
-            size_bytes: audioAsset.size_bytes,
-            r2_key: audioAsset.r2_key,
-            status: audioAsset.status
-          }
-        : null,
-
-      contributors: contributors.map(
-        contributor => ({
-          id: contributor.id,
-          role: contributor.role,
-          name: contributor.name,
-          artist_id:
-            contributor.artist_id || null
-        })
-      )
-    });
-  }
-
-  // ----------------------------------------------------------
-  // Build distribution package
-  // ----------------------------------------------------------
-
-  const distributionPackage = {
-    package_version: "1.0",
-
-    generated_at: new Date().toISOString(),
-
-    submission: {
-      id: submission.id,
-      release_id: release.id
-    },
-
-    release: {
-      id: release.id,
-
-      title: release.title,
-      release_type: release.release_type,
-      version: release.version || null,
-
-      genre: release.genre || null,
-      subgenre: release.subgenre || null,
-
-      language: release.language || null,
-
-      release_date:
-        release.release_date || null,
-
-      original_release_date:
-        release.original_release_date || null,
-
-      upc: release.upc || null,
-
-      copyright_line:
-        release.copyright_line || null,
-
-      phonographic_copyright_line:
-        release.phonographic_copyright_line || null,
-
-      label_name:
-        release.label_name || null,
-
-      explicit:
-        Boolean(release.explicit),
-
-      status:
-        release.status
-    },
-
-    artist: artist
-      ? {
-          id: artist.id,
-          name: artist.name,
-          bio: artist.bio || null,
-          country: artist.country || null
-        }
-      : null,
-
-    artwork: artwork
-      ? {
-          id: artwork.id,
-          filename: artwork.filename,
-          content_type: artwork.content_type,
-          size_bytes: artwork.size_bytes,
-          r2_key: artwork.r2_key,
-          status: artwork.status
-        }
-      : null,
-
-    tracks: distributionTracks
-  };
-
-  // ----------------------------------------------------------
-  // Create package ID
-  // ----------------------------------------------------------
-
-  const packageId =
-    `package_${crypto.randomUUID()}`;
-
-  // ----------------------------------------------------------
-  // Store distribution package
-  // ----------------------------------------------------------
-
-  try {
-
-    await env.DB
-      .prepare(`
-        INSERT INTO distribution_packages (
-          id,
-          submission_id,
-          release_id,
-          user_id,
-          package_version,
-          status,
-          metadata_json,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          ?,
-          ?,
-          ?,
-          ?,
-          '1.0',
-          'ready',
-          ?,
-          CURRENT_TIMESTAMP,
-          CURRENT_TIMESTAMP
-        )
-      `)
-      .bind(
-        packageId,
-        submissionId,
-        release.id,
-        auth.sub,
-        JSON.stringify(distributionPackage)
-      )
-      .run();
-
-    // --------------------------------------------------------
-    // Mark submission ready
-    // --------------------------------------------------------
-
-    await env.DB
-      .prepare(`
-        UPDATE release_submissions
-        SET
-          status = 'ready',
-          completed_at = CURRENT_TIMESTAMP,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-          AND user_id = ?
-      `)
-      .bind(
-        submissionId,
-        auth.sub
-      )
-      .run();
-
-    // --------------------------------------------------------
-    // Update release status
-    // --------------------------------------------------------
-
-    await env.DB
-      .prepare(`
-        UPDATE releases
-        SET
-          status = 'ready',
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-          AND user_id = ?
-      `)
-      .bind(
-        release.id,
-        auth.sub
-      )
-      .run();
-
-  } catch (error) {
-
-    console.error(
-      "Distribution processing failed:",
-      error
-    );
-
-    await env.DB
-      .prepare(`
-        UPDATE release_submissions
-        SET
-          status = 'rejected',
-          error_code = 'PACKAGE_CREATION_FAILED',
-          error_message = ?,
-          completed_at = CURRENT_TIMESTAMP,
-          retry_count = retry_count + 1,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-          AND user_id = ?
-      `)
-      .bind(
-        error?.message || "Failed to create distribution package",
-        submissionId,
-        auth.sub
-      )
-      .run();
-
-    return json(
-      {
-        success: false,
-        error: "Distribution processing failed",
-        submission_id: submissionId
-      },
-      500
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Get final submission
-  // ----------------------------------------------------------
-
-  const finalSubmission = await env.DB
-    .prepare(`
-      SELECT *
-      FROM release_submissions
-      WHERE id = ?
-    `)
-    .bind(submissionId)
-    .first();
-
-  // ----------------------------------------------------------
-  // Response
-  // ----------------------------------------------------------
-
-  return json({
-    success: true,
-
-    message:
-      "Release processed successfully",
-
-    submission: finalSubmission,
-
-    package: {
-      id: packageId,
-      status: "ready",
-      package_version: "1.0"
-    },
-
-    next_step:
-      "Distribution package is ready for delivery"
-  });
-}
-
-// ============================================================
-// GET /v1/submissions/:submission_id
-// Get submission details
-// ============================================================
-
-if (
-  request.method === "GET" &&
-  url.pathname.startsWith("/v1/submissions/") &&
-  !url.pathname.endsWith("/package") &&
-  !url.pathname.endsWith("/process")
-) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const parts = url.pathname.split("/");
-  const submissionId = parts[3];
-
-  if (!submissionId) {
-    return json(
-      {
-        success: false,
-        error: "Submission ID is required"
-      },
-      400
-    );
-  }
-
-  const submission = await env.DB
-    .prepare(`
-      SELECT *
-      FROM release_submissions
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-    .bind(
-      submissionId,
-      auth.sub
-    )
-    .first();
-
-  if (!submission) {
-    return json(
-      {
-        success: false,
-        error: "Submission not found"
-      },
-      404
-    );
-  }
-
-  const release = await env.DB
-    .prepare(`
-      SELECT
-        id,
-        title,
-        release_type,
-        artist_id,
-        release_date,
-        status
-      FROM releases
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-    .bind(
-      submission.release_id,
-      auth.sub
-    )
-    .first();
-
-  const packageRecord = await env.DB
-    .prepare(`
-      SELECT
-        id,
-        package_version,
-        status,
-        created_at,
-        updated_at
-      FROM distribution_packages
-      WHERE submission_id = ?
-      LIMIT 1
-    `)
-    .bind(submissionId)
-    .first();
-
-  return json({
-    success: true,
-
-    submission,
-
-    release,
-
-    package: packageRecord || null
-  });
-}
-
-// ============================================================
-// GET /v1/submissions/:submission_id/package
-// Get generated distribution package
-// ============================================================
-
-if (
-  request.method === "GET" &&
-  url.pathname.startsWith("/v1/submissions/") &&
-  url.pathname.endsWith("/package")
-) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const parts = url.pathname.split("/");
-  const submissionId = parts[3];
-
-  if (!submissionId) {
-    return json(
-      {
-        success: false,
-        error: "Submission ID is required"
-      },
-      400
-    );
-  }
-
-  const submission = await env.DB
-    .prepare(`
-      SELECT *
-      FROM release_submissions
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-    .bind(
-      submissionId,
-      auth.sub
-    )
-    .first();
-
-  if (!submission) {
-    return json(
-      {
-        success: false,
-        error: "Submission not found"
-      },
-      404
-    );
-  }
-
-  const packageRecord = await env.DB
-    .prepare(`
-      SELECT *
-      FROM distribution_packages
-      WHERE submission_id = ?
-      LIMIT 1
-    `)
-    .bind(submissionId)
-    .first();
-
-  if (!packageRecord) {
-    return json(
-      {
-        success: false,
-        error: "Distribution package not found"
-      },
-      404
-    );
-  }
-
-  let metadata;
-
-  try {
-    metadata = JSON.parse(
-      packageRecord.metadata_json
-    );
-  } catch (error) {
-    return json(
-      {
-        success: false,
-        error: "Distribution package metadata is invalid"
-      },
-      500
-    );
-  }
-
-  return json({
-    success: true,
-
-    package: {
-      id: packageRecord.id,
-      submission_id: packageRecord.submission_id,
-      release_id: packageRecord.release_id,
-      package_version: packageRecord.package_version,
-      status: packageRecord.status,
-      created_at: packageRecord.created_at,
-      updated_at: packageRecord.updated_at
-    },
-
-    metadata
-  });
-}
-
-if (
-  request.method === "POST" &&
-  url.pathname.startsWith("/v1/submissions/") &&
-  url.pathname.endsWith("/deliver")
-) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const parts = url.pathname.split("/");
-  const submissionId = parts[3];
-
-  if (!submissionId) {
-    return json(
-      {
-        success: false,
-        error: "Submission ID is required"
-      },
-      400
-    );
-  }
-
-  // IMPORTANT:
-  // Your JWT may use "userId" instead of "user_id".
-  // Support both.
-  const userId = auth.sub || auth.user_id || auth.userId || auth.id;
-
-  if (!userId) {
-    return json(
-      {
-        success: false,
-        error: "User ID missing from authentication token"
-      },
-      401
-    );
-  }
-
-  try {
-    // 1. Get submission
-    const submission = await env.DB.prepare(`
-      SELECT *
-      FROM release_submissions
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-      .bind(submissionId, userId)
-      .first();
-
-    if (!submission) {
-      return json(
-        {
-          success: false,
-          error: "Submission not found"
-        },
-        404
-      );
-    }
-
-    // 2. Submission must be ready
-    if (submission.status !== "ready") {
-      return json(
-        {
-          success: false,
-          error: "Submission is not ready for delivery",
-          current_status: submission.status
-        },
-        409
-      );
-    }
-
-    // 3. Find distribution package
-    const packageRow = await env.DB.prepare(`
-      SELECT *
-      FROM distribution_packages
-      WHERE submission_id = ?
-      ORDER BY created_at DESC
-      LIMIT 1
-    `)
-      .bind(submissionId)
-      .first();
-
-    if (!packageRow) {
-      return json(
-        {
-          success: false,
-          error: "Distribution package not found"
-        },
-        409
-      );
-    }
-
-    // 4. Platforms
-    const platforms = [
-      "spotify",
-      "apple_music",
-      "youtube_music",
-      "amazon_music",
-      "deezer",
-      "tiktok_music"
-    ];
-
-    const createdJobs = [];
-
-    // 5. Create delivery jobs
-    for (const platform of platforms) {
-      const existingJob = await env.DB.prepare(`
-        SELECT *
-        FROM delivery_jobs
-        WHERE submission_id = ?
-          AND platform = ?
-        LIMIT 1
-      `)
-        .bind(submissionId, platform)
-        .first();
-
-      if (existingJob) {
-        createdJobs.push(existingJob);
-        continue;
+  if (env.AUDIORY_KV) {
+    const raw =
+      await env.AUDIORY_KV.get(artistKey);
+
+    if (raw) {
+      try {
+        artist = JSON.parse(raw);
+      } catch {
+        artist = null;
       }
-
-      const jobId = `delivery_${crypto.randomUUID()}`;
-
-      await env.DB.prepare(`
-        INSERT INTO delivery_jobs (
-          id,
-          submission_id,
-          release_id,
-          user_id,
-          platform,
-          status,
-          retry_count
-        )
-        VALUES (?, ?, ?, ?, ?, 'pending', 0)
-      `)
-        .bind(
-          jobId,
-          submission.id,
-          submission.release_id,
-          userId,
-          platform
-        )
-        .run();
-
-      const newJob = await env.DB.prepare(`
-        SELECT *
-        FROM delivery_jobs
-        WHERE id = ?
-        LIMIT 1
-      `)
-        .bind(jobId)
-        .first();
-
-      createdJobs.push(newJob);
     }
-
-    // 6. Update submission
-    await env.DB.prepare(`
-      UPDATE release_submissions
-      SET
-        status = 'delivering',
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-        AND user_id = ?
-    `)
-      .bind(submissionId, userId)
-      .run();
-
-    // 7. Update release
-    await env.DB.prepare(`
-      UPDATE releases
-      SET
-        status = 'delivering',
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-        AND user_id = ?
-    `)
-      .bind(submission.release_id, userId)
-      .run();
-
-    return json(
-      {
-        success: true,
-        message: "Delivery jobs created successfully",
-
-        submission: {
-          id: submission.id,
-          release_id: submission.release_id,
-          status: "delivering"
-        },
-
-        package: {
-          id: packageRow.id,
-          package_version: packageRow.package_version,
-          status: packageRow.status
-        },
-
-        delivery_jobs: createdJobs,
-
-        next_step:
-          "Delivery jobs are queued for platform-specific delivery"
-      },
-      201
-    );
-
-  } catch (error) {
-    console.error("Delivery creation error:", error);
-
-    return json(
-      {
-        success: false,
-        error: "Failed to create delivery jobs",
-        details: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-// GET /v1/submissions/:submission_id/delivery
-if (
-  request.method === "GET" &&
-  url.pathname.startsWith("/v1/submissions/") &&
-  url.pathname.endsWith("/delivery")
-) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
   }
 
-  const auth = await verifyToken(token, env.JWT_SECRET);
+  const artists = artist ? [artist] : [];
 
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const userId = auth.sub || auth.user_id || auth.userId || auth.id;
-
-  if (!userId) {
-    return json(
-      {
-        success: false,
-        error: "User ID missing from authentication token"
-      },
-      401
-    );
-  }
-
-  const parts = url.pathname.split("/");
-  const submissionId = parts[3];
-
-  if (!submissionId) {
-    return json(
-      {
-        success: false,
-        error: "Submission ID is required"
-      },
-      400
-    );
-  }
-
-  try {
-    // Verify submission belongs to user
-    const submission = await env.DB.prepare(`
-      SELECT
-        id,
-        release_id,
-        user_id,
-        status,
-        submitted_at,
-        started_at,
-        completed_at,
-        error_code,
-        error_message,
-        retry_count,
-        created_at,
-        updated_at
-      FROM release_submissions
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-      .bind(submissionId, userId)
-      .first();
-
-    if (!submission) {
-      return json(
-        {
-          success: false,
-          error: "Submission not found"
-        },
-        404
-      );
-    }
-
-    // Get release
-    const release = await env.DB.prepare(`
-      SELECT
-        id,
-        title,
-        release_type,
-        artist_id,
-        release_date,
-        status
-      FROM releases
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-      .bind(submission.release_id, userId)
-      .first();
-
-    // Get delivery jobs
-    const jobsResult = await env.DB.prepare(`
-      SELECT
-        id,
-        submission_id,
-        release_id,
-        user_id,
-        platform,
-        status,
-        external_id,
-        submitted_at,
-        delivered_at,
-        error_code,
-        error_message,
-        retry_count,
-        created_at,
-        updated_at
-      FROM delivery_jobs
-      WHERE submission_id = ?
-        AND user_id = ?
-      ORDER BY created_at ASC
-    `)
-      .bind(submissionId, userId)
-      .all();
-
-    const jobs = jobsResult.results || [];
-
-    // Count statuses
-    const summary = {
-      total: jobs.length,
-      pending: 0,
-      delivering: 0,
-      delivered: 0,
-      failed: 0
-    };
-
-    for (const job of jobs) {
-      if (job.status === "pending") summary.pending++;
-      else if (job.status === "delivering") summary.delivering++;
-      else if (job.status === "delivered") summary.delivered++;
-      else if (job.status === "failed") summary.failed++;
-    }
-
-    return json({
-      success: true,
-
-      submission: {
-        id: submission.id,
-        release_id: submission.release_id,
-        status: submission.status,
-        submitted_at: submission.submitted_at,
-        started_at: submission.started_at,
-        completed_at: submission.completed_at,
-        error_code: submission.error_code,
-        error_message: submission.error_message,
-        retry_count: submission.retry_count,
-        created_at: submission.created_at,
-        updated_at: submission.updated_at
-      },
-
-      release,
-
-      summary,
-
-      delivery_jobs: jobs
-    });
-
-  } catch (error) {
-    console.error("Get delivery jobs error:", error);
-
-    return json(
-      {
-        success: false,
-        error: "Failed to retrieve delivery jobs",
-        details: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-// POST /v1/delivery-jobs/:job_id/process
-if (
-  request.method === "POST" &&
-  url.pathname.startsWith("/v1/delivery-jobs/") &&
-  url.pathname.endsWith("/process")
-) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const userId = auth.sub || auth.user_id || auth.userId || auth.id;
-
-  if (!userId) {
-    return json(
-      {
-        success: false,
-        error: "User ID missing from authentication token"
-      },
-      401
-    );
-  }
-
-  const parts = url.pathname.split("/");
-  const jobId = parts[3];
-
-  if (!jobId) {
-    return json(
-      {
-        success: false,
-        error: "Delivery job ID is required"
-      },
-      400
-    );
-  }
-
-  try {
-    // 1. Load job
-    const job = await env.DB.prepare(`
-      SELECT *
-      FROM delivery_jobs
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-      .bind(jobId, userId)
-      .first();
-
-    if (!job) {
-      return json(
-        {
-          success: false,
-          error: "Delivery job not found"
-        },
-        404
-      );
-    }
-
-    // 2. Only pending or failed jobs can be processed
-    if (job.status !== "pending" && job.status !== "failed") {
-      return json(
-        {
-          success: false,
-          error: "Delivery job cannot be processed in its current state",
-          current_status: job.status
-        },
-        409
-      );
-    }
-
-    // 3. Load distribution package
-    const packageRow = await env.DB.prepare(`
-      SELECT *
-      FROM distribution_packages
-      WHERE submission_id = ?
-        AND release_id = ?
-      ORDER BY created_at DESC
-      LIMIT 1
-    `)
-      .bind(job.submission_id, job.release_id)
-      .first();
-
-    if (!packageRow) {
-      return json(
-        {
-          success: false,
-          error: "Distribution package not found"
-        },
-        409
-      );
-    }
-
-    if (packageRow.status !== "ready") {
-      return json(
-        {
-          success: false,
-          error: "Distribution package is not ready",
-          package_status: packageRow.status
-        },
-        409
-      );
-    }
-
-    // 4. Parse package metadata
-    let metadata;
-
-    try {
-      metadata = JSON.parse(packageRow.metadata_json);
-    } catch (error) {
-      return json(
-        {
-          success: false,
-          error: "Distribution package metadata is invalid"
-        },
-        500
-      );
-    }
-
-    // 5. Find platform adapter
-    const integration = await getPlatformIntegration(
-  env,
-  job.platform
-);
-
-if (!integration) {
-  return json(
+  return preferencesJSON(
     {
-      success: false,
-      error: "Platform integration not found",
-      platform: job.platform,
-      next_step: "Configure the platform integration first"
+      data: artists,
+      message: "Preference artists retrieved."
     },
-    404
+    200,
+    corsHeaders
   );
 }
 
-if (!integration.enabled) {
-  return json(
+
+// =============================================================
+// =============================================================
+// GET /api/preferences/label/artist/:id
+// =============================================================
+// Return only an artist already owned by this Audiory user.
+// Never query a shared Too Lost account for an arbitrary ID.
+// =============================================================
+
+const labelArtistMatch =
+  url.pathname.match(
+    /^\/api\/preferences\/label\/artist\/(\d+)$/
+  );
+
+if (
+  labelArtistMatch &&
+  request.method === "GET"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      { error: "Unauthenticated." },
+      401,
+      corsHeaders
+    );
+  }
+
+  const artistId = Number(labelArtistMatch[1]);
+  let foundArtist = null;
+
+  if (env.AUDIORY_KV) {
+    const labelRaw = await env.AUDIORY_KV.get(
+      `PREFERENCES_LABEL_${userId}`
+    );
+
+    if (labelRaw) {
+      try {
+        const labelData = JSON.parse(labelRaw);
+        if (Array.isArray(labelData?.artists)) {
+          foundArtist =
+            labelData.artists.find(
+              artist => Number(artist?.id) === artistId
+            ) || null;
+        }
+      } catch {}
+    }
+
+    if (!foundArtist) {
+      const artistRaw = await env.AUDIORY_KV.get(
+        `PREFERENCES_ARTIST_${userId}`
+      );
+
+      if (artistRaw) {
+        try {
+          const artistData = JSON.parse(artistRaw);
+          if (Number(artistData?.id) === artistId) {
+            foundArtist = artistData;
+          }
+        } catch {}
+      }
+    }
+  }
+
+  if (!foundArtist) {
+    return preferencesJSON(
+      { error: "Artist not found for this user." },
+      404,
+      corsHeaders
+    );
+  }
+
+  return preferencesJSON(
     {
-      success: false,
-      error: "Platform integration is disabled",
-      platform: job.platform,
-      integration: {
-        id: integration.id,
-        platform: integration.platform,
-        enabled: Boolean(integration.enabled),
-        mode: integration.mode,
-        adapter_version: integration.adapter_version
-      },
-      next_step: "Enable the platform integration before attempting delivery"
+      data: foundArtist,
+      message: "Artist retrieved."
     },
-    409
+    200,
+    corsHeaders
   );
 }
 
-const adapter = getDeliveryAdapter(
-  job.platform,
-  integration.mode
-);
 
-if (!adapter) {
-  return json(
-    {
-      success: false,
-      error: "Platform delivery adapter is not configured",
-      platform: job.platform,
-      integration: {
-        id: integration.id,
-        platform: integration.platform,
-        enabled: Boolean(integration.enabled),
-        mode: integration.mode,
-        adapter_version: integration.adapter_version
-      },
-      next_step: "Configure the platform adapter before attempting external delivery"
-    },
-    501
+// GET /api/preferences/search-spotify
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/search-spotify" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPublicGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/search-spotify${url.search || ""}`
   );
 }
 
-    // 6. Mark job as delivering
-    await env.DB.prepare(`
-      UPDATE delivery_jobs
-      SET
-        status = 'delivering',
-        submitted_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-        AND user_id = ?
-    `)
-      .bind(jobId, userId)
-      .run();
 
-    // 7. Execute external platform adapter
-    const result = await adapter({
-      job,
-      package: packageRow,
-      metadata,
-      env
-    });
+// =============================================================
+// GET /api/preferences/search-yt-channel
+// =============================================================
 
-    // 8. Handle successful external response
-    if (result && result.success === true) {
-      await env.DB.prepare(`
-        UPDATE delivery_jobs
-        SET
-          status = 'delivered',
-          external_id = ?,
-          delivered_at = CURRENT_TIMESTAMP,
-          error_code = NULL,
-          error_message = NULL,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-          AND user_id = ?
-      `)
-        .bind(
-          result.external_id || null,
-          jobId,
-          userId
-        )
-        .run();
-
-      // Update submission + release status based on all delivery jobs
-      const parentStatus = await updateDeliveryParentStatus(
-        env,
-        job.submission_id,
-        job.release_id
-      );
-
-      const updatedJob = await env.DB.prepare(`
-        SELECT *
-        FROM delivery_jobs
-        WHERE id = ?
-        LIMIT 1
-      `)
-        .bind(jobId)
-        .first();
-
-      return json({
-        success: true,
-        message: "Delivery completed successfully",
-        job: updatedJob,
-        delivery_summary: parentStatus
-      });
-    }
-
-    // 9. Handle external failure
-    await env.DB.prepare(`
-      UPDATE delivery_jobs
-      SET
-        status = 'failed',
-        error_code = ?,
-        error_message = ?,
-        retry_count = retry_count + 1,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-        AND user_id = ?
-    `)
-      .bind(
-        result?.error_code || "DELIVERY_FAILED",
-        result?.error_message || "Platform delivery failed",
-        jobId,
-        userId
-      )
-      .run();
-
-      const parentStatus = await updateDeliveryParentStatus(
-        env,
-        job.submission_id,
-        job.release_id
-      );
-
-    const failedJob = await env.DB.prepare(`
-      SELECT *
-      FROM delivery_jobs
-      WHERE id = ?
-      LIMIT 1
-    `)
-      .bind(jobId)
-      .first();
-
-    return json(
-      {
-        success: false,
-        error: "Platform delivery failed",
-        job: failedJob,
-        delivery_summary: parentStatus
-      },
-      502
-    );
-
-  } catch (error) {
-    console.error("Delivery processing error:", error);
-
-    // Try to record the failure
-    try {
-      await env.DB.prepare(`
-        UPDATE delivery_jobs
-        SET
-          status = 'failed',
-          error_code = 'PROCESSING_ERROR',
-          error_message = ?,
-          retry_count = retry_count + 1,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-          AND user_id = ?
-      `)
-        .bind(
-          error?.message || String(error),
-          jobId,
-          userId
-        )
-        .run();
-    } catch (dbError) {
-      console.error("Failed to update delivery job:", dbError);
-    }
-
-    return json(
-      {
-        success: false,
-        error: "Failed to process delivery job",
-        details: error?.message || String(error)
-      },
-      500
-    );
-  }
+if (
+  url.pathname ===
+    "/api/preferences/search-yt-channel" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPublicGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/search-yt-channel${url.search || ""}`
+  );
 }
 
-// GET /v1/delivery-jobs/:job_id
+
+// =============================================================
+// GET /api/preferences/search-apple
+// =============================================================
+
 if (
-  request.method === "GET" &&
-  url.pathname.startsWith("/v1/delivery-jobs/")
+  url.pathname ===
+    "/api/preferences/search-apple" &&
+  request.method === "GET"
 ) {
-  const token = getBearerToken(request);
+  return proxyTooLostPublicGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/search-apple${url.search || ""}`
+  );
+}
 
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
 
-  const auth = await verifyToken(token, env.JWT_SECRET);
+// =============================================================
+// GET /api/preferences/get-spotify-artist
+// =============================================================
 
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
+if (
+  url.pathname ===
+    "/api/preferences/get-spotify-artist" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPublicGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/get-spotify-artist${url.search || ""}`
+  );
+}
 
-  const userId = auth.sub || auth.user_id || auth.userId || auth.id;
 
+// =============================================================
+// GET /api/preferences/get-yt-channel
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/get-yt-channel" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPublicGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/get-yt-channel${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// GET /api/preferences/get-apple-artist
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/get-apple-artist" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPublicGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/get-apple-artist${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// GET /api/preferences/artist-via-link
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/artist-via-link" &&
+  request.method === "GET"
+) {
+  return proxyTooLostPublicGET(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    `/preferences/artist-via-link${url.search || ""}`
+  );
+}
+
+
+// =============================================================
+// POST /api/preferences/artist/get-artist-via-url
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/artist/get-artist-via-url" &&
+  request.method === "POST"
+) {
+  return proxyTooLostPublicPOST(
+    request,
+    env,
+    corsHeaders,
+    userId,
+    "/preferences/artist/get-artist-via-url"
+  );
+}
+
+
+// =============================================================
+// ARTIST PLATFORM SEARCH
+// =============================================================
+//
+// POST /api/preferences/search/artist-platform
+//
+// Primary Too Lost endpoint:
+//
+// POST /preferences/search/artist-platform
+//
+// Body:
+//
+// {
+//   platform: "spotify",
+//   term: "Official Bigi",
+//   limit: 5
+// }
+//
+// If the newer endpoint returns 404 / 405 / 500 / 502 / 503,
+// we try the older platform-specific endpoints already present
+// in your Worker.
+//
+// This prevents the Audiory Worker from hiding the actual Too Lost
+// response behind its own generic 500.
+//
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/search/artist-platform" &&
+  request.method === "POST"
+) {
   if (!userId) {
-    return json(
+    return preferencesJSON(
       {
-        success: false,
-        error: "User ID missing from authentication token"
+        error:
+          "Unauthorized"
       },
-      401
-    );
-  }
-
-  const parts = url.pathname.split("/");
-  const jobId = parts[3];
-
-  if (!jobId) {
-    return json(
-      {
-        success: false,
-        error: "Delivery job ID is required"
-      },
-      400
-    );
-  }
-
-  try {
-    const job = await env.DB.prepare(`
-      SELECT
-        id,
-        submission_id,
-        release_id,
-        user_id,
-        platform,
-        status,
-        external_id,
-        submitted_at,
-        delivered_at,
-        error_code,
-        error_message,
-        retry_count,
-        created_at,
-        updated_at
-      FROM delivery_jobs
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-      .bind(jobId, userId)
-      .first();
-
-    if (!job) {
-      return json(
-        {
-          success: false,
-          error: "Delivery job not found"
-        },
-        404
-      );
-    }
-
-    const submission = await env.DB.prepare(`
-      SELECT
-        id,
-        release_id,
-        status
-      FROM release_submissions
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-      .bind(job.submission_id, userId)
-      .first();
-
-    const release = await env.DB.prepare(`
-      SELECT
-        id,
-        title,
-        release_type,
-        artist_id,
-        release_date,
-        status
-      FROM releases
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-      .bind(job.release_id, userId)
-      .first();
-
-    return json({
-      success: true,
-
-      job,
-
-      submission,
-
-      release
-    });
-
-  } catch (error) {
-    console.error("Get delivery job error:", error);
-
-    return json(
-      {
-        success: false,
-        error: "Failed to retrieve delivery job",
-        details: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-if (
-  request.method === "GET" &&
-  url.pathname === "/v1/platform-integrations"
-) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const result = await env.DB.prepare(`
-    SELECT
-      id,
-      platform,
-      enabled,
-      mode,
-      adapter_version,
-      created_at,
-      updated_at
-    FROM platform_integrations
-    ORDER BY platform ASC
-  `).all();
-
-  return json({
-    success: true,
-    integrations: result.results.map((integration) => ({
-      ...integration,
-      enabled: Boolean(integration.enabled)
-    }))
-  });
-}
-
-if (
-  request.method === "GET" &&
-  url.pathname.startsWith("/v1/platform-integrations/")
-) {
-  const platform = url.pathname.split("/").pop();
-
-  if (!isValidPlatform(platform)) {
-    return json(
-      {
-        success: false,
-        error: "Unsupported platform"
-      },
-      400
-    );
-  }
-
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const integration = await env.DB.prepare(`
-    SELECT
-      id,
-      platform,
-      enabled,
-      mode,
-      adapter_version,
-      created_at,
-      updated_at
-    FROM platform_integrations
-    WHERE platform = ?
-    LIMIT 1
-  `)
-    .bind(platform)
-    .first();
-
-  if (!integration) {
-    return json(
-      {
-        success: false,
-        error: "Platform integration not found"
-      },
-      404
-    );
-  }
-
-  return json({
-    success: true,
-    integration: {
-      ...integration,
-      enabled: Boolean(integration.enabled)
-    }
-  });
-}
-
-if (
-  request.method === "PATCH" &&
-  url.pathname.startsWith("/v1/platform-integrations/")
-) {
-  const platform = url.pathname.split("/").pop();
-
-  if (!isValidPlatform(platform)) {
-    return json(
-      {
-        success: false,
-        error: "Unsupported platform"
-      },
-      400
-    );
-  }
-
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const userId =
-    auth.sub ||
-    auth.user_id ||
-    auth.userId ||
-    auth.id;
-
-  if (!userId) {
-    return json(
-      {
-        success: false,
-        error: "Authenticated user ID missing"
-      },
-      401
+      401,
+      corsHeaders
     );
   }
 
   let body;
 
   try {
-    body = await request.json();
+    body =
+      await request.json();
   } catch {
-    return json(
+    return preferencesJSON(
       {
-        success: false,
-        error: "Invalid JSON body"
-      },
-      400
-    );
-  }
-
-  const updates = [];
-
-  const values = [];
-
-  if (body.enabled !== undefined) {
-    if (typeof body.enabled !== "boolean") {
-      return json(
-        {
-          success: false,
-          error: "enabled must be a boolean"
-        },
-        400
-      );
-    }
-
-    updates.push("enabled = ?");
-    values.push(body.enabled ? 1 : 0);
-  }
-
-  if (body.mode !== undefined) {
-    if (!isValidIntegrationMode(body.mode)) {
-      return json(
-        {
-          success: false,
-          error: "mode must be either sandbox or production"
-        },
-        400
-      );
-    }
-
-    updates.push("mode = ?");
-    values.push(body.mode);
-  }
-
-  if (updates.length === 0) {
-    return json(
-      {
-        success: false,
-        error: "No valid fields to update"
-      },
-      400
-    );
-  }
-
-  updates.push("updated_at = CURRENT_TIMESTAMP");
-
-  values.push(platform);
-
-  const result = await env.DB.prepare(`
-    UPDATE platform_integrations
-    SET ${updates.join(", ")}
-    WHERE platform = ?
-  `)
-    .bind(...values)
-    .run();
-
-  if (!result.meta.changes) {
-    return json(
-      {
-        success: false,
-        error: "Platform integration not found"
-      },
-      404
-    );
-  }
-
-  const integration = await env.DB.prepare(`
-    SELECT
-      id,
-      platform,
-      enabled,
-      mode,
-      adapter_version,
-      created_at,
-      updated_at
-    FROM platform_integrations
-    WHERE platform = ?
-    LIMIT 1
-  `)
-    .bind(platform)
-    .first();
-
-  return json({
-    success: true,
-    message: "Platform integration updated",
-    integration: {
-      ...integration,
-      enabled: Boolean(integration.enabled)
-    }
-  });
-}
-
-// POST /v1/analytics/events
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/analytics/events"
-) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const userId =
-    auth.sub ||
-    auth.user_id ||
-    auth.userId ||
-    auth.id;
-
-  if (!userId) {
-    return json(
-      {
-        success: false,
-        error: "User ID missing from authentication token"
-      },
-      401
-    );
-  }
-
-  try {
-    const body = await request.json();
-
-    const {
-      release_id,
-      track_id,
-      platform,
-      territory,
-      event_type,
-      streams,
-      downloads,
-      revenue_amount,
-      currency,
-      event_date,
-      metadata
-    } = body;
-
-    // Required fields
-    if (!platform) {
-      return json(
-        {
-          success: false,
-          error: "platform is required"
-        },
-        400
-      );
-    }
-
-    if (!event_type) {
-      return json(
-        {
-          success: false,
-          error: "event_type is required"
-        },
-        400
-      );
-    }
-
-    if (!event_date) {
-      return json(
-        {
-          success: false,
-          error: "event_date is required"
-        },
-        400
-      );
-    }
-
-    // Validate date format
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(event_date)) {
-      return json(
-        {
-          success: false,
-          error: "event_date must use YYYY-MM-DD format"
-        },
-        400
-      );
-    }
-
-    const allowedEventTypes = [
-      "stream",
-      "download",
-      "revenue",
-      "stream_download",
-      "royalty"
-    ];
-
-    if (!allowedEventTypes.includes(event_type)) {
-      return json(
-        {
-          success: false,
-          error: "Invalid event_type",
-          allowed_values: allowedEventTypes
-        },
-        400
-      );
-    }
-
-    const allowedPlatforms = [
-      "spotify",
-      "apple_music",
-      "youtube_music",
-      "amazon_music",
-      "deezer",
-      "tiktok_music"
-    ];
-
-    if (!allowedPlatforms.includes(platform)) {
-      return json(
-        {
-          success: false,
-          error: "Invalid platform",
-          allowed_values: allowedPlatforms
-        },
-        400
-      );
-    }
-
-    // Verify release ownership if supplied
-    if (release_id) {
-      const release = await env.DB.prepare(`
-        SELECT id
-        FROM releases
-        WHERE id = ?
-          AND user_id = ?
-        LIMIT 1
-      `)
-        .bind(release_id, userId)
-        .first();
-
-      if (!release) {
-        return json(
-          {
-            success: false,
-            error: "Release not found"
-          },
-          404
-        );
-      }
-    }
-
-    // Verify track ownership if supplied
-    if (track_id) {
-      const track = await env.DB.prepare(`
-        SELECT
-          tracks.id
-        FROM tracks
-        INNER JOIN releases
-          ON releases.id = tracks.release_id
-        WHERE tracks.id = ?
-          AND releases.user_id = ?
-        LIMIT 1
-      `)
-        .bind(track_id, userId)
-        .first();
-
-      if (!track) {
-        return json(
-          {
-            success: false,
-            error: "Track not found"
-          },
-          404
-        );
-      }
-    }
-
-    const streamsValue = Number.isFinite(Number(streams))
-      ? Number(streams)
-      : 0;
-
-    const downloadsValue = Number.isFinite(Number(downloads))
-      ? Number(downloads)
-      : 0;
-
-    const revenueValue = Number.isFinite(Number(revenue_amount))
-      ? Number(revenue_amount)
-      : 0;
-
-    if (streamsValue < 0) {
-      return json(
-        {
-          success: false,
-          error: "streams cannot be negative"
-        },
-        400
-      );
-    }
-
-    if (downloadsValue < 0) {
-      return json(
-        {
-          success: false,
-          error: "downloads cannot be negative"
-        },
-        400
-      );
-    }
-
-    if (revenueValue < 0) {
-      return json(
-        {
-          success: false,
-          error: "revenue_amount cannot be negative"
-        },
-        400
-      );
-    }
-
-    const eventId =
-      `analytics_${crypto.randomUUID()}`;
-
-    await env.DB.prepare(`
-      INSERT INTO analytics_events (
-        id,
-        user_id,
-        release_id,
-        track_id,
-        platform,
-        territory,
-        event_type,
-        streams,
-        downloads,
-        revenue_amount,
-        currency,
-        event_date,
-        metadata_json
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-      .bind(
-        eventId,
-        userId,
-        release_id || null,
-        track_id || null,
-        platform,
-        territory || null,
-        event_type,
-        streamsValue,
-        downloadsValue,
-        revenueValue,
-        currency || "USD",
-        event_date,
-        metadata
-          ? JSON.stringify(metadata)
-          : null
-      )
-      .run();
-
-    const event = await env.DB.prepare(`
-      SELECT *
-      FROM analytics_events
-      WHERE id = ?
-      LIMIT 1
-    `)
-      .bind(eventId)
-      .first();
-
-    return json(
-      {
-        success: true,
-        message: "Analytics event recorded",
-        event
-      },
-      201
-    );
-
-  } catch (error) {
-    console.error(
-      "Analytics event error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error: "Failed to record analytics event",
-        details: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-// POST /v1/analytics/aggregate
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/analytics/aggregate"
-) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const userId =
-    auth.sub ||
-    auth.user_id ||
-    auth.userId ||
-    auth.id;
-
-  if (!userId) {
-    return json(
-      {
-        success: false,
-        error: "User ID missing from authentication token"
-      },
-      401
-    );
-  }
-
-  try {
-    const body = await request.json();
-
-    const { event_id } = body;
-
-    if (!event_id) {
-      return json(
-        {
-          success: false,
-          error: "event_id is required"
-        },
-        400
-      );
-    }
-
-    const event = await env.DB.prepare(`
-      SELECT *
-      FROM analytics_events
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `).bind(
-      event_id,
-      userId
-    ).first();
-
-    if (!event) {
-      return json(
-        {
-          success: false,
-          error: "Analytics event not found"
-        },
-        404
-      );
-    }
-
-    const result =
-      await aggregateAnalyticsEvent(env, event_id);
-
-    return json(
-      {
-        success: true,
-        message: "Analytics event aggregated successfully",
-        result
-      },
-      200
-    );
-
-  } catch (error) {
-    console.error(
-      "Analytics aggregation error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error: "Failed to aggregate analytics event",
-        details: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-// GET /v1/analytics/overview
-if (
-  request.method === "GET" &&
-  url.pathname === "/v1/analytics/overview"
-) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const userId =
-    auth.sub ||
-    auth.user_id ||
-    auth.userId ||
-    auth.id;
-
-  if (!userId) {
-    return json(
-      {
-        success: false,
-        error: "User ID missing from authentication token"
-      },
-      401
-    );
-  }
-
-  try {
-    const from = url.searchParams.get("from");
-    const to = url.searchParams.get("to");
-    const releaseId = url.searchParams.get("release_id");
-    const trackId = url.searchParams.get("track_id");
-    const platform = url.searchParams.get("platform");
-    const territory = url.searchParams.get("territory");
-
-    /*
-     * ---------------------------------------------------------
-     * Validate dates
-     * ---------------------------------------------------------
-     */
-
-    if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) {
-      return json(
-        {
-          success: false,
-          error: "from must use YYYY-MM-DD format"
-        },
-        400
-      );
-    }
-
-    if (to && !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-      return json(
-        {
-          success: false,
-          error: "to must use YYYY-MM-DD format"
-        },
-        400
-      );
-    }
-
-    if (from && to && from > to) {
-      return json(
-        {
-          success: false,
-          error: "from cannot be later than to"
-        },
-        400
-      );
-    }
-
-    /*
-     * ---------------------------------------------------------
-     * Build analytics_daily query
-     * ---------------------------------------------------------
-     */
-
-    let where = `
-      WHERE user_id = ?
-    `;
-
-    const params = [userId];
-
-    if (from) {
-      where += ` AND event_date >= ?`;
-      params.push(from);
-    }
-
-    if (to) {
-      where += ` AND event_date <= ?`;
-      params.push(to);
-    }
-
-    if (releaseId) {
-      where += ` AND release_id = ?`;
-      params.push(releaseId);
-    }
-
-    if (trackId) {
-      where += ` AND track_id = ?`;
-      params.push(trackId);
-    }
-
-    if (platform) {
-      where += ` AND platform = ?`;
-      params.push(platform);
-    }
-
-    if (territory) {
-      where += ` AND territory = ?`;
-      params.push(territory);
-    }
-
-    /*
-     * ---------------------------------------------------------
-     * Aggregate totals
-     * ---------------------------------------------------------
-     */
-
-    const totals = await env.DB.prepare(`
-      SELECT
-        COALESCE(SUM(streams), 0) AS streams,
-        COALESCE(SUM(downloads), 0) AS downloads,
-        COALESCE(SUM(revenue_amount), 0) AS revenue
-      FROM analytics_daily
-      ${where}
-    `).bind(...params).first();
-
-    const tracksResult = await env.DB.prepare(`
-      SELECT COUNT(DISTINCT track_id) AS count
-      FROM analytics_daily
-      ${where}
-      AND track_id IS NOT NULL
-    `).bind(...params).first();
-
-    /*
-     * ---------------------------------------------------------
-     * Count releases
-     * ---------------------------------------------------------
-     */
-
-    const releasesResult = await env.DB.prepare(`
-      SELECT COUNT(DISTINCT release_id) AS count
-      FROM analytics_daily
-      ${where}
-      AND release_id IS NOT NULL
-    `).bind(...params).first();
-
-    /*
-     * ---------------------------------------------------------
-     * Count platforms
-     * ---------------------------------------------------------
-     */
-
-    const platformsResult = await env.DB.prepare(`
-      SELECT COUNT(DISTINCT platform) AS count
-      FROM analytics_daily
-      ${where}
-      AND platform IS NOT NULL
-    `).bind(...params).first();
-
-    /*
-     * ---------------------------------------------------------
-     * Count territories
-     * ---------------------------------------------------------
-     */
-
-    const territoriesResult = await env.DB.prepare(`
-      SELECT COUNT(DISTINCT territory) AS count
-      FROM analytics_daily
-      ${where}
-      AND territory IS NOT NULL
-    `).bind(...params).first();
-
-    /*
-     * ---------------------------------------------------------
-     * Response
-     * ---------------------------------------------------------
-     */
-
-    return json({
-      success: true,
-
-      overview: {
-        streams: Number(totals?.streams || 0),
-        downloads: Number(totals?.downloads || 0),
-        revenue: Number(totals?.revenue || 0),
-        currency: "USD",
-
-        tracks: Number(tracksResult?.count || 0),
-        releases: Number(releasesResult?.count || 0),
-        platforms: Number(platformsResult?.count || 0),
-        territories: Number(territoriesResult?.count || 0)
-      },
-
-      filters: {
-        from: from || null,
-        to: to || null,
-        release_id: releaseId || null,
-        track_id: trackId || null,
-        platform: platform || null,
-        territory: territory || null
-      }
-    });
-
-  } catch (error) {
-    console.error(
-      "Analytics overview error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error: "Failed to load analytics overview",
-        details: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-// GET /v1/analytics/tracks
-if (
-  request.method === "GET" &&
-  url.pathname === "/v1/analytics/tracks"
-) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const userId =
-    auth.sub ||
-    auth.user_id ||
-    auth.userId ||
-    auth.id;
-
-  if (!userId) {
-    return json(
-      {
-        success: false,
-        error: "User ID missing from authentication token"
-      },
-      401
-    );
-  }
-
-  try {
-    const from = url.searchParams.get("from");
-    const to = url.searchParams.get("to");
-    const releaseId = url.searchParams.get("release_id");
-    const platform = url.searchParams.get("platform");
-
-    let limit = Number(url.searchParams.get("limit") || 50);
-    let offset = Number(url.searchParams.get("offset") || 0);
-
-    if (!Number.isInteger(limit) || limit < 1) {
-      return json(
-        {
-          success: false,
-          error: "limit must be a positive integer"
-        },
-        400
-      );
-    }
-
-    if (limit > 100) {
-      limit = 100;
-    }
-
-    if (!Number.isInteger(offset) || offset < 0) {
-      return json(
-        {
-          success: false,
-          error: "offset must be a non-negative integer"
-        },
-        400
-      );
-    }
-
-    /*
-     * ---------------------------------------------------------
-     * Validate dates
-     * ---------------------------------------------------------
-     */
-
-    if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) {
-      return json(
-        {
-          success: false,
-          error: "from must use YYYY-MM-DD format"
-        },
-        400
-      );
-    }
-
-    if (to && !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-      return json(
-        {
-          success: false,
-          error: "to must use YYYY-MM-DD format"
-        },
-        400
-      );
-    }
-
-    if (from && to && from > to) {
-      return json(
-        {
-          success: false,
-          error: "from cannot be later than to"
-        },
-        400
-      );
-    }
-
-    /*
-     * ---------------------------------------------------------
-     * Build query
-     *
-     * We use analytics_daily here instead of analytics_tracks
-     * because date/platform filters must be respected.
-     * ---------------------------------------------------------
-     */
-
-    let where = `
-      WHERE ad.user_id = ?
-        AND ad.track_id IS NOT NULL
-    `;
-
-    const params = [userId];
-
-    if (from) {
-      where += ` AND ad.event_date >= ?`;
-      params.push(from);
-    }
-
-    if (to) {
-      where += ` AND ad.event_date <= ?`;
-      params.push(to);
-    }
-
-    if (releaseId) {
-      where += ` AND ad.release_id = ?`;
-      params.push(releaseId);
-    }
-
-    if (platform) {
-      where += ` AND ad.platform = ?`;
-      params.push(platform);
-    }
-
-    /*
-     * ---------------------------------------------------------
-     * Count total tracks
-     * ---------------------------------------------------------
-     */
-
-    const countResult = await env.DB.prepare(`
-      SELECT COUNT(*) AS count
-      FROM (
-        SELECT ad.track_id
-        FROM analytics_daily ad
-        ${where}
-        GROUP BY ad.track_id
-      )
-    `).bind(...params).first();
-
-    const total = Number(countResult?.count || 0);
-
-    /*
-     * ---------------------------------------------------------
-     * Track analytics
-     * ---------------------------------------------------------
-     */
-
-    const tracksResult = await env.DB.prepare(`
-      SELECT
-        ad.track_id,
-        ad.release_id,
-
-        COALESCE(t.title, 'Unknown Track') AS title,
-        t.version,
-        t.isrc,
-        t.track_number,
-        t.disc_number,
-
-        COALESCE(r.title, 'Unknown Release') AS release_title,
-
-        COALESCE(SUM(ad.streams), 0) AS streams,
-        COALESCE(SUM(ad.downloads), 0) AS downloads,
-        COALESCE(SUM(ad.revenue_amount), 0) AS revenue,
-
-        MAX(ad.event_date) AS last_stream_date,
-
-        COUNT(DISTINCT ad.platform) AS platform_count,
-        COUNT(DISTINCT ad.territory) AS territory_count
-
-      FROM analytics_daily ad
-
-      LEFT JOIN tracks t
-        ON t.id = ad.track_id
-
-      LEFT JOIN releases r
-        ON r.id = ad.release_id
-
-      ${where}
-
-      GROUP BY
-        ad.track_id,
-        ad.release_id,
-        t.title,
-        t.version,
-        t.isrc,
-        t.track_number,
-        t.disc_number,
-        r.title
-
-      ORDER BY streams DESC
-
-      LIMIT ? OFFSET ?
-    `).bind(
-      ...params,
-      limit,
-      offset
-    ).all();
-
-    /*
-     * ---------------------------------------------------------
-     * Format response
-     * ---------------------------------------------------------
-     */
-
-    const tracks = (tracksResult.results || []).map(track => ({
-      track_id: track.track_id,
-      release_id: track.release_id,
-
-      title: track.title,
-      version: track.version || null,
-      isrc: track.isrc || null,
-
-      track_number:
-        track.track_number !== null
-          ? Number(track.track_number)
-          : null,
-
-      disc_number:
-        track.disc_number !== null
-          ? Number(track.disc_number)
-          : null,
-
-      release_title: track.release_title,
-
-      streams: Number(track.streams || 0),
-      downloads: Number(track.downloads || 0),
-      revenue: Number(track.revenue || 0),
-
-      currency: "USD",
-
-      last_stream_date:
-        track.last_stream_date || null,
-
-      platform_count:
-        Number(track.platform_count || 0),
-
-      territory_count:
-        Number(track.territory_count || 0)
-    }));
-
-    return json({
-      success: true,
-
-      tracks,
-
-      pagination: {
-        total,
-        limit,
-        offset,
-        returned: tracks.length,
-        has_more: offset + tracks.length < total
-      },
-
-      filters: {
-        from: from || null,
-        to: to || null,
-        release_id: releaseId || null,
-        platform: platform || null
-      }
-    });
-
-  } catch (error) {
-    console.error(
-      "Analytics tracks error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error: "Failed to load track analytics",
-        details: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-// GET /v1/analytics/tracks/charts
-if (url.pathname === "/v1/analytics/tracks/charts" && request.method === "GET") {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return json(
-      {
-        success: false,
-        error: "Authorization required"
-      },
-      401
-    );
-  }
-
-  const auth = await verifyToken(token, env.JWT_SECRET);
-
-  if (!auth) {
-    return json(
-      {
-        success: false,
-        error: "Invalid or expired token"
-      },
-      401
-    );
-  }
-
-  const userId =
-    auth.sub ||
-    auth.user_id ||
-    auth.userId ||
-    auth.id;
-
-  if (!userId) {
-    return json(
-      {
-        success: false,
-        error: "Invalid authentication payload"
-      },
-      401
-    );
-  }
-
-  const trackId = url.searchParams.get("track_id");
-  const releaseId = url.searchParams.get("release_id");
-  const from = url.searchParams.get("from");
-  const to = url.searchParams.get("to");
-  const platform = url.searchParams.get("platform");
-  const territory = url.searchParams.get("territory");
-
-  // -----------------------------
-  // Validate dates
-  // -----------------------------
-
-  const isValidDate = (value) => {
-    if (!value) return true;
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      return false;
-    }
-
-    const date = new Date(`${value}T00:00:00Z`);
-
-    return !Number.isNaN(date.getTime()) &&
-      date.toISOString().slice(0, 10) === value;
-  };
-
-  if (!isValidDate(from)) {
-    return json(
-      {
-        success: false,
-        error: "Invalid from date. Use YYYY-MM-DD."
-      },
-      400
-    );
-  }
-
-  if (!isValidDate(to)) {
-    return json(
-      {
-        success: false,
-        error: "Invalid to date. Use YYYY-MM-DD."
-      },
-      400
-    );
-  }
-
-  if (from && to && from > to) {
-    return json(
-      {
-        success: false,
-        error: "from date cannot be later than to date"
-      },
-      400
-    );
-  }
-
-  // -----------------------------
-  // Validate platform
-  // -----------------------------
-
-  const allowedPlatforms = [
-    "spotify",
-    "apple_music",
-    "youtube_music",
-    "amazon_music",
-    "deezer",
-    "tiktok_music"
-  ];
-
-  if (platform && !allowedPlatforms.includes(platform)) {
-    return json(
-      {
-        success: false,
-        error: "Invalid platform",
-        allowed_platforms: allowedPlatforms
-      },
-      400
-    );
-  }
-
-  // -----------------------------
-  // Validate track ownership
-  // -----------------------------
-
-  if (trackId) {
-    const trackResult = await env.DB.prepare(`
-      SELECT
-        t.id,
-        t.release_id,
-        t.title,
-        t.version,
-        t.isrc,
-        r.title AS release_title
-      FROM tracks t
-      JOIN releases r
-        ON r.id = t.release_id
-      WHERE t.id = ?
-        AND r.user_id = ?
-      LIMIT 1
-    `)
-      .bind(trackId, userId)
-      .first();
-
-    if (!trackResult) {
-      return json(
-        {
-          success: false,
-          error: "Track not found"
-        },
-        404
-      );
-    }
-  }
-
-  // -----------------------------
-  // Validate release ownership
-  // -----------------------------
-
-  if (releaseId) {
-    const releaseResult = await env.DB.prepare(`
-      SELECT id, title
-      FROM releases
-      WHERE id = ?
-        AND user_id = ?
-      LIMIT 1
-    `)
-      .bind(releaseId, userId)
-      .first();
-
-    if (!releaseResult) {
-      return json(
-        {
-          success: false,
-          error: "Release not found"
-        },
-        404
-      );
-    }
-  }
-
-  // -----------------------------
-  // Build query
-  // -----------------------------
-
-  let query = `
-    SELECT
-      event_date AS date,
-      SUM(streams) AS streams,
-      SUM(downloads) AS downloads,
-      SUM(revenue_amount) AS revenue
-    FROM analytics_daily
-    WHERE user_id = ?
-  `;
-
-  const params = [userId];
-
-  if (trackId) {
-    query += ` AND track_id = ?`;
-    params.push(trackId);
-  }
-
-  if (releaseId) {
-    query += ` AND release_id = ?`;
-    params.push(releaseId);
-  }
-
-  if (from) {
-    query += ` AND event_date >= ?`;
-    params.push(from);
-  }
-
-  if (to) {
-    query += ` AND event_date <= ?`;
-    params.push(to);
-  }
-
-  if (platform) {
-    query += ` AND platform = ?`;
-    params.push(platform);
-  }
-
-  if (territory) {
-    query += ` AND territory = ?`;
-    params.push(territory.toUpperCase());
-  }
-
-  query += `
-    GROUP BY event_date
-    ORDER BY event_date ASC
-  `;
-
-  const result = await env.DB
-    .prepare(query)
-    .bind(...params)
-    .all();
-
-  const rows = result.results || [];
-
-  // -----------------------------
-  // Format chart data
-  // -----------------------------
-
-  const data = rows.map((row) => ({
-    date: row.date,
-    streams: Number(row.streams || 0),
-    downloads: Number(row.downloads || 0),
-    revenue: Number(row.revenue || 0)
-  }));
-
-  // -----------------------------
-  // Calculate totals
-  // -----------------------------
-
-  const totals = data.reduce(
-    (acc, row) => {
-      acc.streams += row.streams;
-      acc.downloads += row.downloads;
-      acc.revenue += row.revenue;
-
-      return acc;
-    },
-    {
-      streams: 0,
-      downloads: 0,
-      revenue: 0
-    }
-  );
-
-  // Keep revenue clean for JSON
-  totals.revenue = Number(totals.revenue.toFixed(2));
-
-  return json({
-    success: true,
-
-    chart: {
-      metric: "streams",
-
-      data,
-
-      totals: {
-        streams: totals.streams,
-        downloads: totals.downloads,
-        revenue: totals.revenue,
-        currency: "USD"
-      },
-
-      days: data.length
-    },
-
-    filters: {
-      track_id: trackId,
-      release_id: releaseId,
-      from,
-      to,
-      platform,
-      territory: territory ? territory.toUpperCase() : null
-    }
-  });
-}
-
-// GET /v1/analytics/tracks/:isrc
-if (
-  url.pathname.startsWith("/v1/analytics/tracks/") &&
-  request.method === "GET"
-) {
-  try {
-    const token = getBearerToken(request);
-
-    if (!token) {
-      return json(
-        {
-          success: false,
-          error: "Authorization required"
-        },
-        401
-      );
-    }
-
-    const auth = await verifyToken(token, env.JWT_SECRET);
-
-    if (!auth) {
-      return json(
-        {
-          success: false,
-          error: "Invalid or expired token"
-        },
-        401
-      );
-    }
-
-    const userId =
-      auth.sub ||
-      auth.user_id ||
-      auth.userId ||
-      auth.id;
-
-    if (!userId) {
-      return json(
-        {
-          success: false,
-          error: "Invalid authentication payload"
-        },
-        401
-      );
-    }
-
-    // --------------------------------
-    // Get ISRC
-    // --------------------------------
-
-    const isrc = decodeURIComponent(
-      url.pathname
-        .replace("/v1/analytics/tracks/", "")
-        .trim()
-    )
-      .replace(/-/g, "")
-      .toUpperCase();
-
-    if (!isrc) {
-      return json(
-        {
-          success: false,
-          error: "ISRC is required"
-        },
-        400
-      );
-    }
-
-    // --------------------------------
-    // Validate ISRC
-    // --------------------------------
-
-    if (!/^[A-Z]{2}[A-Z0-9]{3}[0-9]{2}[0-9]{5}$/.test(isrc)) {
-      return json(
-        {
-          success: false,
-          error: "Invalid ISRC format"
-        },
-        400
-      );
-    }
-
-    // --------------------------------
-    // Find track
-    // --------------------------------
-
-    const track = await env.DB.prepare(`
-      SELECT
-        t.id,
-        t.release_id,
-        t.title,
-        t.version,
-        t.isrc,
-        t.track_number,
-        t.disc_number,
-        t.duration_seconds,
-        t.genre,
-        t.language,
-        t.explicit,
-
-        r.title AS release_title,
-        r.release_type,
-        r.release_date,
-        r.artist_id,
-
-        a.name AS artist_name
-
-      FROM tracks t
-
-      INNER JOIN releases r
-        ON r.id = t.release_id
-
-      LEFT JOIN artists a
-        ON a.id = r.artist_id
-
-      WHERE t.isrc = ?
-        AND r.user_id = ?
-
-      LIMIT 1
-    `)
-      .bind(isrc, userId)
-      .first();
-
-    if (!track) {
-      return json(
-        {
-          success: false,
-          error: "Track not found",
-          isrc
-        },
-        404
-      );
-    }
-
-    // --------------------------------
-    // Filters
-    // --------------------------------
-
-    const from = url.searchParams.get("from");
-    const to = url.searchParams.get("to");
-    const platform = url.searchParams.get("platform");
-    const territory = url.searchParams.get("territory");
-
-    const isValidDate = (value) => {
-      if (!value) return true;
-
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-        return false;
-      }
-
-      const date = new Date(`${value}T00:00:00Z`);
-
-      return (
-        !Number.isNaN(date.getTime()) &&
-        date.toISOString().slice(0, 10) === value
-      );
-    };
-
-    if (!isValidDate(from)) {
-      return json(
-        {
-          success: false,
-          error: "Invalid from date. Use YYYY-MM-DD."
-        },
-        400
-      );
-    }
-
-    if (!isValidDate(to)) {
-      return json(
-        {
-          success: false,
-          error: "Invalid to date. Use YYYY-MM-DD."
-        },
-        400
-      );
-    }
-
-    if (from && to && from > to) {
-      return json(
-        {
-          success: false,
-          error: "from date cannot be later than to date"
-        },
-        400
-      );
-    }
-
-    const allowedPlatforms = [
-      "spotify",
-      "apple_music",
-      "youtube_music",
-      "amazon_music",
-      "deezer",
-      "tiktok_music"
-    ];
-
-    if (
-      platform &&
-      !allowedPlatforms.includes(platform)
-    ) {
-      return json(
-        {
-          success: false,
-          error: "Invalid platform",
-          allowed_platforms: allowedPlatforms
-        },
-        400
-      );
-    }
-
-    // --------------------------------
-    // Build WHERE
-    // --------------------------------
-
-    let where = `
-      user_id = ?
-      AND track_id = ?
-    `;
-
-    const params = [
-      userId,
-      track.id
-    ];
-
-    if (from) {
-      where += ` AND event_date >= ?`;
-      params.push(from);
-    }
-
-    if (to) {
-      where += ` AND event_date <= ?`;
-      params.push(to);
-    }
-
-    if (platform) {
-      where += ` AND platform = ?`;
-      params.push(platform);
-    }
-
-    if (territory) {
-      where += ` AND territory = ?`;
-      params.push(territory.toUpperCase());
-    }
-
-    // --------------------------------
-    // TOTALS
-    // --------------------------------
-
-    const totals = await env.DB.prepare(`
-      SELECT
-        COALESCE(SUM(streams), 0) AS streams,
-        COALESCE(SUM(downloads), 0) AS downloads,
-        COALESCE(SUM(revenue_amount), 0) AS revenue,
-        COUNT(DISTINCT platform) AS platform_count,
-        COUNT(DISTINCT territory) AS territory_count,
-        MIN(event_date) AS first_event_date,
-        MAX(event_date) AS last_event_date
-      FROM analytics_daily
-      WHERE ${where}
-    `)
-      .bind(...params)
-      .first();
-
-    // --------------------------------
-    // PLATFORM BREAKDOWN
-    // --------------------------------
-
-    const platformResult = await env.DB.prepare(`
-      SELECT
-        platform,
-        COALESCE(SUM(streams), 0) AS streams,
-        COALESCE(SUM(downloads), 0) AS downloads,
-        COALESCE(SUM(revenue_amount), 0) AS revenue
-      FROM analytics_daily
-      WHERE ${where}
-      GROUP BY platform
-      ORDER BY streams DESC
-    `)
-      .bind(...params)
-      .all();
-
-    const platforms = (platformResult.results || []).map((row) => ({
-      platform: row.platform,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      revenue: Number(
-        Number(row.revenue || 0).toFixed(2)
-      )
-    }));
-
-    // --------------------------------
-    // TERRITORY BREAKDOWN
-    // --------------------------------
-
-    const territoryResult = await env.DB.prepare(`
-      SELECT
-        territory,
-        COALESCE(SUM(streams), 0) AS streams,
-        COALESCE(SUM(downloads), 0) AS downloads,
-        COALESCE(SUM(revenue_amount), 0) AS revenue
-      FROM analytics_daily
-      WHERE ${where}
-        AND territory IS NOT NULL
-        AND territory != ''
-      GROUP BY territory
-      ORDER BY streams DESC
-    `)
-      .bind(...params)
-      .all();
-
-    const territories = (territoryResult.results || []).map((row) => ({
-      territory: row.territory,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      revenue: Number(
-        Number(row.revenue || 0).toFixed(2)
-      )
-    }));
-
-    // --------------------------------
-    // DAILY DATA
-    // --------------------------------
-
-    const dailyResult = await env.DB.prepare(`
-      SELECT
-        event_date AS date,
-        COALESCE(SUM(streams), 0) AS streams,
-        COALESCE(SUM(downloads), 0) AS downloads,
-        COALESCE(SUM(revenue_amount), 0) AS revenue
-      FROM analytics_daily
-      WHERE ${where}
-      GROUP BY event_date
-      ORDER BY event_date ASC
-    `)
-      .bind(...params)
-      .all();
-
-    const daily = (dailyResult.results || []).map((row) => ({
-      date: row.date,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      revenue: Number(
-        Number(row.revenue || 0).toFixed(2)
-      )
-    }));
-
-    // --------------------------------
-    // RESPONSE
-    // --------------------------------
-
-    return json({
-      success: true,
-
-      track: {
-        id: track.id,
-        isrc: track.isrc,
-        title: track.title,
-        version: track.version,
-        track_number: Number(track.track_number || 0),
-        disc_number: Number(track.disc_number || 0),
-        duration_seconds: Number(
-          track.duration_seconds || 0
-        ),
-        genre: track.genre,
-        language: track.language,
-        explicit: Boolean(track.explicit)
-      },
-
-      release: {
-        id: track.release_id,
-        title: track.release_title,
-        type: track.release_type,
-        release_date: track.release_date,
-        artist_name: track.artist_name,
-      },
-
-      analytics: {
-        streams: Number(totals?.streams || 0),
-        downloads: Number(totals?.downloads || 0),
-        revenue: Number(
-          Number(totals?.revenue || 0).toFixed(2)
-        ),
-        currency: "USD",
-        platforms: Number(
-          totals?.platform_count || 0
-        ),
-        territories: Number(
-          totals?.territory_count || 0
-        ),
-        first_event_date:
-          totals?.first_event_date || null,
-        last_event_date:
-          totals?.last_event_date || null
-      },
-
-      platforms,
-
-      territories,
-
-      daily,
-
-      filters: {
-        from: from || null,
-        to: to || null,
-        platform: platform || null,
-        territory: territory
-          ? territory.toUpperCase()
-          : null
-      }
-    });
-
-  } catch (error) {
-
-    console.error(
-      "GET /v1/analytics/tracks/:isrc error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error: "Internal server error",
-        message: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-if (
-  url.pathname === "/v1/analytics/platforms" &&
-  request.method === "GET"
-) {
-  try {
-    const token = getBearerToken(request);
-
-    if (!token) {
-      return json(
-        {
-          success: false,
-          error: "Authorization required"
-        },
-        401
-      );
-    }
-
-    const auth = await verifyToken(token, env.JWT_SECRET);
-
-    if (!auth) {
-      return json(
-        {
-          success: false,
-          error: "Invalid or expired token"
-        },
-        401
-      );
-    }
-
-    const userId =
-      auth.sub ||
-      auth.user_id ||
-      auth.userId ||
-      auth.id;
-
-    if (!userId) {
-      return json(
-        {
-          success: false,
-          error: "Invalid authentication payload"
-        },
-        401
-      );
-    }
-
-    const from = url.searchParams.get("from");
-    const to = url.searchParams.get("to");
-
-    const isValidDate = (value) => {
-      if (!value) return true;
-
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-        return false;
-      }
-
-      const date = new Date(`${value}T00:00:00Z`);
-
-      return (
-        !Number.isNaN(date.getTime()) &&
-        date.toISOString().slice(0, 10) === value
-      );
-    };
-
-    if (!isValidDate(from)) {
-      return json(
-        {
-          success: false,
-          error: "Invalid from date. Use YYYY-MM-DD."
-        },
-        400
-      );
-    }
-
-    if (!isValidDate(to)) {
-      return json(
-        {
-          success: false,
-          error: "Invalid to date. Use YYYY-MM-DD."
-        },
-        400
-      );
-    }
-
-    if (from && to && from > to) {
-      return json(
-        {
-          success: false,
-          error: "from date cannot be later than to date"
-        },
-        400
-      );
-    }
-
-    // Use analytics_daily when date filters are supplied.
-    // This ensures the numbers respect the selected period.
-
-    let where = `user_id = ?`;
-    const params = [userId];
-
-    if (from) {
-      where += ` AND event_date >= ?`;
-      params.push(from);
-    }
-
-    if (to) {
-      where += ` AND event_date <= ?`;
-      params.push(to);
-    }
-
-    const result = await env.DB.prepare(`
-      SELECT
-        platform,
-        COALESCE(SUM(streams), 0) AS streams,
-        COALESCE(SUM(downloads), 0) AS downloads,
-        COALESCE(SUM(revenue_amount), 0) AS revenue,
-        MIN(event_date) AS first_event_date,
-        MAX(event_date) AS last_event_date
-      FROM analytics_daily
-      WHERE ${where}
-      GROUP BY platform
-      ORDER BY streams DESC
-    `)
-      .bind(...params)
-      .all();
-
-    const platforms = (result.results || []).map((row) => ({
-      platform: row.platform,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      revenue: Number(
-        Number(row.revenue || 0).toFixed(2)
-      ),
-      first_event_date: row.first_event_date || null,
-      last_event_date: row.last_event_date || null
-    }));
-
-    const totals = platforms.reduce(
-      (acc, platform) => {
-        acc.streams += platform.streams;
-        acc.downloads += platform.downloads;
-        acc.revenue += platform.revenue;
-        return acc;
-      },
-      {
-        streams: 0,
-        downloads: 0,
-        revenue: 0
-      }
-    );
-
-    totals.revenue = Number(
-      totals.revenue.toFixed(2)
-    );
-
-    return json({
-      success: true,
-
-      platforms,
-
-      totals: {
-        streams: totals.streams,
-        downloads: totals.downloads,
-        revenue: totals.revenue,
-        platforms: platforms.length,
-        currency: "USD"
-      },
-
-      filters: {
-        from: from || null,
-        to: to || null
-      }
-    });
-
-  } catch (error) {
-    console.error(
-      "GET /v1/analytics/platforms error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error: "Internal server error",
-        message: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-if (
-  url.pathname === "/v1/analytics/platforms/data" &&
-  request.method === "GET"
-) {
-  try {
-    const token = getBearerToken(request);
-
-    if (!token) {
-      return json(
-        {
-          success: false,
-          error: "Authorization required"
-        },
-        401
-      );
-    }
-
-    const auth = await verifyToken(token, env.JWT_SECRET);
-
-    if (!auth) {
-      return json(
-        {
-          success: false,
-          error: "Invalid or expired token"
-        },
-        401
-      );
-    }
-
-    const userId =
-      auth.sub ||
-      auth.user_id ||
-      auth.userId ||
-      auth.id;
-
-    if (!userId) {
-      return json(
-        {
-          success: false,
-          error: "Invalid authentication payload"
-        },
-        401
-      );
-    }
-
-    const from = url.searchParams.get("from");
-    const to = url.searchParams.get("to");
-    const platform = url.searchParams.get("platform");
-
-    let where = `user_id = ?`;
-    const params = [userId];
-
-    if (from) {
-      where += ` AND event_date >= ?`;
-      params.push(from);
-    }
-
-    if (to) {
-      where += ` AND event_date <= ?`;
-      params.push(to);
-    }
-
-    if (platform) {
-      where += ` AND platform = ?`;
-      params.push(platform);
-    }
-
-    const result = await env.DB.prepare(`
-      SELECT
-        event_date AS date,
-        platform,
-        COALESCE(SUM(streams), 0) AS streams,
-        COALESCE(SUM(downloads), 0) AS downloads,
-        COALESCE(SUM(revenue_amount), 0) AS revenue
-      FROM analytics_daily
-      WHERE ${where}
-      GROUP BY event_date, platform
-      ORDER BY event_date ASC, streams DESC
-    `)
-      .bind(...params)
-      .all();
-
-    const data = (result.results || []).map((row) => ({
-      date: row.date,
-      platform: row.platform,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      revenue: Number(
-        Number(row.revenue || 0).toFixed(2)
-      )
-    }));
-
-    return json({
-      success: true,
-
-      data,
-
-      filters: {
-        from: from || null,
-        to: to || null,
-        platform: platform || null
-      }
-    });
-
-  } catch (error) {
-    console.error(
-      "GET /v1/analytics/platforms/data error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error: "Internal server error",
-        message: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-if (
-  url.pathname === "/v1/analytics/platforms/total-streams" &&
-  request.method === "GET"
-) {
-  try {
-    const token = getBearerToken(request);
-
-    if (!token) {
-      return json(
-        {
-          success: false,
-          error: "Authorization required"
-        },
-        401
-      );
-    }
-
-    const auth = await verifyToken(token, env.JWT_SECRET);
-
-    if (!auth) {
-      return json(
-        {
-          success: false,
-          error: "Invalid or expired token"
-        },
-        401
-      );
-    }
-
-    const userId =
-      auth.sub ||
-      auth.user_id ||
-      auth.userId ||
-      auth.id;
-
-    if (!userId) {
-      return json(
-        {
-          success: false,
-          error: "Invalid authentication payload"
-        },
-        401
-      );
-    }
-
-    const from = url.searchParams.get("from");
-    const to = url.searchParams.get("to");
-
-    let where = `user_id = ?`;
-    const params = [userId];
-
-    if (from) {
-      where += ` AND event_date >= ?`;
-      params.push(from);
-    }
-
-    if (to) {
-      where += ` AND event_date <= ?`;
-      params.push(to);
-    }
-
-    const result = await env.DB.prepare(`
-      SELECT
-        platform,
-        COALESCE(SUM(streams), 0) AS streams
-      FROM analytics_daily
-      WHERE ${where}
-      GROUP BY platform
-      ORDER BY streams DESC
-    `)
-      .bind(...params)
-      .all();
-
-    const platforms = (result.results || []).map((row) => ({
-      platform: row.platform,
-      streams: Number(row.streams || 0)
-    }));
-
-    const totalStreams = platforms.reduce(
-      (total, row) => total + row.streams,
-      0
-    );
-
-    return json({
-      success: true,
-
-      total_streams: totalStreams,
-
-      platforms,
-
-      filters: {
-        from: from || null,
-        to: to || null
-      }
-    });
-
-  } catch (error) {
-    console.error(
-      "GET /v1/analytics/platforms/total-streams error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error: "Internal server error",
-        message: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-if (
-  url.pathname === "/v1/analytics/platforms/additional" &&
-  request.method === "GET"
-) {
-  try {
-    const token = getBearerToken(request);
-
-    if (!token) {
-      return json(
-        {
-          success: false,
-          error: "Authorization required"
-        },
-        401
-      );
-    }
-
-    const auth = await verifyToken(token, env.JWT_SECRET);
-
-    if (!auth) {
-      return json(
-        {
-          success: false,
-          error: "Invalid or expired token"
-        },
-        401
-      );
-    }
-
-    const userId =
-      auth.sub ||
-      auth.user_id ||
-      auth.userId ||
-      auth.id;
-
-    if (!userId) {
-      return json(
-        {
-          success: false,
-          error: "Invalid authentication payload"
-        },
-        401
-      );
-    }
-
-    const from = url.searchParams.get("from");
-    const to = url.searchParams.get("to");
-
-    let where = `user_id = ?`;
-    const params = [userId];
-
-    if (from) {
-      where += ` AND event_date >= ?`;
-      params.push(from);
-    }
-
-    if (to) {
-      where += ` AND event_date <= ?`;
-      params.push(to);
-    }
-
-    const result = await env.DB.prepare(`
-      SELECT
-        platform,
-        COALESCE(SUM(streams), 0) AS streams,
-        COALESCE(SUM(downloads), 0) AS downloads,
-        COALESCE(SUM(revenue_amount), 0) AS revenue,
-        COUNT(DISTINCT track_id) AS tracks,
-        COUNT(DISTINCT territory) AS territories,
-        COUNT(DISTINCT event_date) AS active_days
-      FROM analytics_daily
-      WHERE ${where}
-      GROUP BY platform
-      ORDER BY streams DESC
-    `)
-      .bind(...params)
-      .all();
-
-    const rows = result.results || [];
-
-    const totalStreams = rows.reduce(
-      (sum, row) => sum + Number(row.streams || 0),
-      0
-    );
-
-    const totalRevenue = rows.reduce(
-      (sum, row) => sum + Number(row.revenue || 0),
-      0
-    );
-
-    const platforms = rows.map((row) => {
-      const streams = Number(row.streams || 0);
-      const revenue = Number(row.revenue || 0);
-
-      return {
-        platform: row.platform,
-        streams,
-        downloads: Number(row.downloads || 0),
-        revenue: Number(revenue.toFixed(2)),
-        tracks: Number(row.tracks || 0),
-        territories: Number(row.territories || 0),
-        active_days: Number(row.active_days || 0),
-        stream_percentage:
-          totalStreams > 0
-            ? Number(
-                ((streams / totalStreams) * 100).toFixed(2)
-              )
-            : 0,
-        revenue_percentage:
-          totalRevenue > 0
-            ? Number(
-                ((revenue / totalRevenue) * 100).toFixed(2)
-              )
-            : 0
-      };
-    });
-
-    return json({
-      success: true,
-
-      platforms,
-
-      totals: {
-        streams: totalStreams,
-        revenue: Number(totalRevenue.toFixed(2)),
-        platforms: platforms.length,
-        currency: "USD"
-      },
-
-      filters: {
-        from: from || null,
-        to: to || null
-      }
-    });
-
-  } catch (error) {
-    console.error(
-      "GET /v1/analytics/platforms/additional error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error: "Internal server error",
-        message: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-if (
-  url.pathname === "/v1/analytics/platforms/additional/info" &&
-  request.method === "GET"
-) {
-  try {
-    const token = getBearerToken(request);
-
-    if (!token) {
-      return json(
-        {
-          success: false,
-          error: "Authorization required"
-        },
-        401
-      );
-    }
-
-    const auth = await verifyToken(token, env.JWT_SECRET);
-
-    if (!auth) {
-      return json(
-        {
-          success: false,
-          error: "Invalid or expired token"
-        },
-        401
-      );
-    }
-
-    const userId =
-      auth.sub ||
-      auth.user_id ||
-      auth.userId ||
-      auth.id;
-
-    if (!userId) {
-      return json(
-        {
-          success: false,
-          error: "Invalid authentication payload"
-        },
-        401
-      );
-    }
-
-    const platform = url.searchParams.get("platform");
-
-    if (!platform) {
-      return json(
-        {
-          success: false,
-          error: "platform is required"
-        },
-        400
-      );
-    }
-
-    const allowedPlatforms = [
-      "spotify",
-      "apple_music",
-      "youtube_music",
-      "amazon_music",
-      "deezer",
-      "tiktok_music"
-    ];
-
-    if (!allowedPlatforms.includes(platform)) {
-      return json(
-        {
-          success: false,
-          error: "Invalid platform",
-          allowed_platforms: allowedPlatforms
-        },
-        400
-      );
-    }
-
-    const from = url.searchParams.get("from");
-    const to = url.searchParams.get("to");
-
-    let where = `
-      ad.user_id = ?
-      AND ad.platform = ?
-    `;
-
-    const params = [
-      userId,
-      platform
-    ];
-
-    if (from) {
-      where += ` AND ad.event_date >= ?`;
-      params.push(from);
-    }
-
-    if (to) {
-      where += ` AND ad.event_date <= ?`;
-      params.push(to);
-    }
-
-    // --------------------------------
-    // Platform summary
-    // --------------------------------
-
-    const summary = await env.DB.prepare(`
-      SELECT
-        COALESCE(SUM(ad.streams), 0) AS streams,
-        COALESCE(SUM(ad.downloads), 0) AS downloads,
-        COALESCE(SUM(ad.revenue_amount), 0) AS revenue,
-        COUNT(DISTINCT ad.track_id) AS tracks,
-        COUNT(DISTINCT ad.territory) AS territories,
-        MIN(ad.event_date) AS first_event_date,
-        MAX(ad.event_date) AS last_event_date
-      FROM analytics_daily ad
-      WHERE ${where}
-    `)
-      .bind(...params)
-      .first();
-
-    // --------------------------------
-    // Top tracks
-    // --------------------------------
-
-    const trackResult = await env.DB.prepare(`
-      SELECT
-        ad.track_id,
-        t.title,
-        t.isrc,
-        COALESCE(SUM(ad.streams), 0) AS streams,
-        COALESCE(SUM(ad.downloads), 0) AS downloads,
-        COALESCE(SUM(ad.revenue_amount), 0) AS revenue
-      FROM analytics_daily ad
-      LEFT JOIN tracks t
-        ON t.id = ad.track_id
-      WHERE ${where}
-        AND ad.track_id IS NOT NULL
-      GROUP BY
-        ad.track_id,
-        t.title,
-        t.isrc
-      ORDER BY streams DESC
-      LIMIT 10
-    `)
-      .bind(...params)
-      .all();
-
-    const topTracks = (trackResult.results || []).map((row) => ({
-      track_id: row.track_id,
-      title: row.title || null,
-      isrc: row.isrc || null,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      revenue: Number(
-        Number(row.revenue || 0).toFixed(2)
-      )
-    }));
-
-    // --------------------------------
-    // Top territories
-    // --------------------------------
-
-    const territoryResult = await env.DB.prepare(`
-      SELECT
-        ad.territory,
-        COALESCE(SUM(ad.streams), 0) AS streams,
-        COALESCE(SUM(ad.downloads), 0) AS downloads,
-        COALESCE(SUM(ad.revenue_amount), 0) AS revenue
-      FROM analytics_daily ad
-      WHERE ${where}
-        AND ad.territory IS NOT NULL
-        AND ad.territory != ''
-      GROUP BY ad.territory
-      ORDER BY streams DESC
-      LIMIT 20
-    `)
-      .bind(...params)
-      .all();
-
-    const topTerritories =
-      (territoryResult.results || []).map((row) => ({
-        territory: row.territory,
-        streams: Number(row.streams || 0),
-        downloads: Number(row.downloads || 0),
-        revenue: Number(
-          Number(row.revenue || 0).toFixed(2)
-        )
-      }));
-
-    return json({
-      success: true,
-
-      platform,
-
-      summary: {
-        streams: Number(summary?.streams || 0),
-        downloads: Number(summary?.downloads || 0),
-        revenue: Number(
-          Number(summary?.revenue || 0).toFixed(2)
-        ),
-        tracks: Number(summary?.tracks || 0),
-        territories: Number(summary?.territories || 0),
-        currency: "USD",
-        first_event_date:
-          summary?.first_event_date || null,
-        last_event_date:
-          summary?.last_event_date || null
-      },
-
-      top_tracks: topTracks,
-
-      top_territories: topTerritories,
-
-      filters: {
-        from: from || null,
-        to: to || null,
-        platform
-      }
-    });
-
-  } catch (error) {
-    console.error(
-      "GET /v1/analytics/platforms/additional/info error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error: "Internal server error",
-        message: error?.message || String(error)
-      },
-      500
-    );
-  }
-}
-
-// ============================================================
-// SALES API
-// ============================================================
-
-if (url.pathname.startsWith("/v1/sales")) {
-
-  const authResult = await authenticateSalesRequest(request, env);
-
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const { userId } = authResult;
-
-  // ------------------------------------------------------------
-  // SALES OVERVIEW
-  // GET /v1/sales/overview
-  // ------------------------------------------------------------
-
-  if (
-    request.method === "GET" &&
-    url.pathname === "/v1/sales/overview"
-  ) {
-    const dates = getSalesDateRange(url);
-
-    if (dates.error) {
-      return json({
-        success: false,
-        error: dates.error
-      }, 400);
-    }
-
-    const conditions = ["sd.user_id = ?"];
-    const params = [userId];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      dates.from,
-      dates.to,
-      "sd.event_date"
-    );
-
-    const releaseId = url.searchParams.get("release_id");
-    const trackId = url.searchParams.get("track_id");
-    const channel = url.searchParams.get("channel");
-    const territory = url.searchParams.get("territory");
-    const currencyFilter = url.searchParams.get("currency");
-
-    if (releaseId) {
-      conditions.push("sd.release_id = ?");
-      params.push(releaseId);
-    }
-
-    if (trackId) {
-      conditions.push("sd.track_id = ?");
-      params.push(trackId);
-    }
-
-    if (channel) {
-      conditions.push("sd.channel = ?");
-      params.push(channel);
-    }
-
-    if (territory) {
-      conditions.push("sd.territory = ?");
-      params.push(territory);
-    }
-
-    if (currencyFilter) {
-      conditions.push("sd.currency = ?");
-      params.push(currencyFilter.toUpperCase());
-    }
-
-    const result = await env.DB.prepare(`
-      SELECT
-        sd.currency,
-        SUM(sd.streams) AS streams,
-        SUM(sd.downloads) AS downloads,
-        SUM(sd.units) AS units,
-        SUM(sd.gross_revenue) AS gross_revenue,
-        SUM(sd.net_revenue) AS net_revenue
-      FROM sales_daily sd
-      WHERE ${conditions.join(" AND ")}
-      GROUP BY sd.currency
-      ORDER BY sd.currency ASC
-    `).bind(...params).all();
-
-    return json({
-      success: true,
-      overview: formatSalesSummary(result.results || []),
-      filters: {
-        from: dates.from,
-        to: dates.to,
-        release_id: releaseId,
-        track_id: trackId,
-        channel,
-        territory,
-        currency: currencyFilter
-          ? currencyFilter.toUpperCase()
-          : null
-      }
-    });
-  }
-
-
-  // ------------------------------------------------------------
-  // SALES TRACKS
-  // GET /v1/sales/tracks
-  // ------------------------------------------------------------
-
-  if (
-    request.method === "GET" &&
-    url.pathname === "/v1/sales/tracks"
-  ) {
-    const dates = getSalesDateRange(url);
-
-    if (dates.error) {
-      return json({
-        success: false,
-        error: dates.error
-      }, 400);
-    }
-
-    const pagination = getSalesPagination(url);
-
-    const conditions = [
-      "sd.user_id = ?",
-      "sd.track_id IS NOT NULL"
-    ];
-
-    const params = [userId];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      dates.from,
-      dates.to,
-      "sd.event_date"
-    );
-
-    const releaseId = url.searchParams.get("release_id");
-    const channel = url.searchParams.get("channel");
-    const currencyFilter = url.searchParams.get("currency");
-
-    if (releaseId) {
-      conditions.push("sd.release_id = ?");
-      params.push(releaseId);
-    }
-
-    if (channel) {
-      conditions.push("sd.channel = ?");
-      params.push(channel);
-    }
-
-    if (currencyFilter) {
-      conditions.push("sd.currency = ?");
-      params.push(currencyFilter.toUpperCase());
-    }
-
-    params.push(pagination.limit);
-    params.push(pagination.offset);
-
-    const result = await env.DB.prepare(`
-      SELECT
-        sd.track_id,
-        sd.release_id,
-        sd.currency,
-
-        t.title,
-        t.version,
-        t.isrc,
-        t.track_number,
-        t.disc_number,
-
-        r.title AS release_title,
-
-        SUM(sd.streams) AS streams,
-        SUM(sd.downloads) AS downloads,
-        SUM(sd.units) AS units,
-        SUM(sd.gross_revenue) AS gross_revenue,
-        SUM(sd.net_revenue) AS net_revenue,
-
-        MIN(sd.event_date) AS first_sale_date,
-        MAX(sd.event_date) AS last_sale_date,
-
-        COUNT(DISTINCT sd.channel) AS channels,
-        COUNT(DISTINCT sd.territory) AS territories
-
-      FROM sales_daily sd
-
-      JOIN tracks t
-        ON t.id = sd.track_id
-
-      JOIN releases r
-        ON r.id = sd.release_id
-
-      WHERE ${conditions.join(" AND ")}
-
-      GROUP BY
-        sd.track_id,
-        sd.release_id,
-        sd.currency,
-        t.title,
-        t.version,
-        t.isrc,
-        t.track_number,
-        t.disc_number,
-        r.title
-
-      ORDER BY streams DESC
-
-      LIMIT ?
-      OFFSET ?
-    `).bind(...params).all();
-
-    const tracks = (result.results || []).map(row => ({
-      track_id: row.track_id,
-      release_id: row.release_id,
-      title: row.title,
-      version: row.version,
-      isrc: row.isrc,
-      track_number: Number(row.track_number),
-      disc_number: Number(row.disc_number),
-      release_title: row.release_title,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      units: Number(row.units || 0),
-      gross_revenue: roundSalesMoney(row.gross_revenue),
-      net_revenue: roundSalesMoney(row.net_revenue),
-      currency: row.currency,
-      first_sale_date: row.first_sale_date,
-      last_sale_date: row.last_sale_date,
-      channels: Number(row.channels || 0),
-      territories: Number(row.territories || 0)
-    }));
-
-    return json({
-      success: true,
-      tracks,
-      pagination: {
-        limit: pagination.limit,
-        offset: pagination.offset,
-        count: tracks.length
-      },
-      filters: {
-        from: dates.from,
-        to: dates.to,
-        release_id: releaseId,
-        channel,
-        currency: currencyFilter
-          ? currencyFilter.toUpperCase()
-          : null
-      }
-    });
-  }
-
-
-  // ------------------------------------------------------------
-  // SALES TRACK DETAIL
-  //
-  // GET /v1/sales/tracks/:isrc/overview
-  // GET /v1/sales/tracks/:isrc/channels
-  // GET /v1/sales/tracks/:isrc/territories
-  // ------------------------------------------------------------
-
-  const trackMatch = url.pathname.match(
-    /^\/v1\/sales\/tracks\/([^/]+)\/(overview|channels|territories)$/
-  );
-
-  if (
-    request.method === "GET" &&
-    trackMatch
-  ) {
-    const isrc = decodeURIComponent(trackMatch[1]);
-    const action = trackMatch[2];
-
-    const track = await resolveSalesTrack(
-      env,
-      userId,
-      isrc
-    );
-
-    if (!track) {
-      return json({
-        success: false,
-        error: "Track not found"
-      }, 404);
-    }
-
-    const dates = getSalesDateRange(url);
-
-    if (dates.error) {
-      return json({
-        success: false,
-        error: dates.error
-      }, 400);
-    }
-
-    const conditions = [
-      "sd.user_id = ?",
-      "sd.track_id = ?"
-    ];
-
-    const params = [
-      userId,
-      track.id
-    ];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      dates.from,
-      dates.to,
-      "sd.event_date"
-    );
-
-    if (action === "overview") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue,
-          MIN(sd.event_date) AS first_sale_date,
-          MAX(sd.event_date) AS last_sale_date,
-          COUNT(DISTINCT sd.channel) AS channels,
-          COUNT(DISTINCT sd.territory) AS territories
-        FROM sales_daily sd
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY sd.currency
-      `).bind(...params).all();
-
-      const rows = result.results || [];
-
-      return json({
-        success: true,
-        track: {
-          id: track.id,
-          isrc: track.isrc,
-          title: track.title,
-          version: track.version,
-          track_number: track.track_number,
-          disc_number: track.disc_number,
-          duration_seconds: track.duration_seconds,
-          genre: track.genre,
-          language: track.language,
-          explicit: Boolean(track.explicit),
-          release_id: track.release_id,
-          release_title: track.release_title,
-          artist_name: track.artist_name
-        },
-        overview: formatSalesSummary(rows),
-        date_range: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-
-
-    if (action === "channels") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.channel,
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue,
-          MIN(sd.event_date) AS first_sale_date,
-          MAX(sd.event_date) AS last_sale_date
-        FROM sales_daily sd
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY
-          sd.channel,
-          sd.currency
-        ORDER BY streams DESC
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        track: {
-          id: track.id,
-          isrc: track.isrc,
-          title: track.title
-        },
-        channels: (result.results || []).map(row => ({
-          channel: row.channel,
-          streams: Number(row.streams || 0),
-          downloads: Number(row.downloads || 0),
-          units: Number(row.units || 0),
-          gross_revenue: roundSalesMoney(row.gross_revenue),
-          net_revenue: roundSalesMoney(row.net_revenue),
-          currency: row.currency,
-          first_sale_date: row.first_sale_date,
-          last_sale_date: row.last_sale_date
-        })),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-
-
-    if (action === "territories") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.territory,
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue,
-          MIN(sd.event_date) AS first_sale_date,
-          MAX(sd.event_date) AS last_sale_date
-        FROM sales_daily sd
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY
-          sd.territory,
-          sd.currency
-        ORDER BY streams DESC
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        track: {
-          id: track.id,
-          isrc: track.isrc,
-          title: track.title
-        },
-        territories: (result.results || []).map(row => ({
-          territory: row.territory,
-          streams: Number(row.streams || 0),
-          downloads: Number(row.downloads || 0),
-          units: Number(row.units || 0),
-          gross_revenue: roundSalesMoney(row.gross_revenue),
-          net_revenue: roundSalesMoney(row.net_revenue),
-          currency: row.currency,
-          first_sale_date: row.first_sale_date,
-          last_sale_date: row.last_sale_date
-        })),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-  }
-
-
-  // ------------------------------------------------------------
-  // SALES RELEASES
-  // GET /v1/sales/releases
-  // ------------------------------------------------------------
-
-  if (
-    request.method === "GET" &&
-    url.pathname === "/v1/sales/releases"
-  ) {
-    const dates = getSalesDateRange(url);
-
-    if (dates.error) {
-      return json({
-        success: false,
-        error: dates.error
-      }, 400);
-    }
-
-    const pagination = getSalesPagination(url);
-
-    const conditions = [
-      "sd.user_id = ?",
-      "sd.release_id IS NOT NULL"
-    ];
-
-    const params = [userId];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      dates.from,
-      dates.to,
-      "sd.event_date"
-    );
-
-    const currencyFilter = url.searchParams.get("currency");
-
-    if (currencyFilter) {
-      conditions.push("sd.currency = ?");
-      params.push(currencyFilter.toUpperCase());
-    }
-
-    params.push(pagination.limit);
-    params.push(pagination.offset);
-
-    const result = await env.DB.prepare(`
-      SELECT
-        sd.release_id,
-        sd.currency,
-
-        r.title,
-        r.release_type,
-        r.release_date,
-        a.name AS artist_name,
-
-        SUM(sd.streams) AS streams,
-        SUM(sd.downloads) AS downloads,
-        SUM(sd.units) AS units,
-        SUM(sd.gross_revenue) AS gross_revenue,
-        SUM(sd.net_revenue) AS net_revenue,
-
-        MIN(sd.event_date) AS first_sale_date,
-        MAX(sd.event_date) AS last_sale_date,
-
-        COUNT(DISTINCT sd.track_id) AS tracks,
-        COUNT(DISTINCT sd.channel) AS channels,
-        COUNT(DISTINCT sd.territory) AS territories
-
-      FROM sales_daily sd
-
-      JOIN releases r
-        ON r.id = sd.release_id
-
-      LEFT JOIN artists a
-        ON a.id = r.artist_id
-
-      WHERE ${conditions.join(" AND ")}
-
-      GROUP BY
-        sd.release_id,
-        sd.currency,
-        r.title,
-        r.release_type,
-        r.release_date,
-        a.name
-
-      ORDER BY streams DESC
-
-      LIMIT ?
-      OFFSET ?
-    `).bind(...params).all();
-
-    const releases = (result.results || []).map(row => ({
-      release_id: row.release_id,
-      title: row.title,
-      release_type: row.release_type,
-      release_date: row.release_date,
-      artist_name: row.artist_name,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      units: Number(row.units || 0),
-      gross_revenue: roundSalesMoney(row.gross_revenue),
-      net_revenue: roundSalesMoney(row.net_revenue),
-      currency: row.currency,
-      first_sale_date: row.first_sale_date,
-      last_sale_date: row.last_sale_date,
-      tracks: Number(row.tracks || 0),
-      channels: Number(row.channels || 0),
-      territories: Number(row.territories || 0)
-    }));
-
-    return json({
-      success: true,
-      releases,
-      pagination: {
-        limit: pagination.limit,
-        offset: pagination.offset,
-        count: releases.length
-      },
-      filters: {
-        from: dates.from,
-        to: dates.to,
-        currency: currencyFilter
-          ? currencyFilter.toUpperCase()
-          : null
-      }
-    });
-  }
-
-
-  // ------------------------------------------------------------
-  // SALES RELEASE DETAIL
-  //
-  // GET /v1/sales/releases/:releaseId/overview
-  // GET /v1/sales/releases/:releaseId/channels
-  // GET /v1/sales/releases/:releaseId/territories
-  // ------------------------------------------------------------
-
-  const releaseMatch = url.pathname.match(
-    /^\/v1\/sales\/releases\/([^/]+)\/(overview|channels|territories)$/
-  );
-
-  if (
-    request.method === "GET" &&
-    releaseMatch
-  ) {
-    const releaseId = decodeURIComponent(releaseMatch[1]);
-    const action = releaseMatch[2];
-
-    const release = await resolveSalesRelease(
-      env,
-      userId,
-      releaseId
-    );
-
-    if (!release) {
-      return json({
-        success: false,
-        error: "Release not found"
-      }, 404);
-    }
-
-    const dates = getSalesDateRange(url);
-
-    if (dates.error) {
-      return json({
-        success: false,
-        error: dates.error
-      }, 400);
-    }
-
-    const conditions = [
-      "sd.user_id = ?",
-      "sd.release_id = ?"
-    ];
-
-    const params = [
-      userId,
-      release.id
-    ];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      dates.from,
-      dates.to,
-      "sd.event_date"
-    );
-
-    if (action === "overview") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue,
-          MIN(sd.event_date) AS first_sale_date,
-          MAX(sd.event_date) AS last_sale_date,
-          COUNT(DISTINCT sd.track_id) AS tracks,
-          COUNT(DISTINCT sd.channel) AS channels,
-          COUNT(DISTINCT sd.territory) AS territories
-        FROM sales_daily sd
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY sd.currency
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        release: {
-          id: release.id,
-          title: release.title,
-          release_type: release.release_type,
-          release_date: release.release_date,
-          artist_id: release.artist_id,
-          artist_name: release.artist_name
-        },
-        overview: formatSalesSummary(result.results || []),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-
-
-    if (action === "channels") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.channel,
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue,
-          MIN(sd.event_date) AS first_sale_date,
-          MAX(sd.event_date) AS last_sale_date
-        FROM sales_daily sd
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY
-          sd.channel,
-          sd.currency
-        ORDER BY streams DESC
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        release: {
-          id: release.id,
-          title: release.title
-        },
-        channels: (result.results || []).map(row => ({
-          channel: row.channel,
-          streams: Number(row.streams || 0),
-          downloads: Number(row.downloads || 0),
-          units: Number(row.units || 0),
-          gross_revenue: roundSalesMoney(row.gross_revenue),
-          net_revenue: roundSalesMoney(row.net_revenue),
-          currency: row.currency,
-          first_sale_date: row.first_sale_date,
-          last_sale_date: row.last_sale_date
-        })),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-
-
-    if (action === "territories") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.territory,
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue,
-          MIN(sd.event_date) AS first_sale_date,
-          MAX(sd.event_date) AS last_sale_date
-        FROM sales_daily sd
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY
-          sd.territory,
-          sd.currency
-        ORDER BY streams DESC
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        release: {
-          id: release.id,
-          title: release.title
-        },
-        territories: (result.results || []).map(row => ({
-          territory: row.territory,
-          streams: Number(row.streams || 0),
-          downloads: Number(row.downloads || 0),
-          units: Number(row.units || 0),
-          gross_revenue: roundSalesMoney(row.gross_revenue),
-          net_revenue: roundSalesMoney(row.net_revenue),
-          currency: row.currency,
-          first_sale_date: row.first_sale_date,
-          last_sale_date: row.last_sale_date
-        })),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-  }
-
-
-  // ------------------------------------------------------------
-  // SALES ARTISTS
-  // GET /v1/sales/artists
-  // ------------------------------------------------------------
-
-  if (
-    request.method === "GET" &&
-    url.pathname === "/v1/sales/artists"
-  ) {
-    const dates = getSalesDateRange(url);
-
-    if (dates.error) {
-      return json({
-        success: false,
-        error: dates.error
-      }, 400);
-    }
-
-    const pagination = getSalesPagination(url);
-
-    const conditions = ["sd.user_id = ?"];
-    const params = [userId];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      dates.from,
-      dates.to,
-      "sd.event_date"
-    );
-
-    params.push(pagination.limit);
-    params.push(pagination.offset);
-
-    const result = await env.DB.prepare(`
-      SELECT
-        a.id AS artist_id,
-        a.name AS artist_name,
-        sd.currency,
-
-        SUM(sd.streams) AS streams,
-        SUM(sd.downloads) AS downloads,
-        SUM(sd.units) AS units,
-        SUM(sd.gross_revenue) AS gross_revenue,
-        SUM(sd.net_revenue) AS net_revenue,
-
-        MIN(sd.event_date) AS first_sale_date,
-        MAX(sd.event_date) AS last_sale_date,
-
-        COUNT(DISTINCT sd.release_id) AS releases,
-        COUNT(DISTINCT sd.track_id) AS tracks,
-        COUNT(DISTINCT sd.channel) AS channels,
-        COUNT(DISTINCT sd.territory) AS territories
-
-      FROM sales_daily sd
-
-      JOIN releases r
-        ON r.id = sd.release_id
-
-      JOIN artists a
-        ON a.id = r.artist_id
-
-      WHERE ${conditions.join(" AND ")}
-
-      GROUP BY
-        a.id,
-        a.name,
-        sd.currency
-
-      ORDER BY streams DESC
-
-      LIMIT ?
-      OFFSET ?
-    `).bind(...params).all();
-
-    const artists = (result.results || []).map(row => ({
-      artist_id: row.artist_id,
-      artist_name: row.artist_name,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      units: Number(row.units || 0),
-      gross_revenue: roundSalesMoney(row.gross_revenue),
-      net_revenue: roundSalesMoney(row.net_revenue),
-      currency: row.currency,
-      first_sale_date: row.first_sale_date,
-      last_sale_date: row.last_sale_date,
-      releases: Number(row.releases || 0),
-      tracks: Number(row.tracks || 0),
-      channels: Number(row.channels || 0),
-      territories: Number(row.territories || 0)
-    }));
-
-    return json({
-      success: true,
-      artists,
-      pagination: {
-        limit: pagination.limit,
-        offset: pagination.offset,
-        count: artists.length
-      },
-      filters: {
-        from: dates.from,
-        to: dates.to
-      }
-    });
-  }
-
-
-  // ------------------------------------------------------------
-  // SALES ARTIST DETAIL
-  //
-  // GET /v1/sales/artists/:artist/overview
-  // GET /v1/sales/artists/:artist/channels
-  // GET /v1/sales/artists/:artist/territories
-  // ------------------------------------------------------------
-
-  const artistMatch = url.pathname.match(
-    /^\/v1\/sales\/artists\/([^/]+)\/(overview|channels|territories)$/
-  );
-
-  if (
-    request.method === "GET" &&
-    artistMatch
-  ) {
-    const artistRef = decodeURIComponent(artistMatch[1]);
-    const action = artistMatch[2];
-
-    const artist = await resolveSalesArtist(
-      env,
-      userId,
-      artistRef
-    );
-
-    if (!artist) {
-      return json({
-        success: false,
-        error: "Artist not found"
-      }, 404);
-    }
-
-    const dates = getSalesDateRange(url);
-
-    if (dates.error) {
-      return json({
-        success: false,
-        error: dates.error
-      }, 400);
-    }
-
-    const conditions = [
-      "sd.user_id = ?",
-      "r.artist_id = ?"
-    ];
-
-    const params = [
-      userId,
-      artist.id
-    ];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      dates.from,
-      dates.to,
-      "sd.event_date"
-    );
-
-    if (action === "overview") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue,
-          MIN(sd.event_date) AS first_sale_date,
-          MAX(sd.event_date) AS last_sale_date,
-          COUNT(DISTINCT sd.release_id) AS releases,
-          COUNT(DISTINCT sd.track_id) AS tracks,
-          COUNT(DISTINCT sd.channel) AS channels,
-          COUNT(DISTINCT sd.territory) AS territories
-        FROM sales_daily sd
-        JOIN releases r
-          ON r.id = sd.release_id
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY sd.currency
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        artist: {
-          id: artist.id,
-          name: artist.name
-        },
-        overview: formatSalesSummary(result.results || []),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-
-
-    if (action === "channels") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.channel,
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue
-        FROM sales_daily sd
-        JOIN releases r
-          ON r.id = sd.release_id
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY
-          sd.channel,
-          sd.currency
-        ORDER BY streams DESC
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        artist: {
-          id: artist.id,
-          name: artist.name
-        },
-        channels: (result.results || []).map(row => ({
-          channel: row.channel,
-          streams: Number(row.streams || 0),
-          downloads: Number(row.downloads || 0),
-          units: Number(row.units || 0),
-          gross_revenue: roundSalesMoney(row.gross_revenue),
-          net_revenue: roundSalesMoney(row.net_revenue),
-          currency: row.currency
-        })),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-
-
-    if (action === "territories") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.territory,
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue
-        FROM sales_daily sd
-        JOIN releases r
-          ON r.id = sd.release_id
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY
-          sd.territory,
-          sd.currency
-        ORDER BY streams DESC
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        artist: {
-          id: artist.id,
-          name: artist.name
-        },
-        territories: (result.results || []).map(row => ({
-          territory: row.territory,
-          streams: Number(row.streams || 0),
-          downloads: Number(row.downloads || 0),
-          units: Number(row.units || 0),
-          gross_revenue: roundSalesMoney(row.gross_revenue),
-          net_revenue: roundSalesMoney(row.net_revenue),
-          currency: row.currency
-        })),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-  }
-
-
-  // ------------------------------------------------------------
-  // SALES CHANNELS
-  // GET /v1/sales/channels
-  // ------------------------------------------------------------
-
-  if (
-    request.method === "GET" &&
-    url.pathname === "/v1/sales/channels"
-  ) {
-    const dates = getSalesDateRange(url);
-
-    if (dates.error) {
-      return json({
-        success: false,
-        error: dates.error
-      }, 400);
-    }
-
-    const pagination = getSalesPagination(url);
-
-    const conditions = ["sd.user_id = ?"];
-    const params = [userId];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      dates.from,
-      dates.to,
-      "sd.event_date"
-    );
-
-    params.push(pagination.limit);
-    params.push(pagination.offset);
-
-    const result = await env.DB.prepare(`
-      SELECT
-        sd.channel,
-        sd.currency,
-
-        SUM(sd.streams) AS streams,
-        SUM(sd.downloads) AS downloads,
-        SUM(sd.units) AS units,
-        SUM(sd.gross_revenue) AS gross_revenue,
-        SUM(sd.net_revenue) AS net_revenue,
-
-        MIN(sd.event_date) AS first_sale_date,
-        MAX(sd.event_date) AS last_sale_date,
-
-        COUNT(DISTINCT sd.release_id) AS releases,
-        COUNT(DISTINCT sd.track_id) AS tracks,
-        COUNT(DISTINCT sd.territory) AS territories
-
-      FROM sales_daily sd
-
-      WHERE ${conditions.join(" AND ")}
-
-      GROUP BY
-        sd.channel,
-        sd.currency
-
-      ORDER BY streams DESC
-
-      LIMIT ?
-      OFFSET ?
-    `).bind(...params).all();
-
-    const channels = (result.results || []).map(row => ({
-      channel: row.channel,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      units: Number(row.units || 0),
-      gross_revenue: roundSalesMoney(row.gross_revenue),
-      net_revenue: roundSalesMoney(row.net_revenue),
-      currency: row.currency,
-      first_sale_date: row.first_sale_date,
-      last_sale_date: row.last_sale_date,
-      releases: Number(row.releases || 0),
-      tracks: Number(row.tracks || 0),
-      territories: Number(row.territories || 0)
-    }));
-
-    return json({
-      success: true,
-      channels,
-      pagination: {
-        limit: pagination.limit,
-        offset: pagination.offset,
-        count: channels.length
-      },
-      filters: {
-        from: dates.from,
-        to: dates.to
-      }
-    });
-  }
-
-
-  // ------------------------------------------------------------
-  // SALES CHANNEL DETAIL
-  //
-  // GET /v1/sales/channels/:channel/overview
-  // GET /v1/sales/channels/:channel/releases
-  // GET /v1/sales/channels/:channel/territories
-  // ------------------------------------------------------------
-
-  const channelMatch = url.pathname.match(
-    /^\/v1\/sales\/channels\/([^/]+)\/(overview|releases|territories)$/
-  );
-
-  if (
-    request.method === "GET" &&
-    channelMatch
-  ) {
-    const channel = decodeURIComponent(channelMatch[1]);
-    const action = channelMatch[2];
-
-    const dates = getSalesDateRange(url);
-
-    if (dates.error) {
-      return json({
-        success: false,
-        error: dates.error
-      }, 400);
-    }
-
-    const conditions = [
-      "sd.user_id = ?",
-      "sd.channel = ?"
-    ];
-
-    const params = [
-      userId,
-      channel
-    ];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      dates.from,
-      dates.to,
-      "sd.event_date"
-    );
-
-    if (action === "overview") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue,
-          MIN(sd.event_date) AS first_sale_date,
-          MAX(sd.event_date) AS last_sale_date,
-          COUNT(DISTINCT sd.release_id) AS releases,
-          COUNT(DISTINCT sd.track_id) AS tracks,
-          COUNT(DISTINCT sd.territory) AS territories
-        FROM sales_daily sd
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY sd.currency
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        channel,
-        overview: formatSalesSummary(result.results || []),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-
-
-    if (action === "releases") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.release_id,
-          sd.currency,
-          r.title,
-          r.release_type,
-          r.release_date,
-          a.name AS artist_name,
-
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue
-
-        FROM sales_daily sd
-
-        JOIN releases r
-          ON r.id = sd.release_id
-
-        LEFT JOIN artists a
-          ON a.id = r.artist_id
-
-        WHERE ${conditions.join(" AND ")}
-
-        GROUP BY
-          sd.release_id,
-          sd.currency,
-          r.title,
-          r.release_type,
-          r.release_date,
-          a.name
-
-        ORDER BY streams DESC
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        channel,
-        releases: (result.results || []).map(row => ({
-          release_id: row.release_id,
-          title: row.title,
-          release_type: row.release_type,
-          release_date: row.release_date,
-          artist_name: row.artist_name,
-          streams: Number(row.streams || 0),
-          downloads: Number(row.downloads || 0),
-          units: Number(row.units || 0),
-          gross_revenue: roundSalesMoney(row.gross_revenue),
-          net_revenue: roundSalesMoney(row.net_revenue),
-          currency: row.currency
-        })),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-
-
-    if (action === "territories") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          sd.territory,
-          sd.currency,
-          SUM(sd.streams) AS streams,
-          SUM(sd.downloads) AS downloads,
-          SUM(sd.units) AS units,
-          SUM(sd.gross_revenue) AS gross_revenue,
-          SUM(sd.net_revenue) AS net_revenue
-
-        FROM sales_daily sd
-
-        WHERE ${conditions.join(" AND ")}
-
-        GROUP BY
-          sd.territory,
-          sd.currency
-
-        ORDER BY streams DESC
-      `).bind(...params).all();
-
-      return json({
-        success: true,
-        channel,
-        territories: (result.results || []).map(row => ({
-          territory: row.territory,
-          streams: Number(row.streams || 0),
-          downloads: Number(row.downloads || 0),
-          units: Number(row.units || 0),
-          gross_revenue: roundSalesMoney(row.gross_revenue),
-          net_revenue: roundSalesMoney(row.net_revenue),
-          currency: row.currency
-        })),
-        filters: {
-          from: dates.from,
-          to: dates.to
-        }
-      });
-    }
-  }
-
-
-  // ------------------------------------------------------------
-  // SALES TERRITORIES
-  // GET /v1/sales/territories
-  // ------------------------------------------------------------
-
-  if (
-    request.method === "GET" &&
-    url.pathname === "/v1/sales/territories"
-  ) {
-    const dates = getSalesDateRange(url);
-
-    if (dates.error) {
-      return json({
-        success: false,
-        error: dates.error
-      }, 400);
-    }
-
-    const pagination = getSalesPagination(url);
-
-    const conditions = ["sd.user_id = ?"];
-    const params = [userId];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      dates.from,
-      dates.to,
-      "sd.event_date"
-    );
-
-    params.push(pagination.limit);
-    params.push(pagination.offset);
-
-    const result = await env.DB.prepare(`
-      SELECT
-        sd.territory,
-        sd.currency,
-
-        SUM(sd.streams) AS streams,
-        SUM(sd.downloads) AS downloads,
-        SUM(sd.units) AS units,
-        SUM(sd.gross_revenue) AS gross_revenue,
-        SUM(sd.net_revenue) AS net_revenue,
-
-        MIN(sd.event_date) AS first_sale_date,
-        MAX(sd.event_date) AS last_sale_date,
-
-        COUNT(DISTINCT sd.release_id) AS releases,
-        COUNT(DISTINCT sd.track_id) AS tracks,
-        COUNT(DISTINCT sd.channel) AS channels
-
-      FROM sales_daily sd
-
-      WHERE ${conditions.join(" AND ")}
-
-      GROUP BY
-        sd.territory,
-        sd.currency
-
-      ORDER BY streams DESC
-
-      LIMIT ?
-      OFFSET ?
-    `).bind(...params).all();
-
-    const territories = (result.results || []).map(row => ({
-      territory: row.territory,
-      streams: Number(row.streams || 0),
-      downloads: Number(row.downloads || 0),
-      units: Number(row.units || 0),
-      gross_revenue: roundSalesMoney(row.gross_revenue),
-      net_revenue: roundSalesMoney(row.net_revenue),
-      currency: row.currency,
-      first_sale_date: row.first_sale_date,
-      last_sale_date: row.last_sale_date,
-      releases: Number(row.releases || 0),
-      tracks: Number(row.tracks || 0),
-      channels: Number(row.channels || 0)
-    }));
-
-    return json({
-      success: true,
-      territories,
-      pagination: {
-        limit: pagination.limit,
-        offset: pagination.offset,
-        count: territories.length
-      },
-      filters: {
-        from: dates.from,
-        to: dates.to
-      }
-    });
-  }
-
-
-  // ------------------------------------------------------------
-  // STREAM RATES
-  // GET /v1/sales/stream-rates
-  // ------------------------------------------------------------
-
-  if (
-    request.method === "GET" &&
-    url.pathname === "/v1/sales/stream-rates"
-  ) {
-    const pagination = getSalesPagination(url);
-
-    const conditions = ["1 = 1"];
-    const params = [];
-
-    const service = url.searchParams.get("service");
-    const territory = url.searchParams.get("territory");
-    const currency = url.searchParams.get("currency");
-
-    if (service) {
-      conditions.push("service = ?");
-      params.push(service);
-    }
-
-    if (territory) {
-      conditions.push("territory = ?");
-      params.push(territory.toUpperCase());
-    }
-
-    if (currency) {
-      conditions.push("currency = ?");
-      params.push(currency.toUpperCase());
-    }
-
-    params.push(pagination.limit);
-    params.push(pagination.offset);
-
-    const result = await env.DB.prepare(`
-      SELECT
-        id,
-        service,
-        territory,
-        currency,
-        rate,
-        rate_type,
-        effective_from,
-        effective_to,
-        source,
-        metadata_json,
-        created_at,
-        updated_at
-      FROM sales_stream_rates
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY
-        service ASC,
-        territory ASC,
-        effective_from DESC
-      LIMIT ?
-      OFFSET ?
-    `).bind(...params).all();
-
-    return json({
-      success: true,
-      rates: (result.results || []).map(row => ({
-        id: row.id,
-        service: row.service,
-        territory: row.territory,
-        currency: row.currency,
-        rate: Number(row.rate || 0),
-        rate_type: row.rate_type,
-        effective_from: row.effective_from,
-        effective_to: row.effective_to,
-        source: row.source,
-        metadata: row.metadata_json
-          ? JSON.parse(row.metadata_json)
-          : null,
-        created_at: row.created_at,
-        updated_at: row.updated_at
-      })),
-      pagination: {
-        limit: pagination.limit,
-        offset: pagination.offset,
-        count: (result.results || []).length
-      },
-      filters: {
-        service,
-        territory: territory
-          ? territory.toUpperCase()
-          : null,
-        currency: currency
-          ? currency.toUpperCase()
-          : null
-      }
-    });
-  }
-
-
-  // ------------------------------------------------------------
-  // STREAM RATE SERVICE DETAIL
-  //
-  // GET /v1/sales/stream-rates/:service/overview
-  // GET /v1/sales/stream-rates/:service/territories
-  // ------------------------------------------------------------
-
-  const rateMatch = url.pathname.match(
-    /^\/v1\/sales\/stream-rates\/([^/]+)\/(overview|territories)$/
-  );
-
-  if (
-    request.method === "GET" &&
-    rateMatch
-  ) {
-    const service = decodeURIComponent(rateMatch[1]);
-    const action = rateMatch[2];
-
-    if (action === "overview") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          id,
-          service,
-          territory,
-          currency,
-          rate,
-          rate_type,
-          effective_from,
-          effective_to,
-          source
-        FROM sales_stream_rates
-        WHERE service = ?
-        ORDER BY
-          effective_from DESC
-      `).bind(service).all();
-
-      const rows = result.results || [];
-
-      const rates = rows.map(row => Number(row.rate || 0));
-
-      const territories = [
-        ...new Set(
-          rows.map(row => row.territory)
-        )
-      ];
-
-      const currencies = [
-        ...new Set(
-          rows.map(row => row.currency)
-        )
-      ];
-
-      return json({
-        success: true,
-        service,
-        overview: {
-          rate_count: rows.length,
-          territories: territories.length,
-          currencies,
-          min_rate: rates.length
-            ? Math.min(...rates)
-            : null,
-          max_rate: rates.length
-            ? Math.max(...rates)
-            : null,
-          latest_rate: rows.length
-            ? {
-                rate: Number(rows[0].rate || 0),
-                currency: rows[0].currency,
-                territory: rows[0].territory,
-                rate_type: rows[0].rate_type,
-                effective_from: rows[0].effective_from,
-                effective_to: rows[0].effective_to,
-                source: rows[0].source
-              }
-            : null
-        }
-      });
-    }
-
-
-    if (action === "territories") {
-
-      const result = await env.DB.prepare(`
-        SELECT
-          id,
-          territory,
-          currency,
-          rate,
-          rate_type,
-          effective_from,
-          effective_to,
-          source
-        FROM sales_stream_rates
-        WHERE service = ?
-        ORDER BY
-          territory ASC,
-          effective_from DESC
-      `).bind(service).all();
-
-      return json({
-        success: true,
-        service,
-        territories: (result.results || []).map(row => ({
-          territory: row.territory,
-          currency: row.currency,
-          rate: Number(row.rate || 0),
-          rate_type: row.rate_type,
-          effective_from: row.effective_from,
-          effective_to: row.effective_to,
-          source: row.source
-        }))
-      });
-    }
-  }
-}
-
-// ============================================================
-// AUDIORY SALES INGESTION + AGGREGATION ENGINE
-// ============================================================
-//
-// Endpoints added:
-//
-// POST /v1/sales/events
-// POST /v1/sales/events/batch
-// GET  /v1/sales/events
-// GET  /v1/sales/events/:id
-//
-// POST /v1/sales/aggregate
-// POST /v1/sales/aggregate/batch
-//
-// GET  /v1/sales/imports/:id
-//
-// ============================================================
-
-
-// ============================================================
-// SALES CONSTANTS
-// ============================================================
-
-const SALES_PLATFORMS = [
-  "spotify",
-  "apple_music",
-  "youtube_music",
-  "amazon_music",
-  "deezer",
-  "tiktok_music"
-];
-
-const SALES_TYPES = [
-  "stream",
-  "download",
-  "sale",
-  "subscription",
-  "royalty",
-  "adjustment"
-];
-
-const SALES_CURRENCIES = [
-  "USD",
-  "EUR",
-  "GBP",
-  "KES",
-  "CAD",
-  "AUD",
-  "JPY",
-  "ZAR",
-  "NGN",
-  "GHS",
-  "TZS",
-  "UGX"
-];
-
-
-// ============================================================
-// SALES AUTH HELPER
-// ============================================================
-
-async function requireSalesAuth(request, env) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return {
-      ok: false,
-      response: json(
-        {
-          success: false,
-          error: "Authorization required"
-        },
-        401
-      )
-    };
-  }
-
-  const auth = await verifyToken(
-    token,
-    env.JWT_SECRET
-  );
-
-  if (!auth) {
-    return {
-      ok: false,
-      response: json(
-        {
-          success: false,
-          error: "Invalid or expired token"
-        },
-        401
-      )
-    };
-  }
-
-  const userId =
-    auth.sub ||
-    auth.user_id ||
-    auth.userId ||
-    auth.id;
-
-  if (!userId) {
-    return {
-      ok: false,
-      response: json(
-        {
-          success: false,
-          error: "Invalid authentication payload"
-        },
-        401
-      )
-    };
-  }
-
-  return {
-    ok: true,
-    auth,
-    userId
-  };
-}
-
-
-// ============================================================
-// SALES VALIDATION HELPERS
-// ============================================================
-
-function isValidSalesPlatform(platform) {
-  return SALES_PLATFORMS.includes(
-    String(platform || "").toLowerCase()
-  );
-}
-
-
-function isValidSalesType(type) {
-  return SALES_TYPES.includes(
-    String(type || "").toLowerCase()
-  );
-}
-
-
-function isValidSalesCurrency(currency) {
-  return SALES_CURRENCIES.includes(
-    String(currency || "").toUpperCase()
-  );
-}
-
-
-function isValidSalesDateStrict(value) {
-  if (!value) return false;
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
-  }
-
-  const date = new Date(
-    `${value}T00:00:00Z`
-  );
-
-  if (Number.isNaN(date.getTime())) {
-    return false;
-  }
-
-  return (
-    date.toISOString().slice(0, 10) === value
-  );
-}
-
-
-function normalizeSalesTerritory(value) {
-  if (!value) return null;
-
-  return String(value)
-    .trim()
-    .toUpperCase();
-}
-
-
-function normalizeSalesCurrency(value) {
-  return String(
-    value || "USD"
-  )
-    .trim()
-    .toUpperCase();
-}
-
-
-function normalizeSalesPlatform(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
-
-function normalizeSalesType(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
-
-function normalizeSalesChannel(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
-
-function normalizeOptionalNumber(
-  value,
-  fieldName
-) {
-  if (
-    value === undefined ||
-    value === null ||
-    value === ""
-  ) {
-    return 0;
-  }
-
-  const number = Number(value);
-
-  if (!Number.isFinite(number)) {
-    throw new Error(
-      `${fieldName} must be a valid number`
-    );
-  }
-
-  if (number < 0) {
-    throw new Error(
-      `${fieldName} cannot be negative`
-    );
-  }
-
-  return number;
-}
-
-
-function normalizeOptionalInteger(
-  value,
-  fieldName
-) {
-  const number = normalizeOptionalNumber(
-    value,
-    fieldName
-  );
-
-  if (!Number.isInteger(number)) {
-    throw new Error(
-      `${fieldName} must be an integer`
-    );
-  }
-
-  return number;
-}
-
-
-function roundMoney(value) {
-  return Number(
-    Number(value || 0).toFixed(6)
-  );
-}
-
-
-// ============================================================
-// SALES DATE FILTERS
-// ============================================================
-
-function validateSalesDate(value) {
-  if (!value) return true;
-
-  return isValidSalesDateStrict(value);
-}
-
-
-function getSalesDateFilters(url) {
-  const from =
-    url.searchParams.get("from");
-
-  const to =
-    url.searchParams.get("to");
-
-  if (
-    from &&
-    !validateSalesDate(from)
-  ) {
-    throw new Error(
-      "Invalid from date. Expected YYYY-MM-DD"
-    );
-  }
-
-  if (
-    to &&
-    !validateSalesDate(to)
-  ) {
-    throw new Error(
-      "Invalid to date. Expected YYYY-MM-DD"
-    );
-  }
-
-  if (
-    from &&
-    to &&
-    from > to
-  ) {
-    throw new Error(
-      "from cannot be later than to"
-    );
-  }
-
-  return {
-    from,
-    to
-  };
-}
-
-
-function addSalesDateConditions(
-  conditions,
-  params,
-  from,
-  to,
-  column = "se.event_date"
-) {
-  if (from) {
-    conditions.push(
-      `${column} >= ?`
-    );
-
-    params.push(from);
-  }
-
-  if (to) {
-    conditions.push(
-      `${column} <= ?`
-    );
-
-    params.push(to);
-  }
-}
-
-
-function salesUserId(auth) {
-  return (
-    auth.sub ||
-    auth.user_id ||
-    auth.userId ||
-    auth.id
-  );
-}
-
-
-// ============================================================
-// OWNERSHIP VALIDATION
-// ============================================================
-
-async function validateSalesReleaseOwnership(
-  env,
-  releaseId,
-  userId
-) {
-  if (!releaseId) {
-    return null;
-  }
-
-  const release =
-    await env.DB
-      .prepare(`
-        SELECT
-          id,
-          user_id,
-          artist_id,
-          title,
-          release_type
-        FROM releases
-        WHERE id = ?
-          AND user_id = ?
-        LIMIT 1
-      `)
-      .bind(
-        releaseId,
-        userId
-      )
-      .first();
-
-  if (!release) {
-    throw new Error(
-      "Release not found or does not belong to this account"
-    );
-  }
-
-  return release;
-}
-
-
-async function validateSalesTrackOwnership(
-  env,
-  trackId,
-  userId
-) {
-  if (!trackId) {
-    return null;
-  }
-
-  const track =
-    await env.DB
-      .prepare(`
-        SELECT
-          t.id,
-          t.release_id,
-          t.isrc,
-          t.title,
-          r.user_id,
-          r.artist_id
-        FROM tracks t
-        INNER JOIN releases r
-          ON r.id = t.release_id
-        WHERE t.id = ?
-          AND r.user_id = ?
-        LIMIT 1
-      `)
-      .bind(
-        trackId,
-        userId
-      )
-      .first();
-
-  if (!track) {
-    throw new Error(
-      "Track not found or does not belong to this account"
-    );
-  }
-
-  return track;
-}
-
-
-async function validateSalesArtistOwnership(
-  env,
-  artistId,
-  userId
-) {
-  if (!artistId) {
-    return null;
-  }
-
-  const artist =
-    await env.DB
-      .prepare(`
-        SELECT
-          id,
-          name,
-          country
-        FROM artists
-        WHERE id = ?
-          AND user_id = ?
-        LIMIT 1
-      `)
-      .bind(
-        artistId,
-        userId
-      )
-      .first();
-
-  if (!artist) {
-    throw new Error(
-      "Artist not found or does not belong to this account"
-    );
-  }
-
-  return artist;
-}
-
-
-// ============================================================
-// STREAM RATE LOOKUP
-// ============================================================
-
-async function findSalesStreamRate(
-  env,
-  service,
-  territory,
-  currency,
-  eventDate
-) {
-  if (
-    !service ||
-    !territory ||
-    !currency ||
-    !eventDate
-  ) {
-    return null;
-  }
-
-  const result =
-    await env.DB
-      .prepare(`
-        SELECT
-          id,
-          service,
-          territory,
-          currency,
-          rate,
-          rate_type,
-          effective_from,
-          effective_to,
-          source,
-          metadata_json
-        FROM sales_stream_rates
-        WHERE service = ?
-          AND territory = ?
-          AND currency = ?
-          AND effective_from <= ?
-          AND (
-            effective_to IS NULL
-            OR effective_to >= ?
-          )
-        ORDER BY effective_from DESC
-        LIMIT 1
-      `)
-      .bind(
-        service,
-        territory,
-        currency,
-        eventDate,
-        eventDate
-      )
-      .first();
-
-  return result || null;
-}
-
-
-// ============================================================
-// NORMALIZE SALES EVENT
-// ============================================================
-
-async function normalizeSalesEvent(
-  env,
-  input,
-  userId
-) {
-  if (!input || typeof input !== "object") {
-    throw new Error(
-      "Sales event must be a JSON object"
-    );
-  }
-
-  const platform =
-    normalizeSalesPlatform(
-      input.platform ||
-      input.channel
-    );
-
-  if (!platform) {
-    throw new Error(
-      "platform is required"
-    );
-  }
-
-  if (!isValidSalesPlatform(platform)) {
-    throw new Error(
-      `Unsupported platform: ${platform}`
-    );
-  }
-
-  const saleType =
-    normalizeSalesType(
-      input.sale_type ||
-      input.event_type ||
-      "stream"
-    );
-
-  if (!isValidSalesType(saleType)) {
-    throw new Error(
-      `Unsupported sale_type: ${saleType}`
-    );
-  }
-
-  const eventDate =
-    input.event_date;
-
-  if (!isValidSalesDateStrict(eventDate)) {
-    throw new Error(
-      "event_date must use YYYY-MM-DD format"
-    );
-  }
-
-  const territory =
-    normalizeSalesTerritory(
-      input.territory
-    );
-
-  const currency =
-    normalizeSalesCurrency(
-      input.currency
-    );
-
-  if (!isValidSalesCurrency(currency)) {
-    throw new Error(
-      `Unsupported currency: ${currency}`
-    );
-  }
-
-  const releaseId =
-    input.release_id ||
-    null;
-
-  const trackId =
-    input.track_id ||
-    null;
-
-  const artistId =
-    input.artist_id ||
-    null;
-
-  const release =
-    await validateSalesReleaseOwnership(
-      env,
-      releaseId,
-      userId
-    );
-
-  const track =
-    await validateSalesTrackOwnership(
-      env,
-      trackId,
-      userId
-    );
-
-  const artist =
-    await validateSalesArtistOwnership(
-      env,
-      artistId,
-      userId
-    );
-
-  if (
-    track &&
-    releaseId &&
-    track.release_id !== releaseId
-  ) {
-    throw new Error(
-      "track_id does not belong to release_id"
-    );
-  }
-
-  if (
-    track &&
-    !releaseId
-  ) {
-    throw new Error(
-      "release_id is required when track_id is supplied"
-    );
-  }
-
-  if (
-    release &&
-    artistId &&
-    release.artist_id !== artistId
-  ) {
-    throw new Error(
-      "artist_id does not belong to release_id"
-    );
-  }
-
-  const streams =
-    normalizeOptionalInteger(
-      input.streams,
-      "streams"
-    );
-
-  const downloads =
-    normalizeOptionalInteger(
-      input.downloads,
-      "downloads"
-    );
-
-  let units =
-    normalizeOptionalInteger(
-      input.units,
-      "units"
-    );
-
-  const explicitGross =
-    input.gross_revenue !== undefined &&
-    input.gross_revenue !== null &&
-    input.gross_revenue !== "";
-
-  const explicitNet =
-    input.net_revenue !== undefined &&
-    input.net_revenue !== null &&
-    input.net_revenue !== "";
-
-  let grossRevenue =
-    normalizeOptionalNumber(
-      input.gross_revenue,
-      "gross_revenue"
-    );
-
-  let netRevenue =
-    normalizeOptionalNumber(
-      input.net_revenue,
-      "net_revenue"
-    );
-
-  let streamRate =
-    input.stream_rate !== undefined &&
-    input.stream_rate !== null &&
-    input.stream_rate !== ""
-      ? normalizeOptionalNumber(
-          input.stream_rate,
-          "stream_rate"
-        )
-      : null;
-
-  if (streamRate !== null) {
-    if (streamRate < 0) {
-      throw new Error(
-        "stream_rate cannot be negative"
-      );
-    }
-  }
-
-  /*
-   * If units are not supplied:
-   *
-   * stream events => streams
-   * download events => downloads
-   *
-   * Otherwise leave the supplied value.
-   */
-
-  if (
-    input.units === undefined ||
-    input.units === null ||
-    input.units === ""
-  ) {
-    if (saleType === "stream") {
-      units = streams;
-    } else if (
-      saleType === "download"
-    ) {
-      units = downloads;
-    }
-  }
-
-  /*
-   * Resolve stream rate automatically when possible.
-   *
-   * We only calculate gross revenue automatically.
-   * We NEVER invent a net revenue value.
-   */
-
-  let resolvedRate = null;
-
-  if (
-    streamRate === null &&
-    saleType === "stream" &&
-    territory
-  ) {
-    resolvedRate =
-      await findSalesStreamRate(
-        env,
-        platform,
-        territory,
-        currency,
-        eventDate
-      );
-
-    if (resolvedRate) {
-      streamRate =
-        Number(resolvedRate.rate);
-    }
-  }
-
-  if (
-    !explicitGross &&
-    streamRate !== null &&
-    streams > 0
-  ) {
-    grossRevenue =
-      roundMoney(
-        streams * streamRate
-      );
-  }
-
-  /*
-   * If net revenue wasn't supplied,
-   * do not manufacture it.
-   *
-   * For example:
-   *
-   * gross = $5.00
-   * net = $4.75
-   *
-   * is valid when supplied by the distributor.
-   *
-   * We do not assume a universal platform fee.
-   */
-
-  if (!explicitNet) {
-    netRevenue = grossRevenue;
-  }
-
-  /*
-   * For a royalty/sale record where the
-   * source only provides net revenue and
-   * gross is zero, preserve the supplied
-   * net amount.
-   */
-
-  if (
-    explicitNet &&
-    !explicitGross &&
-    grossRevenue === 0
-  ) {
-    grossRevenue = netRevenue;
-  }
-
-  let metadataJson = null;
-
-  if (
-    input.metadata !== undefined &&
-    input.metadata !== null
-  ) {
-    if (
-      typeof input.metadata === "string"
-    ) {
-      try {
-        JSON.parse(input.metadata);
-        metadataJson = input.metadata;
-      } catch {
-        throw new Error(
-          "metadata must contain valid JSON"
-        );
-      }
-    } else {
-      metadataJson =
-        JSON.stringify(
-          input.metadata
-        );
-    }
-  }
-
-  return {
-    id:
-      input.id ||
-      `sale_${crypto.randomUUID()}`,
-
-    user_id:
-      userId,
-
-    release_id:
-      releaseId,
-
-    track_id:
-      trackId,
-
-    isrc:
-      input.isrc ||
-      track?.isrc ||
-      null,
-
-    artist_id:
-      artistId ||
-      release?.artist_id ||
-      track?.artist_id ||
-      null,
-
-    channel:
-      platform,
-
-    territory,
-
-    sale_type:
-      saleType,
-
-    event_date:
-      eventDate,
-
-    streams,
-
-    downloads,
-
-    units,
-
-    gross_revenue:
-      roundMoney(grossRevenue),
-
-    net_revenue:
-      roundMoney(netRevenue),
-
-    currency,
-
-    stream_rate:
-      streamRate === null
-        ? null
-        : roundMoney(streamRate),
-
-    source:
-      String(
-        input.source ||
-        "api"
-      )
-        .trim()
-        .toLowerCase(),
-
-    source_record_id:
-      input.source_record_id ||
-      input.external_id ||
-      null,
-
-    metadata_json:
-      metadataJson,
-
-    resolved_rate:
-      resolvedRate
-        ? {
-            id: resolvedRate.id,
-            rate: Number(
-              resolvedRate.rate
-            ),
-            source:
-              resolvedRate.source
-          }
-        : null
-  };
-}
-
-
-// ============================================================
-// INSERT SALES EVENT
-// ============================================================
-
-async function insertSalesEvent(
-  env,
-  sale
-) {
-  /*
-   * Source + source_record_id provides
-   * idempotency for distributor reports.
-   */
-
-  if (
-    sale.source_record_id
-  ) {
-    const existing =
-      await env.DB
-        .prepare(`
-          SELECT *
-          FROM sales_events
-          WHERE user_id = ?
-            AND source = ?
-            AND source_record_id = ?
-          LIMIT 1
-        `)
-        .bind(
-          sale.user_id,
-          sale.source,
-          sale.source_record_id
-        )
-        .first();
-
-    if (existing) {
-      return {
-        inserted: false,
-        duplicate: true,
-        event: existing
-      };
-    }
-  }
-
-  await env.DB
-    .prepare(`
-      INSERT INTO sales_events (
-        id,
-        user_id,
-        release_id,
-        track_id,
-        isrc,
-        artist_id,
-        channel,
-        territory,
-        sale_type,
-        event_date,
-        streams,
-        downloads,
-        units,
-        gross_revenue,
-        net_revenue,
-        currency,
-        stream_rate,
-        source,
-        source_record_id,
-        metadata_json,
-        aggregation_status
-      )
-      VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        'pending'
-      )
-    `)
-    .bind(
-      sale.id,
-      sale.user_id,
-      sale.release_id,
-      sale.track_id,
-      sale.isrc,
-      sale.artist_id,
-      sale.channel,
-      sale.territory,
-      sale.sale_type,
-      sale.event_date,
-      sale.streams,
-      sale.downloads,
-      sale.units,
-      sale.gross_revenue,
-      sale.net_revenue,
-      sale.currency,
-      sale.stream_rate,
-      sale.source,
-      sale.source_record_id,
-      sale.metadata_json
-    )
-    .run();
-
-  const event =
-    await env.DB
-      .prepare(`
-        SELECT *
-        FROM sales_events
-        WHERE id = ?
-        LIMIT 1
-      `)
-      .bind(sale.id)
-      .first();
-
-  return {
-    inserted: true,
-    duplicate: false,
-    event
-  };
-}
-
-
-// ============================================================
-// AGGREGATION HELPERS
-// ============================================================
-
-async function upsertSalesDaily(
-  env,
-  event
-) {
-  const existing =
-    await env.DB
-      .prepare(`
-        SELECT id
-        FROM sales_daily
-        WHERE user_id = ?
-          AND COALESCE(release_id, '') =
-              COALESCE(?, '')
-          AND COALESCE(track_id, '') =
-              COALESCE(?, '')
-          AND channel = ?
-          AND COALESCE(territory, '') =
-              COALESCE(?, '')
-          AND event_date = ?
-          AND currency = ?
-        LIMIT 1
-      `)
-      .bind(
-        event.user_id,
-        event.release_id,
-        event.track_id,
-        event.channel,
-        event.territory,
-        event.event_date,
-        event.currency
-      )
-      .first();
-
-  if (existing) {
-    await env.DB
-      .prepare(`
-        UPDATE sales_daily
-        SET
-          streams = streams + ?,
-          downloads = downloads + ?,
-          units = units + ?,
-          gross_revenue =
-            gross_revenue + ?,
-          net_revenue =
-            net_revenue + ?,
-          updated_at =
-            CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(
-        event.streams,
-        event.downloads,
-        event.units,
-        event.gross_revenue,
-        event.net_revenue,
-        existing.id
-      )
-      .run();
-
-    return existing.id;
-  }
-
-  const id =
-    `sales_daily_${crypto.randomUUID()}`;
-
-  await env.DB
-    .prepare(`
-      INSERT INTO sales_daily (
-        id,
-        user_id,
-        release_id,
-        track_id,
-        channel,
-        territory,
-        event_date,
-        streams,
-        downloads,
-        units,
-        gross_revenue,
-        net_revenue,
-        currency
-      )
-      VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      )
-    `)
-    .bind(
-      id,
-      event.user_id,
-      event.release_id,
-      event.track_id,
-      event.channel,
-      event.territory,
-      event.event_date,
-      event.streams,
-      event.downloads,
-      event.units,
-      event.gross_revenue,
-      event.net_revenue,
-      event.currency
-    )
-    .run();
-
-  return id;
-}
-
-
-// ============================================================
-// SALES TRACK AGGREGATION
-// ============================================================
-
-async function upsertSalesTrack(
-  env,
-  event
-) {
-  if (!event.track_id) {
-    return null;
-  }
-
-  const existing =
-    await env.DB
-      .prepare(`
-        SELECT id
-        FROM sales_tracks
-        WHERE user_id = ?
-          AND track_id = ?
-          AND currency = ?
-        LIMIT 1
-      `)
-      .bind(
-        event.user_id,
-        event.track_id,
-        event.currency
-      )
-      .first();
-
-  if (existing) {
-    await env.DB
-      .prepare(`
-        UPDATE sales_tracks
-        SET
-          streams =
-            streams + ?,
-          downloads =
-            downloads + ?,
-          units =
-            units + ?,
-          gross_revenue =
-            gross_revenue + ?,
-          net_revenue =
-            net_revenue + ?,
-          first_sale_date =
-            CASE
-              WHEN first_sale_date IS NULL
-                OR first_sale_date > ?
-              THEN ?
-              ELSE first_sale_date
-            END,
-          last_sale_date =
-            CASE
-              WHEN last_sale_date IS NULL
-                OR last_sale_date < ?
-              THEN ?
-              ELSE last_sale_date
-            END,
-          updated_at =
-            CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(
-        event.streams,
-        event.downloads,
-        event.units,
-        event.gross_revenue,
-        event.net_revenue,
-        event.event_date,
-        event.event_date,
-        event.event_date,
-        event.event_date,
-        existing.id
-      )
-      .run();
-
-    return existing.id;
-  }
-
-  const track =
-    await env.DB
-      .prepare(`
-        SELECT
-          id,
-          release_id,
-          isrc,
-          title
-        FROM tracks
-        WHERE id = ?
-        LIMIT 1
-      `)
-      .bind(event.track_id)
-      .first();
-
-  const id =
-    `sales_track_${crypto.randomUUID()}`;
-
-  await env.DB
-    .prepare(`
-      INSERT INTO sales_tracks (
-        id,
-        user_id,
-        track_id,
-        release_id,
-        isrc,
-        title,
-        streams,
-        downloads,
-        units,
-        gross_revenue,
-        net_revenue,
-        currency,
-        first_sale_date,
-        last_sale_date
-      )
-      VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      )
-    `)
-    .bind(
-      id,
-      event.user_id,
-      event.track_id,
-      event.release_id ||
-        track?.release_id ||
-        null,
-      event.isrc ||
-        track?.isrc ||
-        null,
-      track?.title ||
-        null,
-      event.streams,
-      event.downloads,
-      event.units,
-      event.gross_revenue,
-      event.net_revenue,
-      event.currency,
-      event.event_date,
-      event.event_date
-    )
-    .run();
-
-  return id;
-}
-
-
-// ============================================================
-// SALES RELEASE AGGREGATION
-// ============================================================
-
-async function upsertSalesRelease(
-  env,
-  event
-) {
-  if (!event.release_id) {
-    return null;
-  }
-
-  const existing =
-    await env.DB
-      .prepare(`
-        SELECT id
-        FROM sales_releases
-        WHERE user_id = ?
-          AND release_id = ?
-          AND currency = ?
-        LIMIT 1
-      `)
-      .bind(
-        event.user_id,
-        event.release_id,
-        event.currency
-      )
-      .first();
-
-  if (existing) {
-    await env.DB
-      .prepare(`
-        UPDATE sales_releases
-        SET
-          streams =
-            streams + ?,
-          downloads =
-            downloads + ?,
-          units =
-            units + ?,
-          gross_revenue =
-            gross_revenue + ?,
-          net_revenue =
-            net_revenue + ?,
-          first_sale_date =
-            CASE
-              WHEN first_sale_date IS NULL
-                OR first_sale_date > ?
-              THEN ?
-              ELSE first_sale_date
-            END,
-          last_sale_date =
-            CASE
-              WHEN last_sale_date IS NULL
-                OR last_sale_date < ?
-              THEN ?
-              ELSE last_sale_date
-            END,
-          updated_at =
-            CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(
-        event.streams,
-        event.downloads,
-        event.units,
-        event.gross_revenue,
-        event.net_revenue,
-        event.event_date,
-        event.event_date,
-        event.event_date,
-        event.event_date,
-        existing.id
-      )
-      .run();
-
-    return existing.id;
-  }
-
-  const release =
-    await env.DB
-      .prepare(`
-        SELECT
-          id,
-          title
-        FROM releases
-        WHERE id = ?
-        LIMIT 1
-      `)
-      .bind(event.release_id)
-      .first();
-
-  const id =
-    `sales_release_${crypto.randomUUID()}`;
-
-  await env.DB
-    .prepare(`
-      INSERT INTO sales_releases (
-        id,
-        user_id,
-        release_id,
-        title,
-        streams,
-        downloads,
-        units,
-        gross_revenue,
-        net_revenue,
-        currency,
-        first_sale_date,
-        last_sale_date
-      )
-      VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      )
-    `)
-    .bind(
-      id,
-      event.user_id,
-      event.release_id,
-      release?.title ||
-        null,
-      event.streams,
-      event.downloads,
-      event.units,
-      event.gross_revenue,
-      event.net_revenue,
-      event.currency,
-      event.event_date,
-      event.event_date
-    )
-    .run();
-
-  return id;
-}
-
-
-// ============================================================
-// SALES CHANNEL AGGREGATION
-// ============================================================
-
-async function upsertSalesChannel(
-  env,
-  event
-) {
-  const existing =
-    await env.DB
-      .prepare(`
-        SELECT id
-        FROM sales_channels
-        WHERE user_id = ?
-          AND channel = ?
-          AND currency = ?
-        LIMIT 1
-      `)
-      .bind(
-        event.user_id,
-        event.channel,
-        event.currency
-      )
-      .first();
-
-  if (existing) {
-    await env.DB
-      .prepare(`
-        UPDATE sales_channels
-        SET
-          streams =
-            streams + ?,
-          downloads =
-            downloads + ?,
-          units =
-            units + ?,
-          gross_revenue =
-            gross_revenue + ?,
-          net_revenue =
-            net_revenue + ?,
-          first_sale_date =
-            CASE
-              WHEN first_sale_date IS NULL
-                OR first_sale_date > ?
-              THEN ?
-              ELSE first_sale_date
-            END,
-          last_sale_date =
-            CASE
-              WHEN last_sale_date IS NULL
-                OR last_sale_date < ?
-              THEN ?
-              ELSE last_sale_date
-            END,
-          updated_at =
-            CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(
-        event.streams,
-        event.downloads,
-        event.units,
-        event.gross_revenue,
-        event.net_revenue,
-        event.event_date,
-        event.event_date,
-        event.event_date,
-        event.event_date,
-        existing.id
-      )
-      .run();
-
-    return existing.id;
-  }
-
-  const id =
-    `sales_channel_${crypto.randomUUID()}`;
-
-  await env.DB
-    .prepare(`
-      INSERT INTO sales_channels (
-        id,
-        user_id,
-        channel,
-        streams,
-        downloads,
-        units,
-        gross_revenue,
-        net_revenue,
-        currency,
-        first_sale_date,
-        last_sale_date
-      )
-      VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      )
-    `)
-    .bind(
-      id,
-      event.user_id,
-      event.channel,
-      event.streams,
-      event.downloads,
-      event.units,
-      event.gross_revenue,
-      event.net_revenue,
-      event.currency,
-      event.event_date,
-      event.event_date
-    )
-    .run();
-
-  return id;
-}
-
-
-// ============================================================
-// SALES TERRITORY AGGREGATION
-// ============================================================
-
-async function upsertSalesTerritory(
-  env,
-  event
-) {
-  if (!event.territory) {
-    return null;
-  }
-
-  const existing =
-    await env.DB
-      .prepare(`
-        SELECT id
-        FROM sales_territories
-        WHERE user_id = ?
-          AND territory = ?
-          AND currency = ?
-        LIMIT 1
-      `)
-      .bind(
-        event.user_id,
-        event.territory,
-        event.currency
-      )
-      .first();
-
-  if (existing) {
-    await env.DB
-      .prepare(`
-        UPDATE sales_territories
-        SET
-          streams =
-            streams + ?,
-          downloads =
-            downloads + ?,
-          units =
-            units + ?,
-          gross_revenue =
-            gross_revenue + ?,
-          net_revenue =
-            net_revenue + ?,
-          first_sale_date =
-            CASE
-              WHEN first_sale_date IS NULL
-                OR first_sale_date > ?
-              THEN ?
-              ELSE first_sale_date
-            END,
-          last_sale_date =
-            CASE
-              WHEN last_sale_date IS NULL
-                OR last_sale_date < ?
-              THEN ?
-              ELSE last_sale_date
-            END,
-          updated_at =
-            CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(
-        event.streams,
-        event.downloads,
-        event.units,
-        event.gross_revenue,
-        event.net_revenue,
-        event.event_date,
-        event.event_date,
-        event.event_date,
-        event.event_date,
-        existing.id
-      )
-      .run();
-
-    return existing.id;
-  }
-
-  const id =
-    `sales_territory_${crypto.randomUUID()}`;
-
-  await env.DB
-    .prepare(`
-      INSERT INTO sales_territories (
-        id,
-        user_id,
-        territory,
-        streams,
-        downloads,
-        units,
-        gross_revenue,
-        net_revenue,
-        currency,
-        first_sale_date,
-        last_sale_date
-      )
-      VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      )
-    `)
-    .bind(
-      id,
-      event.user_id,
-      event.territory,
-      event.streams,
-      event.downloads,
-      event.units,
-      event.gross_revenue,
-      event.net_revenue,
-      event.currency,
-      event.event_date,
-      event.event_date
-    )
-    .run();
-
-  return id;
-}
-
-
-// ============================================================
-// AGGREGATE ONE SALES EVENT
-// ============================================================
-
-async function aggregateSalesEvent(
-  env,
-  eventId
-) {
-  const event =
-    await env.DB
-      .prepare(`
-        SELECT *
-        FROM sales_events
-        WHERE id = ?
-        LIMIT 1
-      `)
-      .bind(eventId)
-      .first();
-
-  if (!event) {
-    throw new Error(
-      "Sales event not found"
-    );
-  }
-
-  /*
-   * Already aggregated.
-   */
-
-  if (
-    event.aggregation_status ===
-    "aggregated"
-  ) {
-    return {
-      success: true,
-      event_id: event.id,
-      already_aggregated: true,
-      status: "aggregated"
-    };
-  }
-
-  /*
-   * Acquire aggregation lock.
-   *
-   * Only a pending event can enter processing.
-   */
-
-  const lock =
-    await env.DB
-      .prepare(`
-        UPDATE sales_events
-        SET
-          aggregation_status = 'processing',
-          aggregation_error = NULL,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-          AND aggregation_status = 'pending'
-      `)
-      .bind(eventId)
-      .run();
-
-  if (
-    !lock.meta ||
-    !lock.meta.changes
-  ) {
-    const current =
-      await env.DB
-        .prepare(`
-          SELECT
-            id,
-            aggregation_status,
-            aggregation_error
-          FROM sales_events
-          WHERE id = ?
-          LIMIT 1
-        `)
-        .bind(eventId)
-        .first();
-
-    if (
-      current?.aggregation_status ===
-      "aggregated"
-    ) {
-      return {
-        success: true,
-        event_id: eventId,
-        already_aggregated: true,
-        status: "aggregated"
-      };
-    }
-
-    if (
-      current?.aggregation_status ===
-      "processing"
-    ) {
-      return {
-        success: false,
-        event_id: eventId,
-        status: "processing",
-        message:
-          "Sales event is already being aggregated"
-      };
-    }
-
-    throw new Error(
-      current?.aggregation_error ||
-      "Unable to acquire sales aggregation lock"
-    );
-  }
-
-  try {
-    /*
-     * --------------------------------------------
-     * 1. DAILY
-     * --------------------------------------------
-     */
-
-    const dailyId =
-      await upsertSalesDaily(
-        env,
-        event
-      );
-
-    /*
-     * --------------------------------------------
-     * 2. TRACK
-     * --------------------------------------------
-     */
-
-    const trackId =
-      await upsertSalesTrack(
-        env,
-        event
-      );
-
-    /*
-     * --------------------------------------------
-     * 3. RELEASE
-     * --------------------------------------------
-     */
-
-    const releaseId =
-      await upsertSalesRelease(
-        env,
-        event
-      );
-
-    /*
-     * --------------------------------------------
-     * 4. CHANNEL
-     * --------------------------------------------
-     */
-
-    const channelId =
-      await upsertSalesChannel(
-        env,
-        event
-      );
-
-    /*
-     * --------------------------------------------
-     * 5. TERRITORY
-     * --------------------------------------------
-     */
-
-    const territoryId =
-      await upsertSalesTerritory(
-        env,
-        event
-      );
-
-    /*
-     * --------------------------------------------
-     * 6. MARK AGGREGATED
-     * --------------------------------------------
-     */
-
-    await env.DB
-      .prepare(`
-        UPDATE sales_events
-        SET
-          aggregation_status =
-            'aggregated',
-          aggregated_at =
-            CURRENT_TIMESTAMP,
-          aggregation_error =
-            NULL,
-          updated_at =
-            CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(eventId)
-      .run();
-
-    return {
-      success: true,
-
-      event_id:
-        event.id,
-
-      status:
-        "aggregated",
-
-      aggregates: {
-        daily_id:
-          dailyId,
-
-        track_id:
-          trackId,
-
-        release_id:
-          releaseId,
-
-        channel_id:
-          channelId,
-
-        territory_id:
-          territoryId
-      }
-    };
-
-  } catch (error) {
-
-    /*
-     * If aggregation fails, leave it retryable.
-     */
-
-    await env.DB
-      .prepare(`
-        UPDATE sales_events
-        SET
-          aggregation_status =
-            'pending',
-          aggregation_error = ?,
-          updated_at =
-            CURRENT_TIMESTAMP
-        WHERE id = ?
-      `)
-      .bind(
-        error?.message ||
-          String(error),
-        eventId
-      )
-      .run();
-
-    throw error;
-  }
-}
-
-
-// ============================================================
-// POST /v1/sales/events
-// INGEST ONE SALES EVENT
-// ============================================================
-
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/sales/events"
-) {
-  const authResult =
-    await requireSalesAuth(
-      request,
-      env
-    );
-
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const userId =
-    authResult.userId;
-
-  try {
-    let body;
-
-    try {
-      body =
-        await request.json();
-    } catch {
-      return json(
-        {
-          success: false,
-          error: "Invalid JSON body"
-        },
-        400
-      );
-    }
-
-    const sale =
-      await normalizeSalesEvent(
-        env,
-        body,
-        userId
-      );
-
-    const result =
-      await insertSalesEvent(
-        env,
-        sale
-      );
-
-    /*
-     * Do not aggregate duplicates again.
-     */
-
-    if (result.duplicate) {
-      return json({
-        success: true,
-
-        duplicate: true,
-
-        message:
-          "Sales event already exists",
-
-        event:
-          result.event
-      });
-    }
-
-    /*
-     * Automatically aggregate the event.
-     */
-
-    const aggregation =
-      await aggregateSalesEvent(
-        env,
-        sale.id
-      );
-
-    const event =
-      await env.DB
-        .prepare(`
-          SELECT *
-          FROM sales_events
-          WHERE id = ?
-          LIMIT 1
-        `)
-        .bind(sale.id)
-        .first();
-
-    return json(
-      {
-        success: true,
-
-        message:
-          "Sales event ingested and aggregated successfully",
-
-        event,
-
-        aggregation,
-
-        rate_resolution:
-          sale.resolved_rate
-      },
-      201
-    );
-
-  } catch (error) {
-
-    console.error(
-      "POST /v1/sales/events error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
         error:
-          error?.message ||
-          "Failed to ingest sales event"
+          "Invalid JSON request body."
       },
-      400
+      400,
+      corsHeaders
     );
   }
-}
 
-
-// ============================================================
-// POST /v1/sales/events/batch
-// BATCH SALES INGESTION
-// ============================================================
-
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/sales/events/batch"
-) {
-  const authResult =
-    await requireSalesAuth(
-      request,
-      env
+  const normalizedPlatform =
+    normalizePlatform(
+      body?.platform
     );
 
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const userId =
-    authResult.userId;
-
-  try {
-    let body;
-
-    try {
-      body =
-        await request.json();
-    } catch {
-      return json(
-        {
-          success: false,
-          error: "Invalid JSON body"
-        },
-        400
-      );
-    }
-
-    const events =
-      Array.isArray(body)
-        ? body
-        : body.events;
-
-    if (!Array.isArray(events)) {
-      return json(
-        {
-          success: false,
-          error:
-            "events must be an array"
-        },
-        400
-      );
-    }
-
-    if (events.length === 0) {
-      return json(
-        {
-          success: false,
-          error:
-            "events cannot be empty"
-        },
-        400
-      );
-    }
-
-    if (events.length > 100) {
-      return json(
-        {
-          success: false,
-          error:
-            "Maximum 100 sales events per request"
-        },
-        400
-      );
-    }
-
-    const results = [];
-
-    let received = 0;
-    let imported = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    for (
-      const input of events
-    ) {
-      received++;
-
-      try {
-        const sale =
-          await normalizeSalesEvent(
-            env,
-            input,
-            userId
-          );
-
-        const inserted =
-          await insertSalesEvent(
-            env,
-            sale
-          );
-
-        if (
-          inserted.duplicate
-        ) {
-          skipped++;
-
-          results.push({
-            success: true,
-            duplicate: true,
-            event_id:
-              inserted.event.id,
-            source_record_id:
-              inserted.event
-                .source_record_id,
-            message:
-              "Sales event already exists"
-          });
-
-          continue;
-        }
-
-        imported++;
-
-        /*
-         * Aggregate immediately.
-         */
-
-        const aggregation =
-          await aggregateSalesEvent(
-            env,
-            sale.id
-          );
-
-        results.push({
-          success: true,
-          event_id:
-            sale.id,
-          duplicate: false,
-          aggregation_status:
-            aggregation.status,
-          rate_resolution:
-            sale.resolved_rate
-        });
-
-      } catch (error) {
-
-        failed++;
-
-        results.push({
-          success: false,
-          error:
-            error?.message ||
-            String(error)
-        });
-      }
-    }
-
-    return json(
-      {
-        success:
-          failed === 0,
-
-        message:
-          failed === 0
-            ? "Sales batch imported successfully"
-            : "Sales batch completed with errors",
-
-        summary: {
-          received,
-          imported,
-          skipped,
-          failed
-        },
-
-        results
-      },
-      failed === events.length
-        ? 400
-        : 201
-    );
-
-  } catch (error) {
-
-    console.error(
-      "POST /v1/sales/events/batch error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error:
-          error?.message ||
-          "Failed to process sales batch"
-      },
-      500
-    );
-  }
-}
-
-
-// ============================================================
-// POST /v1/sales/aggregate
-// AGGREGATE ONE EXISTING EVENT
-// ============================================================
-
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/sales/aggregate"
-) {
-  const authResult =
-    await requireSalesAuth(
-      request,
-      env
-    );
-
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const userId =
-    authResult.userId;
-
-  try {
-    let body;
-
-    try {
-      body =
-        await request.json();
-    } catch {
-      return json(
-        {
-          success: false,
-          error: "Invalid JSON body"
-        },
-        400
-      );
-    }
-
-    const eventId =
-      body.event_id;
-
-    if (!eventId) {
-      return json(
-        {
-          success: false,
-          error:
-            "event_id is required"
-        },
-        400
-      );
-    }
-
-    const event =
-      await env.DB
-        .prepare(`
-          SELECT *
-          FROM sales_events
-          WHERE id = ?
-            AND user_id = ?
-          LIMIT 1
-        `)
-        .bind(
-          eventId,
-          userId
-        )
-        .first();
-
-    if (!event) {
-      return json(
-        {
-          success: false,
-          error:
-            "Sales event not found"
-        },
-        404
-      );
-    }
-
-    const result =
-      await aggregateSalesEvent(
-        env,
-        eventId
-      );
-
-    return json({
-      success: true,
-
-      message:
-        result.already_aggregated
-          ? "Sales event was already aggregated"
-          : "Sales event aggregated successfully",
-
-      result
-    });
-
-  } catch (error) {
-
-    console.error(
-      "POST /v1/sales/aggregate error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error:
-          error?.message ||
-          "Failed to aggregate sales event"
-      },
-      500
-    );
-  }
-}
-
-
-// ============================================================
-// POST /v1/sales/aggregate/batch
-// AGGREGATE MULTIPLE EXISTING EVENTS
-// ============================================================
-
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/sales/aggregate/batch"
-) {
-  const authResult =
-    await requireSalesAuth(
-      request,
-      env
-    );
-
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const userId =
-    authResult.userId;
-
-  try {
-    let body;
-
-    try {
-      body =
-        await request.json();
-    } catch {
-      return json(
-        {
-          success: false,
-          error: "Invalid JSON body"
-        },
-        400
-      );
-    }
-
-    let eventIds =
-      body.event_ids;
-
-    /*
-     * If no event_ids are supplied,
-     * process pending events.
-     */
-
-    if (
-      !Array.isArray(eventIds) ||
-      eventIds.length === 0
-    ) {
-      const pending =
-        await env.DB
-          .prepare(`
-            SELECT id
-            FROM sales_events
-            WHERE user_id = ?
-              AND aggregation_status = 'pending'
-            ORDER BY event_date ASC
-            LIMIT 100
-          `)
-          .bind(userId)
-          .all();
-
-      eventIds =
-        (pending.results || [])
-          .map(row => row.id);
-    }
-
-    if (eventIds.length === 0) {
-      return json({
-        success: true,
-
-        message:
-          "No pending sales events to aggregate",
-
-        summary: {
-          requested: 0,
-          aggregated: 0,
-          already_aggregated: 0,
-          failed: 0
-        },
-
-        results: []
-      });
-    }
-
-    if (eventIds.length > 100) {
-      return json(
-        {
-          success: false,
-          error:
-            "Maximum 100 events per aggregation request"
-        },
-        400
-      );
-    }
-
-    let aggregated = 0;
-    let alreadyAggregated = 0;
-    let failed = 0;
-
-    const results = [];
-
-    for (
-      const eventId of eventIds
-    ) {
-      try {
-        const event =
-          await env.DB
-            .prepare(`
-              SELECT id
-              FROM sales_events
-              WHERE id = ?
-                AND user_id = ?
-              LIMIT 1
-            `)
-            .bind(
-              eventId,
-              userId
-            )
-            .first();
-
-        if (!event) {
-          failed++;
-
-          results.push({
-            success: false,
-            event_id: eventId,
-            error:
-              "Sales event not found"
-          });
-
-          continue;
-        }
-
-        const result =
-          await aggregateSalesEvent(
-            env,
-            eventId
-          );
-
-        if (
-          result.already_aggregated
-        ) {
-          alreadyAggregated++;
-        } else if (
-          result.status ===
-          "aggregated"
-        ) {
-          aggregated++;
-        }
-
-        results.push({
-          success: true,
-          event_id: eventId,
-          ...result
-        });
-
-      } catch (error) {
-
-        failed++;
-
-        results.push({
-          success: false,
-          event_id: eventId,
-          error:
-            error?.message ||
-            String(error)
-        });
-      }
-    }
-
-    return json({
-      success:
-        failed === 0,
-
-      message:
-        failed === 0
-          ? "Sales aggregation completed"
-          : "Sales aggregation completed with errors",
-
-      summary: {
-        requested:
-          eventIds.length,
-
-        aggregated,
-
-        already_aggregated:
-          alreadyAggregated,
-
-        failed
-      },
-
-      results
-    });
-
-  } catch (error) {
-
-    console.error(
-      "POST /v1/sales/aggregate/batch error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error:
-          error?.message ||
-          "Failed to aggregate sales batch"
-      },
-      500
-    );
-  }
-}
-
-
-// ============================================================
-// GET /v1/sales/events
-// LIST RAW SALES EVENTS
-// ============================================================
-
-if (
-  request.method === "GET" &&
-  url.pathname === "/v1/sales/events"
-) {
-  const authResult =
-    await requireSalesAuth(
-      request,
-      env
-    );
-
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const userId =
-    authResult.userId;
-
-  try {
-    const {
-      from,
-      to
-    } =
-      getSalesDateFilters(url);
-
-    const platform =
-      url.searchParams.get(
-        "platform"
-      );
-
-    const territory =
-      url.searchParams.get(
-        "territory"
-      );
-
-    const releaseId =
-      url.searchParams.get(
-        "release_id"
-      );
-
-    const trackId =
-      url.searchParams.get(
-        "track_id"
-      );
-
-    const status =
-      url.searchParams.get(
-        "aggregation_status"
-      );
-
-    let limit =
-      Number(
-        url.searchParams.get(
-          "limit"
-        ) || 50
-      );
-
-    let offset =
-      Number(
-        url.searchParams.get(
-          "offset"
-        ) || 0
-      );
-
-    if (
-      !Number.isInteger(limit) ||
-      limit < 1
-    ) {
-      return json(
-        {
-          success: false,
-          error:
-            "limit must be a positive integer"
-        },
-        400
-      );
-    }
-
-    if (limit > 100) {
-      limit = 100;
-    }
-
-    if (
-      !Number.isInteger(offset) ||
-      offset < 0
-    ) {
-      return json(
-        {
-          success: false,
-          error:
-            "offset must be a non-negative integer"
-        },
-        400
-      );
-    }
-
-    if (
-      platform &&
-      !isValidSalesPlatform(
-        platform
-      )
-    ) {
-      return json(
-        {
-          success: false,
-          error:
-            "Invalid platform"
-        },
-        400
-      );
-    }
-
-    const conditions = [
-      "se.user_id = ?"
-    ];
-
-    const params = [
-      userId
-    ];
-
-    addSalesDateConditions(
-      conditions,
-      params,
-      from,
-      to,
-      "se.event_date"
-    );
-
-    if (platform) {
-      conditions.push(
-        "se.channel = ?"
-      );
-
-      params.push(
-        normalizeSalesPlatform(
-          platform
-        )
-      );
-    }
-
-    if (territory) {
-      conditions.push(
-        "se.territory = ?"
-      );
-
-      params.push(
-        normalizeSalesTerritory(
-          territory
-        )
-      );
-    }
-
-    if (releaseId) {
-      conditions.push(
-        "se.release_id = ?"
-      );
-
-      params.push(
-        releaseId
-      );
-    }
-
-    if (trackId) {
-      conditions.push(
-        "se.track_id = ?"
-      );
-
-      params.push(
-        trackId
-      );
-    }
-
-    if (status) {
-      conditions.push(
-        "se.aggregation_status = ?"
-      );
-
-      params.push(
-        status
-      );
-    }
-
-    const where =
-      conditions.join(
-        " AND "
-      );
-
-    const countResult =
-      await env.DB
-        .prepare(`
-          SELECT COUNT(*) AS count
-          FROM sales_events se
-          WHERE ${where}
-        `)
-        .bind(...params)
-        .first();
-
-    const total =
-      Number(
-        countResult?.count || 0
-      );
-
-    const result =
-      await env.DB
-        .prepare(`
-          SELECT
-            se.*
-          FROM sales_events se
-          WHERE ${where}
-          ORDER BY
-            se.event_date DESC,
-            se.created_at DESC
-          LIMIT ?
-          OFFSET ?
-        `)
-        .bind(
-          ...params,
-          limit,
-          offset
-        )
-        .all();
-
-    const events =
-      (result.results || [])
-        .map(event => ({
-          ...event,
-
-          streams:
-            Number(
-              event.streams || 0
-            ),
-
-          downloads:
-            Number(
-              event.downloads || 0
-            ),
-
-          units:
-            Number(
-              event.units || 0
-            ),
-
-          gross_revenue:
-            Number(
-              Number(
-                event.gross_revenue || 0
-              ).toFixed(6)
-            ),
-
-          net_revenue:
-            Number(
-              Number(
-                event.net_revenue || 0
-              ).toFixed(6)
-            ),
-
-          stream_rate:
-            event.stream_rate === null
-              ? null
-              : Number(
-                  event.stream_rate
-                )
-        }));
-
-    return json({
-      success: true,
-
-      events,
-
-      pagination: {
-        total,
-        limit,
-        offset,
-        returned:
-          events.length,
-        has_more:
-          offset +
-            events.length <
-          total
-      },
-
-      filters: {
-        from:
-          from || null,
-
-        to:
-          to || null,
-
-        platform:
-          platform || null,
-
-        territory:
-          territory
-            ? normalizeSalesTerritory(
-                territory
-              )
-            : null,
-
-        release_id:
-          releaseId || null,
-
-        track_id:
-          trackId || null,
-
-        aggregation_status:
-          status || null
-      }
-    });
-
-  } catch (error) {
-
-    console.error(
-      "GET /v1/sales/events error:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-        error:
-          error?.message ||
-          "Failed to load sales events"
-      },
-      500
-    );
-  }
-}
-
-// ============================================================
-// POST /v1/sales/imports
-// Create and process a distributor sales import
-// ============================================================
-
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/sales/imports"
-) {
-  const authResult = await requireSalesAuth(
-    request,
-    env
-  );
-
-  if (!authResult.success) {
-    return authResult.response;
-  }
-
-  const userId = authResult.userId;
-
-  try {
-    const body = await request.json();
-
-    const source = normalizeImportSource(
-      body.source
-    );
-
-    const sourceReportId = String(
-      body.source_report_id ||
-      body.report_id ||
+  const term =
+    String(
+      body?.term ??
+      body?.artist ??
+      body?.name ??
       ""
     ).trim();
 
-    const sourceValidation =
-      validateImportSource(source);
+  let limit =
+    Number(body?.limit);
 
-    if (!sourceValidation.valid) {
-      return json({
-        success: false,
-        error: sourceValidation.error
-      }, 400);
-    }
-
-    const reportValidation =
-      validateImportReportId(sourceReportId);
-
-    if (!reportValidation.valid) {
-      return json({
-        success: false,
-        error: reportValidation.error
-      }, 400);
-    }
-
-    const rows = normalizeImportRows(body);
-
-    if (!rows.length) {
-      return json({
-        success: false,
-        error: "No sales rows supplied"
-      }, 400);
-    }
-
-    if (rows.length > SALES_IMPORT_MAX_ROWS) {
-      return json({
-        success: false,
-        error:
-          `Import cannot contain more than ${SALES_IMPORT_MAX_ROWS} rows`
-      }, 400);
-    }
-
-    // --------------------------------------------------------
-    // Import-level idempotency
-    // --------------------------------------------------------
-
-    const existingImport =
-      await env.DB.prepare(`
-        SELECT *
-        FROM sales_imports
-        WHERE user_id = ?
-          AND source = ?
-          AND source_report_id = ?
-        LIMIT 1
-      `)
-        .bind(
-          userId,
-          source,
-          sourceReportId
-        )
-        .first();
-
-    if (existingImport) {
-      return json({
-        success: true,
-        duplicate: true,
-        message:
-          "This distributor report has already been imported",
-        import: existingImport
-      });
-    }
-
-    const importId =
-      generateSalesImportId();
-
-    // --------------------------------------------------------
-    // Create import
-    // --------------------------------------------------------
-
-    await env.DB.prepare(`
-      INSERT INTO sales_imports (
-        id,
-        user_id,
-        source,
-        source_report_id,
-        period_start,
-        period_end,
-        status,
-        records_received,
-        records_imported,
-        records_skipped,
-        total_gross_revenue,
-        total_net_revenue,
-        currency,
-        started_at
-      )
-      VALUES (
-        ?, ?, ?, ?, NULL, NULL,
-        'processing',
-        ?, 0, 0, 0, 0, NULL,
-        CURRENT_TIMESTAMP
-      )
-    `)
-      .bind(
-        importId,
-        userId,
-        source,
-        sourceReportId,
-        rows.length
-      )
-      .run();
-
-    let imported = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    let totalGross = 0;
-    let totalNet = 0;
-
-    const currencies = new Set();
-
-    let periodStart = null;
-    let periodEnd = null;
-
-    const rowResults = [];
-
-    // --------------------------------------------------------
-    // Process rows
-    // --------------------------------------------------------
-
-    for (
-      let index = 0;
-      index < rows.length;
-      index++
-    ) {
-      const rowNumber = index + 1;
-      const rawRow = rows[index];
-
-      const normalized =
-        normalizeImportedSalesRow(
-          rawRow,
-          rowNumber
-        );
-
-      const data = normalized.data;
-
-      const validationErrors =
-        validateImportedSalesRow(data);
-
-      if (validationErrors.length) {
-        failed++;
-
-        for (
-          const validationError
-          of validationErrors
-        ) {
-          await createSalesImportError(
-            env,
-            {
-              importId,
-              rowNumber,
-              sourceRecordId:
-                data.source_record_id,
-              errorCode:
-                validationError.code,
-              errorMessage:
-                validationError.message,
-              rawData: rawRow
-            }
-          );
-        }
-
-        rowResults.push({
-          row: rowNumber,
-          status: "failed",
-          errors: validationErrors
-        });
-
-        continue;
-      }
-
-      // ------------------------------------------------------
-      // Duplicate row detection
-      // ------------------------------------------------------
-
-      const existingEvent =
-        await findExistingSalesEvent(
-          env,
-          userId,
-          source,
-          data.source_record_id
-        );
-
-      if (existingEvent) {
-        skipped++;
-
-        rowResults.push({
-          row: rowNumber,
-          status: "duplicate",
-          source_record_id:
-            data.source_record_id,
-          existing_event_id:
-            existingEvent.id
-        });
-
-        continue;
-      }
-
-      // ------------------------------------------------------
-      // Insert sales event
-      // ------------------------------------------------------
-
-      try {
-        const eventId =
-          `sale_${crypto.randomUUID()}`;
-
-        await env.DB.prepare(`
-          INSERT INTO sales_events (
-            id,
-            user_id,
-            release_id,
-            track_id,
-            isrc,
-            artist_id,
-            channel,
-            territory,
-            sale_type,
-            event_date,
-            streams,
-            downloads,
-            units,
-            gross_revenue,
-            net_revenue,
-            currency,
-            stream_rate,
-            source,
-            source_record_id,
-            metadata_json
-          )
-          VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-          )
-        `)
-          .bind(
-            eventId,
-            userId,
-            data.release_id,
-            data.track_id,
-            data.isrc,
-            data.artist_id,
-            data.channel,
-            data.territory,
-            data.sale_type,
-            data.event_date,
-            data.streams,
-            data.downloads,
-            data.units,
-            data.gross_revenue,
-            data.net_revenue,
-            data.currency,
-            data.stream_rate,
-            source,
-            data.source_record_id,
-            data.metadata_json
-              ? JSON.stringify(
-                  data.metadata_json
-                )
-              : null
-          )
-          .run();
-
-        // ----------------------------------------------------
-        // Automatic aggregation
-        // ----------------------------------------------------
-
-        const aggregation =
-          await aggregateSalesEvent(
-            env,
-            eventId
-          );
-
-        if (
-          !aggregation ||
-          aggregation.success !== true
-        ) {
-          throw new Error(
-            "Sales event aggregation failed"
-          );
-        }
-
-        imported++;
-
-        totalGross +=
-          data.gross_revenue;
-
-        totalNet +=
-          data.net_revenue;
-
-        currencies.add(
-          data.currency
-        );
-
-        if (
-          !periodStart ||
-          data.event_date < periodStart
-        ) {
-          periodStart =
-            data.event_date;
-        }
-
-        if (
-          !periodEnd ||
-          data.event_date > periodEnd
-        ) {
-          periodEnd =
-            data.event_date;
-        }
-
-        rowResults.push({
-          row: rowNumber,
-          status: "imported",
-          event_id: eventId,
-          aggregation:
-            aggregation
-        });
-
-      } catch (error) {
-        failed++;
-
-        await createSalesImportError(
-          env,
-          {
-            importId,
-            rowNumber,
-            sourceRecordId:
-              data.source_record_id,
-            errorCode:
-              "ROW_IMPORT_FAILED",
-            errorMessage:
-              error?.message ||
-              "Failed to import sales row",
-            rawData: rawRow
-          }
-        );
-
-        rowResults.push({
-          row: rowNumber,
-          status: "failed",
-          errors: [
-            {
-              code:
-                "ROW_IMPORT_FAILED",
-              message:
-                error?.message ||
-                "Failed to import sales row"
-            }
-          ]
-        });
-      }
-    }
-
-    // --------------------------------------------------------
-    // Determine currency
-    // --------------------------------------------------------
-
-    const importCurrency =
-      currencies.size === 1
-        ? [...currencies][0]
-        : null;
-
-    // --------------------------------------------------------
-    // Determine import status
-    // --------------------------------------------------------
-
-    let status = "completed";
-
-    if (failed > 0 && imported > 0) {
-      status = "completed_with_errors";
-    } else if (failed > 0 && imported === 0) {
-      status = "failed";
-    }
-
-    // --------------------------------------------------------
-    // Update import
-    // --------------------------------------------------------
-
-    await env.DB.prepare(`
-      UPDATE sales_imports
-      SET
-        period_start = ?,
-        period_end = ?,
-        status = ?,
-        records_imported = ?,
-        records_skipped = ?,
-        total_gross_revenue = ?,
-        total_net_revenue = ?,
-        currency = ?,
-        completed_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-        AND user_id = ?
-    `)
-      .bind(
-        periodStart,
-        periodEnd,
-        status,
-        imported,
-        skipped,
-        totalGross,
-        totalNet,
-        importCurrency,
-        importId,
-        userId
-      )
-      .run();
-
-    const finalImport =
-      await env.DB.prepare(`
-        SELECT *
-        FROM sales_imports
-        WHERE id = ?
-          AND user_id = ?
-        LIMIT 1
-      `)
-        .bind(
-          importId,
-          userId
-        )
-        .first();
-
-    return json({
-      success: true,
-      message:
-        "Sales import processed",
-      import: finalImport,
-      summary: {
-        records_received:
-          rows.length,
-        records_imported:
-          imported,
-        records_skipped:
-          skipped,
-        records_failed:
-          failed,
-        currencies:
-          [...currencies]
-      },
-      rows: rowResults
-    }, 201);
-
-  } catch (error) {
-    console.error(
-      "POST /v1/sales/imports error:",
-      error
-    );
-
-    return json({
-      success: false,
-      error:
-        "Failed to process sales import",
-      details:
-        error?.message ||
-        String(error)
-    }, 500);
-  }
-}
-
-// ============================================================
-// GET /v1/sales/imports/:id/errors
-// ============================================================
-
-if (
-  request.method === "GET" &&
-  url.pathname.match(
-    /^\/v1\/sales\/imports\/[^/]+\/errors$/
-  )
-) {
-  const authResult =
-    await requireSalesAuth(
-      request,
-      env
-    );
-
-  if (!authResult.success) {
-    return authResult.response;
+  if (
+    !Number.isFinite(limit) ||
+    limit < 1
+  ) {
+    limit = 5;
   }
 
-  const userId =
-    authResult.userId;
-
-  try {
-    const parts =
-      url.pathname.split("/");
-
-    const importId = parts[4];
-
-    if (!importId) {
-      return json({
-        success: false,
-        error: "Import ID is required"
-      }, 400);
-    }
-
-    const salesImport =
-      await env.DB.prepare(`
-        SELECT *
-        FROM sales_imports
-        WHERE id = ?
-          AND user_id = ?
-        LIMIT 1
-      `)
-        .bind(
-          importId,
-          userId
-        )
-        .first();
-
-    if (!salesImport) {
-      return json({
-        success: false,
-        error: "Sales import not found"
-      }, 404);
-    }
-
-    const errors =
-      await env.DB.prepare(`
-        SELECT *
-        FROM sales_import_errors
-        WHERE import_id = ?
-        ORDER BY row_number ASC
-      `)
-        .bind(importId)
-        .all();
-
-    return json({
-      success: true,
-      import: salesImport,
-      errors:
-        errors.results || [],
-      total_errors:
-        (errors.results || []).length
-    });
-
-  } catch (error) {
-    console.error(
-      "GET sales import errors:",
-      error
+  limit =
+    Math.min(
+      Math.floor(limit),
+      50
     );
 
-    return json({
-      success: false,
-      error:
-        "Failed to retrieve import errors",
-      details:
-        error?.message ||
-        String(error)
-    }, 500);
-  }
-}
-
-// ============================================================
-// POST /v1/sales/imports/:id/retry
-// Retry failed import rows
-// ============================================================
-
-if (
-  request.method === "POST" &&
-  url.pathname.match(
-    /^\/v1\/sales\/imports\/[^/]+\/retry$/
-  )
-) {
-  const authResult =
-    await requireSalesAuth(
-      request,
-      env
-    );
-
-  if (!authResult.success) {
-    return authResult.response;
-  }
-
-  const userId =
-    authResult.userId;
-
-  try {
-    const parts =
-      url.pathname.split("/");
-
-    const importId = parts[4];
-
-    const salesImport =
-      await env.DB.prepare(`
-        SELECT *
-        FROM sales_imports
-        WHERE id = ?
-          AND user_id = ?
-        LIMIT 1
-      `)
-        .bind(
-          importId,
-          userId
-        )
-        .first();
-
-    if (!salesImport) {
-      return json({
-        success: false,
-        error: "Sales import not found"
-      }, 404);
-    }
-
-    const errorsResult =
-      await env.DB.prepare(`
-        SELECT *
-        FROM sales_import_errors
-        WHERE import_id = ?
-          AND status = 'failed'
-        ORDER BY row_number ASC
-      `)
-        .bind(importId)
-        .all();
-
-    const errors =
-      errorsResult.results || [];
-
-    if (!errors.length) {
-      return json({
-        success: true,
-        message:
-          "There are no failed rows to retry",
-        import: salesImport,
-        retried: 0
-      });
-    }
-
-    let imported = 0;
-    let skipped = 0;
-    let stillFailed = 0;
-
-    for (const errorRow of errors) {
-      let rawData;
-
-      try {
-        rawData = JSON.parse(
-          errorRow.raw_data_json
-        );
-      } catch {
-        stillFailed++;
-
-        await env.DB.prepare(`
-          UPDATE sales_import_errors
-          SET
-            retry_count = retry_count + 1,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `)
-          .bind(errorRow.id)
-          .run();
-
-        continue;
-      }
-
-      const normalized =
-        normalizeImportedSalesRow(
-          rawData,
-          errorRow.row_number
-        );
-
-      const data =
-        normalized.data;
-
-      const validationErrors =
-        validateImportedSalesRow(
-          data
-        );
-
-      if (validationErrors.length) {
-        stillFailed++;
-
-        await env.DB.prepare(`
-          UPDATE sales_import_errors
-          SET
-            retry_count = retry_count + 1,
-            error_code = ?,
-            error_message = ?,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `)
-          .bind(
-            validationErrors[0].code,
-            validationErrors[0].message,
-            errorRow.id
-          )
-          .run();
-
-        continue;
-      }
-
-      const existingEvent =
-        await findExistingSalesEvent(
-          env,
-          userId,
-          salesImport.source,
-          data.source_record_id
-        );
-
-      if (existingEvent) {
-        skipped++;
-
-        await env.DB.prepare(`
-          UPDATE sales_import_errors
-          SET
-            status = 'resolved',
-            resolved_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `)
-          .bind(errorRow.id)
-          .run();
-
-        continue;
-      }
-
-      try {
-        const eventId =
-          `sale_${crypto.randomUUID()}`;
-
-        await env.DB.prepare(`
-          INSERT INTO sales_events (
-            id,
-            user_id,
-            release_id,
-            track_id,
-            isrc,
-            artist_id,
-            channel,
-            territory,
-            sale_type,
-            event_date,
-            streams,
-            downloads,
-            units,
-            gross_revenue,
-            net_revenue,
-            currency,
-            stream_rate,
-            source,
-            source_record_id,
-            metadata_json
-          )
-          VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-          )
-        `)
-          .bind(
-            eventId,
-            userId,
-            data.release_id,
-            data.track_id,
-            data.isrc,
-            data.artist_id,
-            data.channel,
-            data.territory,
-            data.sale_type,
-            data.event_date,
-            data.streams,
-            data.downloads,
-            data.units,
-            data.gross_revenue,
-            data.net_revenue,
-            data.currency,
-            data.stream_rate,
-            salesImport.source,
-            data.source_record_id,
-            data.metadata_json
-              ? JSON.stringify(
-                  data.metadata_json
-                )
-              : null
-          )
-          .run();
-
-        const aggregation =
-          await aggregateSalesEvent(
-            env,
-            eventId
-          );
-
-        if (
-          !aggregation ||
-          aggregation.success !== true
-        ) {
-          throw new Error(
-            "Sales event aggregation failed"
-          );
-        }
-
-        imported++;
-
-        await env.DB.prepare(`
-          UPDATE sales_import_errors
-          SET
-            status = 'resolved',
-            resolved_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `)
-          .bind(errorRow.id)
-          .run();
-
-      } catch (error) {
-        stillFailed++;
-
-        await env.DB.prepare(`
-          UPDATE sales_import_errors
-          SET
-            retry_count = retry_count + 1,
-            error_code = 'RETRY_FAILED',
-            error_message = ?,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `)
-          .bind(
-            error?.message ||
-              "Retry failed",
-            errorRow.id
-          )
-          .run();
-      }
-    }
-
-    const remainingResult =
-      await env.DB.prepare(`
-        SELECT COUNT(*) AS count
-        FROM sales_import_errors
-        WHERE import_id = ?
-          AND status = 'failed'
-      `)
-        .bind(importId)
-        .first();
-
-    const remaining =
-      Number(
-        remainingResult?.count || 0
-      );
-
-    let status;
-
-    if (remaining > 0) {
-      status = "completed_with_errors";
-    } else {
-      status = "completed";
-    }
-
-    await env.DB.prepare(`
-      UPDATE sales_imports
-      SET
-        records_imported =
-          records_imported + ?,
-        records_skipped =
-          records_skipped + ?,
-        status = ?,
-        completed_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-        AND user_id = ?
-    `)
-      .bind(
-        imported,
-        skipped,
-        status,
-        importId,
-        userId
-      )
-      .run();
-
-    const finalImport =
-      await env.DB.prepare(`
-        SELECT *
-        FROM sales_imports
-        WHERE id = ?
-        LIMIT 1
-      `)
-        .bind(importId)
-        .first();
-
-    return json({
-      success: true,
-      message:
-        "Failed sales rows retried",
-      import: finalImport,
-      retry: {
-        attempted: errors.length,
-        imported,
-        skipped,
-        still_failed: remaining
-      }
-    });
-
-  } catch (error) {
-    console.error(
-      "POST sales import retry error:",
-      error
-    );
-
-    return json({
-      success: false,
-      error:
-        "Failed to retry sales import rows",
-      details:
-        error?.message ||
-        String(error)
-    }, 500);
-  }
-}
-
-
-// ============================================================
-// GET /v1/sales/events/:id
-// GET ONE RAW SALES EVENT
-// ============================================================
-
-if (
-  request.method === "GET" &&
-  url.pathname.startsWith(
-    "/v1/sales/events/"
-  ) &&
-  !url.pathname.endsWith(
-    "/batch"
-  )
-) {
-  const authResult =
-    await requireSalesAuth(
-      request,
-      env
-    );
-
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const userId =
-    authResult.userId;
-
-  try {
-    const parts =
-      url.pathname.split("/");
-
-    const eventId =
-      parts[4];
-
-    if (!eventId) {
-      return json(
-        {
-          success: false,
-          error:
-            "Sales event ID is required"
-        },
-        400
-      );
-    }
-
-    const event =
-      await env.DB
-        .prepare(`
-          SELECT *
-          FROM sales_events
-          WHERE id = ?
-            AND user_id = ?
-          LIMIT 1
-        `)
-        .bind(
-          eventId,
-          userId
-        )
-        .first();
-
-    if (!event) {
-      return json(
-        {
-          success: false,
-          error:
-            "Sales event not found"
-        },
-        404
-      );
-    }
-
-    return json({
-      success: true,
-
-      event: {
-        ...event,
-
-        streams:
-          Number(
-            event.streams || 0
-          ),
-
-        downloads:
-          Number(
-            event.downloads || 0
-          ),
-
-        units:
-          Number(
-            event.units || 0
-          ),
-
-        gross_revenue:
-          Number(
-            Number(
-              event.gross_revenue || 0
-            ).toFixed(6)
-          ),
-
-        net_revenue:
-          Number(
-            Number(
-              event.net_revenue || 0
-            ).toFixed(6)
-          ),
-
-        stream_rate:
-          event.stream_rate === null
-            ? null
-            : Number(
-                event.stream_rate
-              )
-      }
-    });
-
-  } catch (error) {
-
-    console.error(
-      "GET /v1/sales/events/:id error:",
-      error
-    );
-
-    return json(
+  const allowedPlatforms = [
+    "spotify",
+    "youtube",
+    "apple",
+    "audiomack"
+  ];
+
+  if (
+    !allowedPlatforms.includes(
+      normalizedPlatform
+    )
+  ) {
+    return preferencesJSON(
       {
-        success: false,
         error:
-          error?.message ||
-          "Failed to load sales event"
+          "Invalid platform.",
+        allowedPlatforms,
+        received:
+          body?.platform || null
       },
-      500
+      400,
+      corsHeaders
     );
   }
-}
 
-
-// ============================================================
-// GET /v1/sales/imports/:id
-// GET IMPORT STATUS
-// ============================================================
-
-if (
-  request.method === "GET" &&
-  url.pathname.startsWith(
-    "/v1/sales/imports/"
-  )
-) {
-  const authResult =
-    await requireSalesAuth(
-      request,
-      env
-    );
-
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const userId =
-    authResult.userId;
-
-  try {
-    const parts =
-      url.pathname.split("/");
-
-    const importId =
-      parts[4];
-
-    if (!importId) {
-      return json(
-        {
-          success: false,
-          error:
-            "Import ID is required"
-        },
-        400
-      );
-    }
-
-    // --------------------------------------------------------
-    // LOAD IMPORT
-    // --------------------------------------------------------
-
-    const salesImport =
-      await env.DB
-        .prepare(`
-          SELECT *
-          FROM sales_imports
-          WHERE id = ?
-            AND user_id = ?
-          LIMIT 1
-        `)
-        .bind(
-          importId,
-          userId
-        )
-        .first();
-
-    if (!salesImport) {
-      return json(
-        {
-          success: false,
-          error:
-            "Sales import not found"
-        },
-        404
-      );
-    }
-
-    // --------------------------------------------------------
-    // LOAD ROW-LEVEL ERROR SUMMARY
-    // --------------------------------------------------------
-
-    const errorSummary =
-      await env.DB
-        .prepare(`
-          SELECT
-            COUNT(*) AS total,
-
-            SUM(
-              CASE
-                WHEN status = 'failed'
-                THEN 1
-                ELSE 0
-              END
-            ) AS failed,
-
-            SUM(
-              CASE
-                WHEN status = 'resolved'
-                THEN 1
-                ELSE 0
-              END
-            ) AS resolved
-
-          FROM sales_import_errors
-          WHERE import_id = ?
-        `)
-        .bind(importId)
-        .first();
-
-    // --------------------------------------------------------
-    // RETURN IMPORT STATUS
-    // --------------------------------------------------------
-
-    return json({
-      success: true,
-
-      import: {
-        ...salesImport,
-
-        records_received:
-          Number(
-            salesImport
-              .records_received || 0
-          ),
-
-        records_imported:
-          Number(
-            salesImport
-              .records_imported || 0
-          ),
-
-        records_skipped:
-          Number(
-            salesImport
-              .records_skipped || 0
-          ),
-
-        total_gross_revenue:
-          Number(
-            Number(
-              salesImport
-                .total_gross_revenue ||
-                0
-            ).toFixed(6)
-          ),
-
-        total_net_revenue:
-          Number(
-            Number(
-              salesImport
-                .total_net_revenue ||
-                0
-            ).toFixed(6)
-          )
-      },
-
-      // ------------------------------------------------------
-      // ROW-LEVEL IMPORT ERRORS
-      // ------------------------------------------------------
-
-      errors: {
-        total:
-          Number(
-            errorSummary?.total || 0
-          ),
-
-        failed:
-          Number(
-            errorSummary?.failed || 0
-          ),
-
-        resolved:
-          Number(
-            errorSummary?.resolved || 0
-          )
-      }
-    });
-
-  } catch (error) {
-
-    console.error(
-      "GET /v1/sales/imports/:id error:",
-      error
-    );
-
-    return json(
+  if (!term) {
+    return preferencesJSON(
       {
-        success: false,
         error:
-          error?.message ||
-          "Failed to load sales import"
+          "Search term is required."
       },
-      500
+      400,
+      corsHeaders
     );
   }
-}
 
-// ============================================================
-// PATCH /v1/royalties/agreements/:agreement_id
-// ============================================================
+  if (term.length > 255) {
+    return preferencesJSON(
+      {
+        error:
+          "Search term must be 255 characters or less."
+      },
+      400,
+      corsHeaders
+    );
+  }
 
-if (
-  request.method === "PATCH" &&
-  url.pathname.startsWith("/v1/royalties/agreements/")
-) {
+  let accessToken;
+
   try {
-    const auth = await requireRoyaltyAuth(request, env);
-
-    const userId =
-      auth.sub ||
-      auth.user_id ||
-      auth.userId ||
-      auth.id;
-
-    if (!userId) {
-      return json({
-        success: false,
-        error: "Unable to determine authenticated user"
-      }, 401);
-    }
-
-    const agreementId =
-      url.pathname.split("/")[4];
-
-    if (!agreementId) {
-      return json({
-        success: false,
-        error: "Agreement ID is required"
-      }, 400);
-    }
-
-    const agreement = await getRoyaltyAgreement(
-      env,
-      agreementId,
-      userId
-    );
-
-    if (!agreement) {
-      return json({
-        success: false,
-        error: "Royalty agreement not found"
-      }, 404);
-    }
-
-    const body = await request.json();
-
-    const allowedStatuses = [
-      "draft",
-      "active",
-      "expired",
-      "cancelled"
-    ];
-
-    if (
-      body.status !== undefined &&
-      !allowedStatuses.includes(body.status)
-    ) {
-      return json({
-        success: false,
-        error: "Invalid agreement status"
-      }, 400);
-    }
-
-    const updates = [];
-    const params = [];
-
-    if (body.status !== undefined) {
-      updates.push("status = ?");
-      params.push(body.status);
-    }
-
-    if (body.name !== undefined) {
-      if (
-        typeof body.name !== "string" ||
-        !body.name.trim()
-      ) {
-        return json({
-          success: false,
-          error: "name must be a non-empty string"
-        }, 400);
-      }
-
-      updates.push("name = ?");
-      params.push(body.name.trim());
-    }
-
-    if (body.description !== undefined) {
-      updates.push("description = ?");
-      params.push(
-        body.description === null
-          ? null
-          : String(body.description)
-      );
-    }
-
-    if (body.effective_from !== undefined) {
-      updates.push("effective_from = ?");
-      params.push(body.effective_from || null);
-    }
-
-    if (body.effective_to !== undefined) {
-      updates.push("effective_to = ?");
-      params.push(body.effective_to || null);
-    }
-
-    if (!updates.length) {
-      return json({
-        success: false,
-        error: "No fields to update"
-      }, 400);
-    }
-
-    updates.push(
-      "updated_at = CURRENT_TIMESTAMP"
-    );
-
-    params.push(agreementId);
-    params.push(userId);
-
-    await env.DB.prepare(`
-      UPDATE royalty_agreements
-      SET ${updates.join(", ")}
-      WHERE id = ?
-        AND user_id = ?
-    `).bind(...params).run();
-
-    const updatedAgreement =
-      await getRoyaltyAgreement(
-        env,
-        agreementId,
-        userId
-      );
-
-    return json({
-      success: true,
-      message: "Royalty agreement updated successfully",
-      agreement: updatedAgreement
-    });
-
-  } catch (error) {
+    accessToken =
+      await getTooLostSearchAccessToken(env);
+  } catch (authError) {
     console.error(
-      "Royalty agreement update error:",
-      error
+      "Too Lost preference search authentication error:",
+      authError
     );
 
-    return json({
-      success: false,
-      error: "Failed to update royalty agreement",
-      details: error.message
-    }, 500);
-  }
-}
-
-// ============================================================
-// POST /v1/royalties/agreements
-// CREATE ROYALTY AGREEMENT
-// ============================================================
-
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/royalties/agreements"
-) {
-
-  const authResult =
-    await requireRoyaltyAuth(
-      request,
-      env
+    return preferencesJSON(
+      {
+        error:
+          "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          String(authError)
+      },
+      401,
+      corsHeaders
     );
-
-  if (!authResult.ok) {
-    return authResult.response;
   }
 
-  const userId =
-    authResult.userId;
+  const tooLostPayload = {
+    platform:
+      normalizedPlatform,
+
+    term,
+
+    limit
+  };
+
+  console.log(
+    "TOO LOST ARTIST PLATFORM SEARCH REQUEST:",
+    JSON.stringify(
+      tooLostPayload,
+      null,
+      2
+    )
+  );
+
+  // -----------------------------------------------------------
+  // PRIMARY SEARCH
+  // -----------------------------------------------------------
 
   try {
+    const upstream =
+      await fetchTooLostAPI(
+        "/preferences/search/artist-platform",
+        "POST",
+        tooLostPayload,
+        accessToken,
+        env
+      );
 
-    let body;
+    const upstreamText =
+      await upstream.text();
+
+    let upstreamBody = {};
 
     try {
-      body = await request.json();
+      upstreamBody =
+        upstreamText
+          ? JSON.parse(upstreamText)
+          : {};
     } catch {
-      return json({
-        success: false,
-        error: "Invalid JSON body"
-      }, 400);
+      upstreamBody = {
+        raw: upstreamText
+      };
     }
 
-
-    const name =
-      String(
-        body.name || ""
-      ).trim();
-
-    const description =
-      body.description
-        ? String(body.description).trim()
-        : null;
-
-    const scopeType =
-      String(
-        body.scope_type || "track"
+    console.log(
+      "TOO LOST ARTIST PLATFORM SEARCH RESPONSE:",
+      JSON.stringify(
+        {
+          status:
+            upstream.status,
+          response:
+            upstreamBody
+        },
+        null,
+        2
       )
-        .trim()
-        .toLowerCase();
-
-    const releaseId =
-      body.release_id
-        ? String(body.release_id).trim()
-        : null;
-
-    const trackId =
-      body.track_id
-        ? String(body.track_id).trim()
-        : null;
-
-    const artistId =
-      body.artist_id
-        ? String(body.artist_id).trim()
-        : null;
-
-    const effectiveFrom =
-      body.effective_from
-        ? String(body.effective_from).trim()
-        : null;
-
-    const effectiveTo =
-      body.effective_to
-        ? String(body.effective_to).trim()
-        : null;
-
-
-    if (!name) {
-      return json({
-        success: false,
-        error: "Agreement name is required"
-      }, 400);
-    }
-
-
-    if (name.length > 255) {
-      return json({
-        success: false,
-        error:
-          "Agreement name is too long"
-      }, 400);
-    }
-
-
-    if (
-      !isValidRoyaltyScopeType(
-        scopeType
-      )
-    ) {
-      return json({
-        success: false,
-        error:
-          "Invalid scope_type",
-        allowed_scope_types:
-          ROYALTY_SCOPE_TYPES
-      }, 400);
-    }
-
-
-    const target =
-      await validateRoyaltyTarget(
-        env,
-        userId,
-        scopeType,
-        releaseId,
-        trackId,
-        artistId
-      );
-
-
-    if (!target.valid) {
-      return json({
-        success: false,
-        error: target.error
-      }, target.error.includes("not found")
-        ? 404
-        : 403);
-    }
-
-
-    if (
-      effectiveFrom &&
-      !/^\d{4}-\d{2}-\d{2}$/.test(
-        effectiveFrom
-      )
-    ) {
-      return json({
-        success: false,
-        error:
-          "effective_from must use YYYY-MM-DD"
-      }, 400);
-    }
-
-
-    if (
-      effectiveTo &&
-      !/^\d{4}-\d{2}-\d{2}$/.test(
-        effectiveTo
-      )
-    ) {
-      return json({
-        success: false,
-        error:
-          "effective_to must use YYYY-MM-DD"
-      }, 400);
-    }
-
-
-    if (
-      effectiveFrom &&
-      effectiveTo &&
-      effectiveFrom > effectiveTo
-    ) {
-      return json({
-        success: false,
-        error:
-          "effective_from cannot be after effective_to"
-      }, 400);
-    }
-
-
-    const agreementId =
-      generateId(
-        "royalty_agreement"
-      );
-
-
-    await env.DB.prepare(`
-      INSERT INTO royalty_agreements (
-        id,
-        user_id,
-        name,
-        description,
-        scope_type,
-        release_id,
-        track_id,
-        artist_id,
-        status,
-        effective_from,
-        effective_to,
-        version
-      )
-      VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, 1
-      )
-    `)
-      .bind(
-        agreementId,
-        userId,
-        name,
-        description,
-        scopeType,
-        releaseId,
-        trackId,
-        artistId,
-        effectiveFrom,
-        effectiveTo
-      )
-      .run();
-
-
-    const agreement =
-      await getRoyaltyAgreement(
-        env,
-        userId,
-        agreementId
-      );
-
-
-    return json({
-      success: true,
-      message:
-        "Royalty agreement created successfully",
-      agreement
-    }, 201);
-
-  } catch (error) {
-
-    console.error(
-      "Create royalty agreement error:",
-      error
     );
 
-    return json({
-      success: false,
-      error:
-        error?.message ||
-        "Failed to create royalty agreement"
-    }, 500);
-  }
-}
+    // ---------------------------------------------------------
+    // SUCCESS
+    // ---------------------------------------------------------
 
-// ============================================================
-// POST /v1/royalties/agreements/:agreement_id/splits
-// ADD ROYALTY SPLIT
-// ============================================================
-
-if (
-  request.method === "POST" &&
-  url.pathname.match(
-    /^\/v1\/royalties\/agreements\/[^/]+\/splits$/
-  )
-) {
-
-  const authResult =
-    await requireRoyaltyAuth(
-      request,
-      env
-    );
-
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const userId =
-    authResult.userId;
-
-  try {
-
-    const parts =
-      url.pathname.split("/");
-
-    const agreementId =
-      parts[4];
-
-
-    if (!agreementId) {
-      return json({
-        success: false,
-        error:
-          "Agreement ID is required"
-      }, 400);
+    if (upstream.ok) {
+      return preferencesJSON(
+        upstreamBody,
+        200,
+        corsHeaders
+      );
     }
 
+    // ---------------------------------------------------------
+    // FALLBACK
+    //
+    // Existing older endpoints:
+    //
+    // Spotify:
+    // GET /preferences/search-spotify?artist=...
+    //
+    // YouTube:
+    // GET /preferences/search-yt-channel?channel=...
+    //
+    // Apple:
+    // GET /preferences/search-apple?artist=...
+    // ---------------------------------------------------------
 
-    const agreement =
-      await getRoyaltyAgreement(
-        env,
-        userId,
-        agreementId
+    const shouldFallback =
+      [
+        404,
+        405,
+        500,
+        502,
+        503
+      ].includes(
+        upstream.status
       );
 
-
-    if (!agreement) {
-      return json({
-        success: false,
-        error:
-          "Royalty agreement not found"
-      }, 404);
+    if (!shouldFallback) {
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost rejected the platform search.",
+          tooLostStatus:
+            upstream.status,
+          tooLostResponse:
+            upstreamBody
+        },
+        upstream.status,
+        corsHeaders
+      );
     }
 
+    let fallbackPath =
+      null;
 
     if (
-      agreement.status !== "draft"
+      normalizedPlatform ===
+      "spotify"
     ) {
-      return json({
-        success: false,
-        error:
-          "Splits can only be added to a draft agreement"
-      }, 409);
+      fallbackPath =
+        `/preferences/search-spotify?artist=${encodeURIComponent(
+          term
+        )}&limit=${encodeURIComponent(
+          limit
+        )}`;
     }
 
+    if (
+      normalizedPlatform ===
+      "youtube"
+    ) {
+      fallbackPath =
+        `/preferences/search-yt-channel?channel=${encodeURIComponent(
+          term
+        )}&limit=${encodeURIComponent(
+          limit
+        )}`;
+    }
 
-    let body;
+    if (
+      normalizedPlatform ===
+      "apple"
+    ) {
+      fallbackPath =
+        `/preferences/search-apple?artist=${encodeURIComponent(
+          term
+        )}&limit=${encodeURIComponent(
+          limit
+        )}`;
+    }
+
+    // Audiomack does not have an old GET fallback in the
+    // supplied Worker, so keep the original upstream response.
+    if (!fallbackPath) {
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost artist-platform search failed.",
+          tooLostStatus:
+            upstream.status,
+          tooLostResponse:
+            upstreamBody
+        },
+        502,
+        corsHeaders
+      );
+    }
+
+    console.warn(
+      "Trying legacy Too Lost artist platform search:",
+      fallbackPath
+    );
+
+    const fallback =
+      await fetchTooLostAPI(
+        fallbackPath,
+        "GET",
+        null,
+        accessToken,
+        env
+      );
+
+    const fallbackText =
+      await fallback.text();
+
+    let fallbackBody = {};
 
     try {
-      body = await request.json();
+      fallbackBody =
+        fallbackText
+          ? JSON.parse(
+              fallbackText
+            )
+          : {};
     } catch {
-      return json({
-        success: false,
-        error:
-          "Invalid JSON body"
-      }, 400);
+      fallbackBody = {
+        raw: fallbackText
+      };
     }
 
-
-    const name =
-      String(
-        body.name || ""
-      ).trim();
-
-    const role =
-      String(
-        body.role || ""
+    console.log(
+      "TOO LOST LEGACY ARTIST SEARCH RESPONSE:",
+      JSON.stringify(
+        {
+          status:
+            fallback.status,
+          response:
+            fallbackBody
+        },
+        null,
+        2
       )
-        .trim()
-        .toLowerCase();
-
-    const contributorId =
-      body.contributor_id
-        ? String(body.contributor_id).trim()
-        : null;
-
-    const artistId =
-      body.artist_id
-        ? String(body.artist_id).trim()
-        : null;
-
-
-    const percentageCheck =
-      validateRoyaltyPercentage(
-        body.split_percentage
-      );
-
-
-    if (!name) {
-      return json({
-        success: false,
-        error:
-          "Split name is required"
-      }, 400);
-    }
-
-
-    if (!isValidRoyaltySplitRole(role)) {
-      return json({
-        success: false,
-        error:
-          "Invalid split role",
-        allowed_roles:
-          ROYALTY_SPLIT_ROLES
-      }, 400);
-    }
-
-
-    if (!percentageCheck.valid) {
-      return json({
-        success: false,
-        error:
-          percentageCheck.error
-      }, 400);
-    }
-
-
-    const percentage =
-      percentageCheck.value;
-
-
-    if (
-      !contributorId &&
-      !artistId
-    ) {
-      return json({
-        success: false,
-        error:
-          "Either contributor_id or artist_id is required"
-      }, 400);
-    }
-
-
-    if (
-      contributorId &&
-      artistId
-    ) {
-      return json({
-        success: false,
-        error:
-          "Use contributor_id or artist_id, not both"
-      }, 400);
-    }
-
-
-    // --------------------------------------------------------
-    // Validate contributor
-    // --------------------------------------------------------
-
-    if (contributorId) {
-
-      const contributor =
-        await env.DB.prepare(`
-          SELECT
-            tc.id,
-            tc.track_id,
-            tc.name,
-            tc.role,
-            tc.artist_id,
-            r.user_id
-          FROM track_contributors tc
-          INNER JOIN tracks t
-            ON t.id = tc.track_id
-          INNER JOIN releases r
-            ON r.id = t.release_id
-          WHERE tc.id = ?
-          LIMIT 1
-        `)
-          .bind(contributorId)
-          .first();
-
-
-      if (!contributor) {
-        return json({
-          success: false,
-          error:
-            "Contributor not found"
-        }, 404);
-      }
-
-
-      if (
-        contributor.user_id !==
-        userId
-      ) {
-        return json({
-          success: false,
-          error:
-            "You do not have permission to use this contributor"
-        }, 403);
-      }
-
-
-      if (
-        agreement.scope_type ===
-        "track" &&
-        contributor.track_id !==
-        agreement.track_id
-      ) {
-        return json({
-          success: false,
-          error:
-            "Contributor does not belong to the agreement track"
-        }, 400);
-      }
-    }
-
-
-    // --------------------------------------------------------
-    // Validate artist
-    // --------------------------------------------------------
-
-    if (artistId) {
-
-      const artist =
-        await env.DB.prepare(`
-          SELECT
-            id,
-            user_id,
-            name
-          FROM artists
-          WHERE id = ?
-          LIMIT 1
-        `)
-          .bind(artistId)
-          .first();
-
-
-      if (!artist) {
-        return json({
-          success: false,
-          error:
-            "Artist not found"
-        }, 404);
-      }
-
-
-      if (
-        artist.user_id !==
-        userId
-      ) {
-        return json({
-          success: false,
-          error:
-            "You do not have permission to use this artist"
-        }, 403);
-      }
-    }
-
-
-    // --------------------------------------------------------
-    // Check existing split
-    // --------------------------------------------------------
-
-    if (contributorId) {
-
-      const existing =
-        await env.DB.prepare(`
-          SELECT id
-          FROM royalty_splits
-          WHERE agreement_id = ?
-            AND contributor_id = ?
-          LIMIT 1
-        `)
-          .bind(
-            agreementId,
-            contributorId
-          )
-          .first();
-
-
-      if (existing) {
-        return json({
-          success: false,
-          error:
-            "This contributor already has a split in this agreement"
-        }, 409);
-      }
-    }
-
-
-    if (artistId) {
-
-      const existing =
-        await env.DB.prepare(`
-          SELECT id
-          FROM royalty_splits
-          WHERE agreement_id = ?
-            AND artist_id = ?
-          LIMIT 1
-        `)
-          .bind(
-            agreementId,
-            artistId
-          )
-          .first();
-
-
-      if (existing) {
-        return json({
-          success: false,
-          error:
-            "This artist already has a split in this agreement"
-        }, 409);
-      }
-    }
-
-
-    // --------------------------------------------------------
-    // Check total
-    // --------------------------------------------------------
-
-    const currentResult =
-      await env.DB.prepare(`
-        SELECT
-          COALESCE(
-            SUM(split_percentage),
-            0
-          ) AS total
-        FROM royalty_splits
-        WHERE agreement_id = ?
-      `)
-        .bind(agreementId)
-        .first();
-
-
-    const currentTotal =
-      Number(
-        currentResult?.total || 0
-      );
-
-
-    const newTotal =
-      Number(
-        (
-          currentTotal +
-          percentage
-        ).toFixed(6)
-      );
-
-
-    if (newTotal > 100) {
-      return json({
-        success: false,
-        error:
-          "Royalty splits cannot exceed 100%",
-        current_total:
-          currentTotal,
-        requested_split:
-          percentage,
-        resulting_total:
-          newTotal
-      }, 400);
-    }
-
-
-    const splitId =
-      generateId(
-        "royalty_split"
-      );
-
-
-    await env.DB.prepare(`
-      INSERT INTO royalty_splits (
-        id,
-        agreement_id,
-        user_id,
-        contributor_id,
-        artist_id,
-        name,
-        role,
-        split_percentage
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-      .bind(
-        splitId,
-        agreementId,
-        userId,
-        contributorId,
-        artistId,
-        name,
-        role,
-        percentage
-      )
-      .run();
-
-
-    const split =
-      await env.DB.prepare(`
-        SELECT *
-        FROM royalty_splits
-        WHERE id = ?
-        LIMIT 1
-      `)
-        .bind(splitId)
-        .first();
-
-
-    return json({
-      success: true,
-      message:
-        "Royalty split added successfully",
-      split,
-      agreement_total:
-        newTotal,
-      remaining:
-        Number(
-          (100 - newTotal).toFixed(6)
-        )
-    }, 201);
-
-  } catch (error) {
-
-    console.error(
-      "Add royalty split error:",
-      error
     );
 
-    return json({
-      success: false,
-      error:
-        error?.message ||
-        "Failed to add royalty split"
-    }, 500);
-  }
-}
-
-// ============================================================
-// GET /v1/royalties/agreements/:agreement_id
-// GET ROYALTY AGREEMENT
-// ============================================================
-
-if (
-  request.method === "GET" &&
-  url.pathname.match(
-    /^\/v1\/royalties\/agreements\/[^/]+$/
-  )
-) {
-
-  const authResult =
-    await requireRoyaltyAuth(
-      request,
-      env
-    );
-
-  if (!authResult.ok) {
-    return authResult.response;
-  }
-
-  const userId =
-    authResult.userId;
-
-  try {
-
-    const agreementId =
-      url.pathname.split("/")[4];
-
-
-    const agreement =
-      await getRoyaltyAgreement(
-        env,
-        userId,
-        agreementId
+    if (fallback.ok) {
+      return preferencesJSON(
+        fallbackBody,
+        200,
+        corsHeaders
       );
-
-
-    if (!agreement) {
-      return json({
-        success: false,
-        error:
-          "Royalty agreement not found"
-      }, 404);
     }
 
-
-    const splits =
-      await getRoyaltyAgreementSplits(
-        env,
-        userId,
-        agreementId
-      );
-
-
-    const total =
-      calculateRoyaltySplitTotal(
-        splits
-      );
-
-
-    return json({
-      success: true,
-
-      agreement: {
-        ...agreement,
-
-        version:
-          Number(
-            agreement.version || 1
-          ),
-
-        splits,
-
-        split_summary: {
-          total_percentage: total,
-
-          remaining_percentage:
-            Number(
-              (100 - total)
-                .toFixed(6)
-            ),
-
-          complete:
-            total === 100
+    return preferencesJSON(
+      {
+        error:
+          "Artist platform search failed.",
+        primarySearch: {
+          status:
+            upstream.status,
+          response:
+            upstreamBody
+        },
+        fallbackSearch: {
+          status:
+            fallback.status,
+          response:
+            fallbackBody
         }
-      }
-    });
+      },
+      502,
+      corsHeaders
+    );
 
   } catch (error) {
-
     console.error(
-      "Get royalty agreement error:",
+      "Preference platform search failed:",
       error
     );
 
-    return json({
-      success: false,
-      error:
-        error?.message ||
-        "Failed to load royalty agreement"
-    }, 500);
+    return preferencesJSON(
+      {
+        error:
+          "Preference platform search failed.",
+        details:
+          error?.message ||
+          String(error)
+      },
+      502,
+      corsHeaders
+    );
   }
 }
 
-// ============================================================
-// GET /v1/royalties/agreements
-// LIST ROYALTY AGREEMENTS
-// ============================================================
+
+// =============================================================
+// =============================================================
+// GET ARTIST PREFERENCES
+// =============================================================
+//
+// Audiory is the source of truth for the user's visible preferences.
+// We intentionally DO NOT call Too Lost here because a shared
+// application token can represent another Audiory user's Too Lost
+// account. The saved Too Lost ID remains in this user's KV record.
+// =============================================================
 
 if (
-  request.method === "GET" &&
   url.pathname ===
-    "/v1/royalties/agreements"
+    "/api/preferences/artist" &&
+  request.method === "GET"
 ) {
-
-  const authResult =
-    await requireRoyaltyAuth(
-      request,
-      env
+  if (!userId) {
+    return preferencesJSON(
+      { error: "Unauthenticated." },
+      401,
+      corsHeaders
     );
-
-  if (!authResult.ok) {
-    return authResult.response;
   }
 
-  const userId =
-    authResult.userId;
+  const kvKey =
+    `PREFERENCES_ARTIST_${userId}`;
+
+  let artistData = null;
+
+  if (env.AUDIORY_KV) {
+    const cached =
+      await env.AUDIORY_KV.get(kvKey);
+
+    if (cached) {
+      try {
+        artistData = JSON.parse(cached);
+      } catch {
+        artistData = null;
+      }
+    }
+  }
+
+  if (!artistData) {
+    artistData = {
+      id: null,
+      artistName: "",
+      about: "",
+      primaryGenre: "",
+      secondaryGenre: "",
+      language: "",
+      profileImg: "",
+      label: "",
+      cLine: "",
+      pLine: "",
+      releaseTime: "",
+      timeZone: "Africa/Nairobi",
+      collaborators: [],
+      defaultRoles: [],
+      territories: [],
+      platforms: {
+        spotify: "",
+        appleMusic: "",
+        soundcloud: "",
+        vevo: "",
+        website: "",
+        youtube: ""
+      },
+      social: {
+        facebook: "",
+        instagram: "",
+        twitter: "",
+        youtube: ""
+      },
+      audiomack: {
+        link: "",
+        status: ""
+      },
+      deliveries: {
+        beatport: false,
+        delivery_beatport_link: "",
+        delivery_even: false,
+        delivery_facebook: false,
+        delivery_hook: false,
+        delivery_lyricfind: false,
+        delivery_soundcloud: false,
+        delivery_soundexchange: false,
+        delivery_tracklib: false,
+        delivery_youtube: false
+      },
+      additional: {
+        allmusic: "",
+        ddex: "",
+        isni: "",
+        musicbrainz: "",
+        wikipedia: ""
+      },
+      stores: [],
+      metadata: {
+        artists: [],
+        credits: [],
+        writers: []
+      }
+    };
+  }
+
+  return preferencesJSON(
+    {
+      data: { artist: artistData },
+      message: "Artist preferences retrieved.",
+      syncedWithTooLost: Boolean(artistData?.id)
+    },
+    200,
+    corsHeaders
+  );
+}
+
+
+// POST ARTIST PREFERENCES
+// =============================================================
+//
+// POST /api/preferences/artist/submit
+//
+// CRITICAL CHANGE:
+//
+// We DO NOT blindly send:
+//
+//   id: null
+//
+// anymore.
+//
+// Before saving, we retrieve the existing artist preference and
+// obtain its Too Lost ID.
+//
+// If the user is editing artist 178145, then the payload becomes:
+//
+//   id: 178145
+//
+// This tells Too Lost to update the existing artist instead of
+// creating another artist.
+//
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/artist/submit" &&
+  request.method === "POST"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthenticated."
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  const body =
+    await request
+      .json()
+      .catch(() => ({}));
+
+  const artistName =
+    String(
+      body.artistName || ""
+    ).trim();
+
+  if (!artistName) {
+    return preferencesJSON(
+      {
+        error:
+          "Artist name is required."
+      },
+      400,
+      corsHeaders
+    );
+  }
+
+  const platforms =
+    body.platforms || {};
+
+  const social =
+    body.social || {};
+
+  const metadata =
+    body.metadata || {};
+
+  // -----------------------------------------------------------
+  // FIND EXISTING ARTIST ID
+  // -----------------------------------------------------------
+
+  const artistKVKey =
+    `PREFERENCES_ARTIST_${userId}`;
+
+  let existingArtist =
+    null;
+
+  let existingArtistId =
+    null;
+
+  // First try KV because this is already scoped to userId.
+  if (env.AUDIORY_KV) {
+    const cachedArtist =
+      await env.AUDIORY_KV.get(
+        artistKVKey
+      );
+
+    if (cachedArtist) {
+      try {
+        existingArtist =
+          JSON.parse(
+            cachedArtist
+          );
+      } catch {
+        existingArtist =
+          null;
+      }
+    }
+  }
+
+  if (
+    existingArtist?.id
+  ) {
+    existingArtistId =
+      Number(
+        existingArtist.id
+      );
+  }
+
+  // -----------------------------------------------------------
+  // SECURITY: do NOT look up a missing ID in Too Lost.
+  //
+  // A shared/global Too Lost token could return another Audiory
+  // user's artist. When this user's KV has no ID, this is a NEW
+  // artist and Too Lost must create it.
+  // -----------------------------------------------------------
+
+  let tooLostAccessToken;
 
   try {
-
-    const status =
-      url.searchParams.get(
-        "status"
+    tooLostAccessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
       );
+  } catch (authError) {
+    console.error(
+      "Too Lost artist preferences authentication failed:",
+      authError
+    );
 
-    const scopeType =
-      url.searchParams.get(
-        "scope_type"
-      );
+    return preferencesJSON(
+      {
+        error: "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          "Unable to authenticate with Too Lost.",
+        syncedWithTooLost: false
+      },
+      401,
+      corsHeaders
+    );
+  }
 
-    const conditions = [
-      "ra.user_id = ?"
-    ];
+  // -----------------------------------------------------------
+  // Normalize incoming fields
+  // -----------------------------------------------------------
 
-    const params = [
-      userId
-    ];
+  const tooLostPayload = {
+    artistName:
+      toNullableString(
+        artistName
+      ),
 
+    metadata: {
+      artists:
+        Array.isArray(
+          metadata.artists
+        ) &&
+        metadata.artists.length > 0
+          ? metadata.artists
+          : [
+              {
+                name:
+                  toNullableString(
+                    artistName
+                  ) ||
+                  "Unknown Artist",
 
-    if (status) {
+                role:
+                  "Main Artist"
+              }
+            ],
 
-      if (
-        !isValidRoyaltyAgreementStatus(
-          status
+      credits:
+        Array.isArray(
+          metadata.credits
         )
-      ) {
-        return json({
-          success: false,
-          error:
-            "Invalid status",
-          allowed_statuses:
-            ROYALTY_AGREEMENT_STATUSES
-        }, 400);
-      }
+          ? metadata.credits
+          : [],
 
-      conditions.push(
-        "ra.status = ?"
+      writers:
+        Array.isArray(
+          metadata.writers
+        )
+          ? metadata.writers
+          : []
+    },
+
+    about:
+      toNullableString(
+        body.about
+      ),
+
+    additional: {
+      allmusic:
+        toNullableString(
+          body.additional?.allmusic
+        ),
+
+      ddex:
+        toNullableString(
+          body.additional?.ddex
+        ),
+
+      isni:
+        toNullableString(
+          body.additional?.isni
+        ),
+
+      musicbrainz:
+        toNullableString(
+          body.additional?.musicbrainz
+        ),
+
+      wikipedia:
+        toNullableString(
+          body.additional?.wikipedia
+        )
+    },
+
+    audiomack: {
+      link:
+        toNullableString(
+          body.audiomack?.link
+        ),
+
+      status:
+        toNullableBoolean(
+          body.audiomack?.status
+        )
+    },
+
+    c_line:
+      toNullableString(
+        body.c_line ??
+        body.cLine
+      ),
+
+    collaborators:
+      Array.isArray(
+        body.collaborators
+      )
+        ? body.collaborators
+        : [],
+
+    deliveries: {
+      beatport:
+        toNullableBoolean(
+          body.deliveries?.beatport
+        ),
+
+      delivery_beatport_link:
+        toNullableString(
+          body.deliveries
+            ?.delivery_beatport_link
+        ),
+
+      delivery_even:
+        toNullableBoolean(
+          body.deliveries?.delivery_even
+        ),
+
+      delivery_facebook:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_facebook
+        ),
+
+      delivery_hook:
+        toNullableBoolean(
+          body.deliveries?.delivery_hook
+        ),
+
+      delivery_lyricfind:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_lyricfind
+        ),
+
+      delivery_soundcloud:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_soundcloud
+        ),
+
+      delivery_soundexchange:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_soundexchange
+        ),
+
+      delivery_tracklib:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_tracklib
+        ),
+
+      delivery_youtube:
+        toNullableBoolean(
+          body.deliveries
+            ?.delivery_youtube
+        )
+    },
+
+    // ---------------------------------------------------------
+    // CRITICAL:
+    //
+    // Existing artist => existing ID
+    // New artist      => null
+    // ---------------------------------------------------------
+
+    id:
+      existingArtistId ||
+      null,
+
+    img:
+      toNullableString(
+        body.img ??
+        body.profileImg
+      ),
+
+    label:
+      toNullableString(
+        body.label
+      ),
+
+    language:
+      toNullableString(
+        body.language
+      ),
+
+    p_line:
+      toNullableString(
+        body.p_line ??
+        body.pLine
+      ),
+
+    platforms: {
+      appleMusic:
+        toNullableString(
+          body.platforms
+            ?.appleMusic ??
+          body.platforms
+            ?.apple_music
+        ),
+
+      soundcloud:
+        toNullableString(
+          body.platforms
+            ?.soundcloud
+        ),
+
+      spotify:
+        toNullableString(
+          body.platforms
+            ?.spotify
+        ),
+
+      vevo:
+        toNullableString(
+          body.platforms
+            ?.vevo
+        ),
+
+      website:
+        toNullableString(
+          body.platforms
+            ?.website
+        ),
+
+      youtube:
+        toNullableString(
+          body.platforms
+            ?.youtube
+        )
+    },
+
+    primaryGenre:
+      toNullableString(
+        body.primaryGenre
+      ),
+
+    releaseTime:
+      toNullableString(
+        body.releaseTime
+      ),
+
+    removeImg:
+      body.removeImg === true,
+
+    secondaryGenre:
+      toNullableString(
+        body.secondaryGenre
+      ),
+
+    social: {
+      facebook:
+        toNullableString(
+          body.social?.facebook
+        ),
+
+      instagram:
+        toNullableString(
+          body.social?.instagram
+        ),
+
+      twitter:
+        toNullableString(
+          body.social?.twitter
+        ),
+
+      youtube:
+        toNullableString(
+          body.social?.youtube
+        )
+    },
+
+    stores:
+      Array.isArray(
+        body.stores
+      )
+        ? body.stores
+        : [],
+
+    territories:
+      Array.isArray(
+        body.territories
+      )
+        ? body.territories
+        : [],
+
+    timeZone:
+      toNullableString(
+        body.timeZone ??
+        body.timezone ??
+        body.releaseTimezone
+      ) ||
+      "Africa/Nairobi"
+  };
+
+  console.log(
+    "EXISTING TOO LOST ARTIST ID:",
+    existingArtistId
+  );
+
+  console.log(
+    "FINAL TOO LOST ARTIST PAYLOAD:",
+    JSON.stringify(
+      tooLostPayload,
+      null,
+      2
+    )
+  );
+
+  // -----------------------------------------------------------
+  // Submit
+  // -----------------------------------------------------------
+
+  let tooLostResponse;
+
+  let tooLostJson =
+    {};
+
+  try {
+    tooLostResponse =
+      await fetchTooLostAPI(
+        "/preferences/artist/submit",
+        "POST",
+        tooLostPayload,
+        tooLostAccessToken,
+        env
       );
 
-      params.push(status);
+    const rawTooLostBody =
+      await tooLostResponse.text();
+
+    try {
+      tooLostJson =
+        rawTooLostBody
+          ? JSON.parse(
+              rawTooLostBody
+            )
+          : {};
+    } catch {
+      tooLostJson = {
+        raw:
+          rawTooLostBody
+      };
     }
 
-
-    if (scopeType) {
-
-      if (
-        !isValidRoyaltyScopeType(
-          scopeType
-        )
-      ) {
-        return json({
-          success: false,
-          error:
-            "Invalid scope_type",
-          allowed_scope_types:
-            ROYALTY_SCOPE_TYPES
-        }, 400);
+    console.log(
+      "TOO LOST ARTIST SUBMIT:",
+      {
+        status:
+          tooLostResponse.status,
+        response:
+          tooLostJson
       }
+    );
 
-      conditions.push(
-        "ra.scope_type = ?"
+    if (
+      !tooLostResponse.ok
+    ) {
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost rejected the artist preferences.",
+
+          tooLostStatus:
+            tooLostResponse.status,
+
+          tooLostResponse:
+            tooLostJson,
+
+          artistIdSent:
+            tooLostPayload.id
+        },
+        tooLostResponse.status,
+        corsHeaders
       );
-
-      params.push(scopeType);
     }
 
+  } catch (error) {
+    console.error(
+      "Too Lost artist preferences request failed:",
+      error
+    );
 
-    const result =
-      await env.DB.prepare(`
-        SELECT
-          ra.*,
+    return preferencesJSON(
+      {
+        error:
+          "Could not connect to Too Lost.",
 
-          r.title AS release_title,
-          r.release_type,
+        details:
+          error?.message ||
+          String(error),
 
-          t.title AS track_title,
-          t.isrc,
+        syncedWithTooLost:
+          false
+      },
+      502,
+      corsHeaders
+    );
+  }
 
-          a.name AS artist_name,
+  // -----------------------------------------------------------
+  // Determine the ID returned by Too Lost.
+  //
+  // This is important for a newly-created artist.
+  // -----------------------------------------------------------
 
-          (
-            SELECT
-              COALESCE(
-                SUM(rs.split_percentage),
-                0
-              )
-            FROM royalty_splits rs
-            WHERE rs.agreement_id = ra.id
-          ) AS split_total
+  const returnedArtist =
+    tooLostJson?.data?.artist ||
+    tooLostJson?.artist ||
+    (
+      tooLostJson?.data &&
+      typeof tooLostJson.data ===
+        "object" &&
+      !Array.isArray(
+        tooLostJson.data
+      )
+        ? tooLostJson.data
+        : null
+    );
 
-        FROM royalty_agreements ra
+  const savedArtistId =
+    Number(
+      returnedArtist?.id ||
+      tooLostJson?.data?.id ||
+      existingArtistId ||
+      0
+    ) || null;
 
-        LEFT JOIN releases r
-          ON r.id = ra.release_id
+  // -----------------------------------------------------------
+  // Save only after Too Lost accepts.
+  // -----------------------------------------------------------
 
-        LEFT JOIN tracks t
-          ON t.id = ra.track_id
+  const savedArtist = {
+    ...tooLostPayload,
 
-        LEFT JOIN artists a
-          ON a.id = ra.artist_id
+    id:
+      savedArtistId,
 
-        WHERE ${conditions.join(" AND ")}
+    cLine:
+      tooLostPayload.c_line,
 
-        ORDER BY
-          ra.created_at DESC
-      `)
-        .bind(...params)
-        .all();
+    pLine:
+      tooLostPayload.p_line,
+
+    profileImg:
+      tooLostPayload.img,
+
+    savedAt:
+      new Date().toISOString()
+  };
+
+  if (
+    env.AUDIORY_KV
+  ) {
+    await env.AUDIORY_KV.put(
+      artistKVKey,
+      JSON.stringify(
+        savedArtist
+      )
+    );
+  }
+
+  return preferencesJSON(
+    {
+      success:
+        true,
+
+      message:
+        "Artist preferences saved and synchronized with Too Lost.",
+
+      data: {
+        artist:
+          savedArtist
+      },
+
+      syncedWithTooLost:
+        true
+    },
+    200,
+    corsHeaders
+  );
+}
 
 
-    const agreements =
-      (result.results || [])
-        .map(agreement => {
+// =============================================================
+// =============================================================
+// GET LABEL PREFERENCES
+// =============================================================
+//
+// User-visible label data is read ONLY from the user's KV namespace
+// key. Never proxy a shared Too Lost label response into another user.
+// =============================================================
 
-          const total =
-            Number(
-              Number(
-                agreement.split_total ||
-                0
-              ).toFixed(6)
+if (
+  url.pathname ===
+    "/api/preferences/label" &&
+  request.method === "GET"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      { error: "Unauthorized" },
+      401,
+      corsHeaders
+    );
+  }
+
+  const labelKey =
+    `PREFERENCES_LABEL_${userId}`;
+
+  let labelData = null;
+
+  if (env.AUDIORY_KV) {
+    const rawData =
+      await env.AUDIORY_KV.get(labelKey);
+
+    if (rawData) {
+      try {
+        labelData = JSON.parse(rawData);
+      } catch {
+        labelData = null;
+      }
+    }
+  }
+
+  if (!labelData) {
+    labelData = {
+      label: {
+        id: null,
+        name: "",
+        about: "",
+        profileImg: null,
+        social: {
+          facebook: "",
+          instagram: "",
+          twitter: "",
+          youtube: ""
+        },
+        platforms: { website: "" }
+      },
+      artists: []
+    };
+  }
+
+  return preferencesJSON(
+    {
+      data: labelData,
+      message: "Label preferences retrieved.",
+      syncedWithTooLost: Boolean(labelData?.label?.id)
+    },
+    200,
+    corsHeaders
+  );
+}
+
+
+// POST LABEL PREFERENCES
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/label/submit" &&
+  request.method === "POST"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthorized"
+      },
+      401,
+      corsHeaders
+    );
+  }
+
+  try {
+    const requestText =
+      await request.text();
+
+    let body =
+      {};
+
+    try {
+      body =
+        JSON.parse(
+          requestText ||
+          "{}"
+        );
+    } catch (jsonError) {
+      return preferencesJSON(
+        {
+          error:
+            "Invalid JSON request body.",
+          details:
+            jsonError?.message ||
+            String(jsonError)
+        },
+        400,
+        corsHeaders
+      );
+    }
+
+    const name =
+      toNullableString(
+        body.name
+      );
+
+    if (!name) {
+      return preferencesJSON(
+        {
+          error:
+            "Label name is required."
+        },
+        400,
+        corsHeaders
+      );
+    }
+
+    // ---------------------------------------------------------
+    // FIND EXISTING LABEL ID
+    // ---------------------------------------------------------
+
+    const labelKVKey =
+      `PREFERENCES_LABEL_${userId}`;
+
+    let existingLabelId =
+      null;
+
+    // KV first.
+    if (
+      env.AUDIORY_KV
+    ) {
+      const cached =
+        await env.AUDIORY_KV.get(
+          labelKVKey
+        );
+
+      if (cached) {
+        try {
+          const parsed =
+            JSON.parse(
+              cached
             );
 
-          return {
-            ...agreement,
+          existingLabelId =
+            Number(
+              parsed?.label?.id ||
+              parsed?.id ||
+              0
+            ) || null;
 
-            version:
-              Number(
-                agreement.version || 1
-              ),
-
-            split_total:
-              total,
-
-            remaining_percentage:
-              Number(
-                (100 - total)
-                  .toFixed(6)
-              ),
-
-            complete:
-              total === 100
-          };
-        });
-
-
-    return json({
-      success: true,
-      agreements
-    });
-
-  } catch (error) {
-
-    console.error(
-      "List royalty agreements error:",
-      error
-    );
-
-    return json({
-      success: false,
-      error:
-        error?.message ||
-        "Failed to load royalty agreements"
-    }, 500);
-  }
-}
-
-// ============================================================
-// POST /v1/royalties/calculate
-// ============================================================
-
-if (
-  request.method === "POST" &&
-  url.pathname === "/v1/royalties/calculate"
-) {
-  try {
-    const auth = await requireRoyaltyAuth(request, env);
-    const userId = auth.userId;
-
-    const body = await request.json();
-
-    const eventId = body.event_id;
-
-    if (!eventId) {
-      return json({
-        success: false,
-        error: "event_id is required"
-      }, 400);
+        } catch {
+          existingLabelId =
+            null;
+        }
+      }
     }
 
-    // --------------------------------------------------------
-    // Load sales event
-    // --------------------------------------------------------
+    let accessToken;
 
-    const salesEvent = await getSalesEventForRoyalty(
-      env,
-      eventId,
-      userId
-    );
-
-    if (!salesEvent) {
-      return json({
-        success: false,
-        error: "Sales event not found"
-      }, 404);
-    }
-
-    // --------------------------------------------------------
-    // Check whether this sales event was already calculated
-    // --------------------------------------------------------
-
-    const existingCalculation = await env.DB.prepare(`
-      SELECT *
-      FROM royalty_calculations
-      WHERE sales_event_id = ?
-        AND user_id = ?
-      ORDER BY created_at DESC
-      LIMIT 1
-    `).bind(
-      eventId,
-      userId
-    ).first();
-
-    if (existingCalculation) {
-      const existingLedger = await env.DB.prepare(`
-        SELECT *
-        FROM royalty_ledger
-        WHERE calculation_id = ?
-        ORDER BY created_at ASC
-      `).bind(
-        existingCalculation.id
-      ).all();
-
-      return json({
-        success: true,
-        duplicate: true,
-        message: "Royalty calculation already exists",
-        calculation: existingCalculation,
-        ledger: existingLedger.results || []
-      });
-    }
-
-    // --------------------------------------------------------
-    // Find applicable agreement
-    // --------------------------------------------------------
-
-    const agreement = await getApplicableRoyaltyAgreement(
-      env,
-      userId,
-      salesEvent
-    );
-
-    if (!agreement) {
-      return json({
-        success: false,
-        error: "No active royalty agreement found",
-        sales_event_id: eventId,
-        track_id: salesEvent.track_id,
-        release_id: salesEvent.release_id,
-        artist_id: salesEvent.artist_id
-      }, 422);
-    }
-
-    // --------------------------------------------------------
-    // Load splits
-    // --------------------------------------------------------
-
-    const splits = await getRoyaltySplitsForCalculation(
-      env,
-      agreement.id
-    );
-
-    if (!splits.length) {
-      return json({
-        success: false,
-        error: "Royalty agreement has no splits",
-        agreement_id: agreement.id
-      }, 422);
-    }
-
-    // --------------------------------------------------------
-    // Validate split total
-    // --------------------------------------------------------
-
-    const splitTotal = roundMoney(
-      splits.reduce(
-        (total, split) =>
-          total + Number(split.split_percentage || 0),
-        0
-      )
-    );
-
-    if (splitTotal !== 100) {
-      return json({
-        success: false,
-        error: "Royalty agreement splits must total exactly 100%",
-        agreement_id: agreement.id,
-        total_percentage: splitTotal,
-        remaining_percentage: roundMoney(100 - splitTotal)
-      }, 422);
-    }
-
-    // --------------------------------------------------------
-    // Determine royalty base
-    // --------------------------------------------------------
-
-    const grossRevenue = Number(
-      salesEvent.gross_revenue || 0
-    );
-
-    const netRevenue = Number(
-      salesEvent.net_revenue || 0
-    );
-
-    const royaltyBase = netRevenue;
-
-    if (royaltyBase < 0) {
-      return json({
-        success: false,
-        error: "Royalty base cannot be negative"
-      }, 422);
-    }
-
-    // --------------------------------------------------------
-    // Create calculation
-    // --------------------------------------------------------
-
-    const calculationId = generateRoyaltyId(
-      "royalty_calculation"
-    );
-
-    await env.DB.prepare(`
-      INSERT INTO royalty_calculations (
-        id,
-        user_id,
-        agreement_id,
-        sales_event_id,
-        release_id,
-        track_id,
-        gross_revenue,
-        net_revenue,
-        royalty_base,
-        currency,
-        calculation_date,
-        status,
-        metadata_json
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      calculationId,
-      userId,
-      agreement.id,
-      eventId,
-      salesEvent.release_id || null,
-      salesEvent.track_id || null,
-      grossRevenue,
-      netRevenue,
-      royaltyBase,
-      salesEvent.currency || "USD",
-      salesEvent.event_date,
-      "calculated",
-      JSON.stringify({
-        agreement_version: agreement.version,
-        agreement_name: agreement.name,
-        split_total: splitTotal,
-        calculation_method: "net_revenue"
-      })
-    ).run();
-
-    // --------------------------------------------------------
-    // Create ledger entries
-    // --------------------------------------------------------
-
-    const ledgerEntries = [];
-
-    for (const split of splits) {
-      const percentage = Number(
-        split.split_percentage || 0
+    try {
+      accessToken =
+        await getUserTooLostAccessToken(
+          env,
+          userId
+        );
+    } catch (authError) {
+      console.error(
+        "TOO LOST LABEL AUTHENTICATION ERROR:",
+        authError
       );
 
-      const royaltyAmount = roundMoney(
-        royaltyBase * (percentage / 100)
+      return preferencesJSON(
+        {
+          error: "Too Lost Authentication Failed",
+          details:
+            authError?.message ||
+            "Unable to authenticate with Too Lost."
+        },
+        401,
+        corsHeaders
       );
-
-      const recipientType =
-        getRoyaltyRecipientType(split);
-
-      const recipientId =
-        getRoyaltyRecipientId(split);
-
-      const recipientName =
-        getRoyaltyRecipientName(split);
-
-      const ledgerId = generateRoyaltyId(
-        "royalty_ledger"
-      );
-
-      await env.DB.prepare(`
-        INSERT INTO royalty_ledger (
-          id,
-          user_id,
-          calculation_id,
-          agreement_id,
-          sales_event_id,
-          release_id,
-          track_id,
-          recipient_type,
-          recipient_id,
-          recipient_name,
-          recipient_role,
-          split_percentage,
-          royalty_base,
-          royalty_amount,
-          currency,
-          entry_type,
-          status,
-          description,
-          metadata_json
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        ledgerId,
-        userId,
-        calculationId,
-        agreement.id,
-        eventId,
-        salesEvent.release_id || null,
-        salesEvent.track_id || null,
-        recipientType,
-        recipientId,
-        recipientName,
-        split.role,
-        percentage,
-        royaltyBase,
-        royaltyAmount,
-        salesEvent.currency || "USD",
-        "royalty",
-        "unpaid",
-        `Royalty for ${salesEvent.track_title || salesEvent.release_title || "sales event"}`,
-        JSON.stringify({
-          agreement_version: agreement.version,
-          calculation_method: "net_revenue"
-        })
-      ).run();
-
-      ledgerEntries.push({
-        id: ledgerId,
-        recipient_type: recipientType,
-        recipient_id: recipientId,
-        recipient_name: recipientName,
-        recipient_role: split.role,
-        split_percentage: percentage,
-        royalty_base: royaltyBase,
-        royalty_amount: royaltyAmount,
-        currency: salesEvent.currency || "USD",
-        status: "unpaid"
-      });
     }
 
-    // --------------------------------------------------------
-    // Return calculation
-    // --------------------------------------------------------
+    // ---------------------------------------------------------
+    // SECURITY: never discover a missing label ID from the shared
+    // Too Lost account. Missing KV ID means this user is creating
+    // a new label. Existing IDs are only taken from this user's KV.
+    // ---------------------------------------------------------
 
-    const totalCalculated = roundMoney(
-      ledgerEntries.reduce(
-        (total, entry) =>
-          total + Number(entry.royalty_amount || 0),
-        0
-      )
-    );
+    // ---------------------------------------------------------
+    // CANONICAL LABEL PAYLOAD
+    // ---------------------------------------------------------
 
-    return json({
-      success: true,
-      message: "Royalty calculated successfully",
+    const tooLostPayload = {
+      name,
 
-      calculation: {
-        id: calculationId,
-        sales_event_id: eventId,
-        agreement_id: agreement.id,
-        agreement_name: agreement.name,
-        agreement_version: agreement.version,
+      about:
+        toNullableString(
+          body.about
+        )?.slice(
+          0,
+          500
+        ) || null,
 
-        gross_revenue: grossRevenue,
-        net_revenue: netRevenue,
-        royalty_base: royaltyBase,
+      img:
+        toNullableString(
+          body.img ??
+          body.profileImg
+        ),
 
-        currency: salesEvent.currency || "USD",
-
-        calculation_date: salesEvent.event_date,
-
-        total_calculated: totalCalculated,
-
-        status: "calculated"
+      platforms: {
+        website:
+          toNullableString(
+            body.platforms
+              ?.website
+          )
       },
 
-      ledger: ledgerEntries
-    }, 201);
+      removeImg:
+        toNullableBoolean(
+          body.removeImg
+        ) === true,
+
+      social: {
+        facebook:
+          toNullableString(
+            body.social
+              ?.facebook
+          ),
+
+        instagram:
+          toNullableString(
+            body.social
+              ?.instagram
+          ),
+
+        twitter:
+          toNullableString(
+            body.social
+              ?.twitter
+          ),
+
+        youtube:
+          toNullableString(
+            body.social
+              ?.youtube
+          )
+      }
+    };
+
+    // ---------------------------------------------------------
+    // IMPORTANT:
+    //
+    // If Too Lost's label endpoint supports an ID for updating,
+    // preserve it rather than creating another label.
+    //
+    // Do NOT send id:null.
+    //
+    // Only add it when an existing ID is known.
+    // ---------------------------------------------------------
+
+    if (
+      existingLabelId
+    ) {
+      tooLostPayload.id =
+        existingLabelId;
+    }
+
+    console.log(
+      "AUDIORY -> TOO LOST LABEL PAYLOAD:",
+      JSON.stringify(
+        tooLostPayload,
+        null,
+        2
+      )
+    );
+
+    // ---------------------------------------------------------
+    // SEND TO TOO LOST
+    // ---------------------------------------------------------
+
+    let upstreamRes;
+
+    try {
+      upstreamRes =
+        await fetchTooLostAPI(
+          "/preferences/label/submit",
+          "POST",
+          tooLostPayload,
+          accessToken,
+          env
+        );
+
+    } catch (networkError) {
+      console.error(
+        "TOO LOST LABEL NETWORK ERROR:",
+        networkError
+      );
+
+      return preferencesJSON(
+        {
+          error:
+            "Unable to connect to Too Lost.",
+          details:
+            networkError?.message ||
+            String(networkError)
+        },
+        502,
+        corsHeaders
+      );
+    }
+
+    const upstreamText =
+      await upstreamRes.text();
+
+    let upstreamData =
+      {};
+
+    try {
+      upstreamData =
+        JSON.parse(
+          upstreamText ||
+          "{}"
+        );
+    } catch {
+      upstreamData = {
+        raw:
+          upstreamText
+      };
+    }
+
+    console.log(
+      "TOO LOST LABEL RESPONSE:",
+      JSON.stringify(
+        {
+          status:
+            upstreamRes.status,
+          ok:
+            upstreamRes.ok,
+          response:
+            upstreamData
+        },
+        null,
+        2
+      )
+    );
+
+    if (
+      !upstreamRes.ok
+    ) {
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost rejected the label preferences.",
+
+          tooLostStatus:
+            upstreamRes.status,
+
+          tooLostResponse:
+            upstreamData,
+
+          labelIdSent:
+            existingLabelId
+        },
+        upstreamRes.status,
+        corsHeaders
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Determine saved label ID.
+    // ---------------------------------------------------------
+
+    const returnedLabel =
+      upstreamData?.data?.label ||
+      upstreamData?.label ||
+      null;
+
+    const savedLabelId =
+      Number(
+        returnedLabel?.id ||
+        upstreamData?.data?.id ||
+        existingLabelId ||
+        0
+      ) || null;
+
+    // ---------------------------------------------------------
+    // Preserve existing artists.
+    // ---------------------------------------------------------
+
+    let existingArtists =
+      [];
+
+    if (
+      env.AUDIORY_KV
+    ) {
+      const cached =
+        await env.AUDIORY_KV.get(
+          labelKVKey
+        );
+
+      if (cached) {
+        try {
+          const parsed =
+            JSON.parse(
+              cached
+            );
+
+          if (
+            Array.isArray(
+              parsed?.artists
+            )
+          ) {
+            existingArtists =
+              parsed.artists;
+          }
+
+        } catch {
+          existingArtists =
+            [];
+        }
+      }
+    }
+
+    // SECURITY: Too Lost may return every artist attached to the
+    // shared label account. Never copy that list into this user's KV.
+    // Only retain artists that this Audiory user already owns locally.
+    // The user's primary artist ID is the ownership boundary.
+    let ownedArtistIds = new Set();
+
+    if (env.AUDIORY_KV) {
+      const artistRaw = await env.AUDIORY_KV.get(
+        `PREFERENCES_ARTIST_${userId}`
+      );
+
+      if (artistRaw) {
+        try {
+          const artistData = JSON.parse(artistRaw);
+          const artistId = Number(artistData?.id || 0);
+          if (Number.isInteger(artistId) && artistId > 0) {
+            ownedArtistIds.add(artistId);
+          }
+        } catch {}
+      }
+    }
+
+    const responseArtists =
+      Array.isArray(upstreamData?.data?.artists)
+        ? upstreamData.data.artists
+        : [];
+
+    const newlyReturnedOwnedArtists =
+      responseArtists.filter(
+        artist =>
+          ownedArtistIds.has(Number(artist?.id))
+      );
+
+    const safeArtists =
+      [...existingArtists, ...newlyReturnedOwnedArtists]
+        .filter(Boolean)
+        .filter((artist, index, array) => {
+          const id = Number(artist?.id || 0);
+          if (!id || !ownedArtistIds.has(id)) return false;
+          return array.findIndex(
+            item => Number(item?.id || 0) === id
+          ) === index;
+        });
+
+    const savedData = {
+      label: {
+        id:
+          savedLabelId,
+
+        name,
+
+        about:
+          tooLostPayload.about,
+
+        profileImg:
+          tooLostPayload.img,
+
+        platforms:
+          tooLostPayload.platforms,
+
+        social:
+          tooLostPayload.social
+      },
+
+      artists:
+        safeArtists
+    };
+
+    // ---------------------------------------------------------
+    // USER-SPECIFIC KV ONLY
+    // ---------------------------------------------------------
+
+    if (
+      env.AUDIORY_KV
+    ) {
+      await env.AUDIORY_KV.put(
+        labelKVKey,
+        JSON.stringify(
+          savedData
+        )
+      );
+    }
+
+    return preferencesJSON(
+      {
+        message:
+          upstreamData?.message ||
+          "Label preferences updated.",
+
+        data:
+          savedData,
+
+        syncedWithTooLost:
+          true
+      },
+      200,
+      corsHeaders
+    );
 
   } catch (error) {
     console.error(
-      "Royalty calculation error:",
+      "AUDIORY LABEL SAVE ERROR:",
       error
     );
 
-    return json({
-      success: false,
-      error: "Failed to calculate royalty",
-      details: error.message
-    }, 500);
+    return preferencesJSON(
+      {
+        error:
+          "Audiory could not save label preferences.",
+        details:
+          error?.message ||
+          String(error)
+      },
+      500,
+      corsHeaders
+    );
   }
 }
 
-    // -------------------------
-    // 404
-    // -------------------------
 
-    return json({
-      success: false,
-      error: "Endpoint not found"
-    }, 404);
+// =============================================================
+// POST /api/preferences/label/artist/remove
+// =============================================================
+//
+// Removes an artist from label management.
+//
+// =============================================================
+
+if (
+  url.pathname ===
+    "/api/preferences/label/artist/remove" &&
+  request.method === "POST"
+) {
+  if (!userId) {
+    return preferencesJSON(
+      {
+        error:
+          "Unauthorized"
+      },
+      401,
+      corsHeaders
+    );
   }
+
+  let body;
+
+  try {
+    body =
+      await request.json();
+  } catch {
+    return preferencesJSON(
+      {
+        error:
+          "Invalid JSON request body."
+      },
+      400,
+      corsHeaders
+    );
+  }
+
+  const artistId =
+    Number(
+      body?.artistId
+    );
+
+  if (
+    !Number.isInteger(
+      artistId
+    ) ||
+    artistId <= 0
+  ) {
+    return preferencesJSON(
+      {
+        error:
+          "A valid artistId is required."
+      },
+      400,
+      corsHeaders
+    );
+  }
+
+  // SECURITY: never allow a user to remove an artist merely by
+  // guessing a Too Lost artist ID. The ID must exist in this user's
+  // locally stored label artists or primary artist record.
+  let ownsArtist = false;
+
+  if (env.AUDIORY_KV) {
+    const labelRaw = await env.AUDIORY_KV.get(
+      `PREFERENCES_LABEL_${userId}`
+    );
+
+    if (labelRaw) {
+      try {
+        const labelData = JSON.parse(labelRaw);
+        ownsArtist =
+          Array.isArray(labelData?.artists) &&
+          labelData.artists.some(
+            artist => Number(artist?.id) === artistId
+          );
+      } catch {}
+    }
+
+    if (!ownsArtist) {
+      const artistRaw = await env.AUDIORY_KV.get(
+        `PREFERENCES_ARTIST_${userId}`
+      );
+
+      if (artistRaw) {
+        try {
+          const artistData = JSON.parse(artistRaw);
+          ownsArtist = Number(artistData?.id) === artistId;
+        } catch {}
+      }
+    }
+  }
+
+  if (!ownsArtist) {
+    return preferencesJSON(
+      { error: "Artist not found for this user." },
+      404,
+      corsHeaders
+    );
+  }
+
+  try {
+    const accessToken =
+      await getUserTooLostAccessToken(
+        env,
+        userId
+      );
+
+    const upstream =
+      await fetchTooLostAPI(
+        "/preferences/label/artist/remove",
+        "POST",
+        {
+          artistId
+        },
+        accessToken,
+        env
+      );
+
+    const upstreamText =
+      await upstream.text();
+
+    let upstreamBody =
+      {};
+
+    try {
+      upstreamBody =
+        upstreamText
+          ? JSON.parse(
+              upstreamText
+            )
+          : {};
+    } catch {
+      upstreamBody = {
+        raw:
+          upstreamText
+      };
+    }
+
+    console.log(
+      "TOO LOST LABEL ARTIST REMOVE:",
+      {
+        artistId,
+        status:
+          upstream.status,
+        response:
+          upstreamBody
+      }
+    );
+
+    if (
+      !upstream.ok
+    ) {
+      return preferencesJSON(
+        {
+          error:
+            "Too Lost rejected the artist removal.",
+
+          tooLostStatus:
+            upstream.status,
+
+          tooLostResponse:
+            upstreamBody
+        },
+        upstream.status,
+        corsHeaders
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Update USER-SPECIFIC KV.
+    // ---------------------------------------------------------
+
+    if (
+      env.AUDIORY_KV
+    ) {
+      const labelKey =
+        `PREFERENCES_LABEL_${userId}`;
+
+      const cached =
+        await env.AUDIORY_KV.get(
+          labelKey
+        );
+
+      if (cached) {
+        try {
+          const labelData =
+            JSON.parse(
+              cached
+            );
+
+          if (
+            Array.isArray(
+              labelData?.artists
+            )
+          ) {
+            labelData.artists =
+              labelData.artists.filter(
+                (artist) =>
+                  Number(
+                    artist?.id
+                  ) !== artistId
+              );
+
+            await env.AUDIORY_KV.put(
+              labelKey,
+              JSON.stringify(
+                labelData
+              )
+            );
+          }
+
+        } catch (kvError) {
+          console.error(
+            "Could not update label KV after artist removal:",
+            kvError
+          );
+        }
+      }
+    }
+
+    return preferencesJSON(
+      {
+        success:
+          true,
+
+        message:
+          upstreamBody?.message ||
+          "Artist removed from label.",
+
+        data:
+          upstreamBody?.data ||
+          null
+      },
+      200,
+      corsHeaders
+    );
+
+  } catch (error) {
+    console.error(
+      "Remove label artist error:",
+      error
+    );
+
+    return preferencesJSON(
+      {
+        error:
+          "Failed to remove artist.",
+        details:
+          error?.message ||
+          String(error)
+      },
+      502,
+      corsHeaders
+    );
+  }
+}
+
+
+  return null;
+}
+
+ 
+
+const isReleasePath = url.pathname === "/api/releases" ||
+                url.pathname.startsWith("/api/releases/");
+
+
+// =============================================================
+// TOO LOST CONNECTION
+// =============================================================
+
+const baseUrl = (
+  env.TOO_LOST_BASE_URL ||
+  "https://api-sandbox.toolost.com/v1"
+).replace(/\/$/, "");
+
+let accessToken;
+
+try {
+  accessToken = await getAccessToken(env);
+} catch (authError) {
+  console.error(
+    "Too Lost Authentication Error:",
+    authError
+  );
+
+  return new Response(
+    JSON.stringify({
+      error: "Too Lost Authentication Failed",
+      details:
+        authError?.message ||
+        "Unable to authenticate with Too Lost."
+    }),
+    {
+      status: 401,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+
+// =============================================================
+// TOO LOST PLATFORM LOOKUP
+// =============================================================
+
+if (
+  request.method === "GET" &&
+  url.pathname === "/api/toolost/platforms"
+) {
+  try {
+
+    const response = await fetch(
+      `${baseUrl}/lookup/platforms`,
+      {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    const responseText =
+      await response.text();
+
+    console.log(
+      "TOO LOST PLATFORM RAW RESPONSE:",
+      {
+        status: response.status,
+        body: responseText
+      }
+    );
+
+    let data;
+
+    try {
+      data = JSON.parse(
+        responseText || "{}"
+      );
+    } catch (error) {
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message:
+            "Too Lost returned an invalid platform response.",
+          raw: responseText
+        }),
+        {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            "Content-Type":
+              "application/json"
+          }
+        }
+      );
+    }
+
+    if (!response.ok) {
+
+      console.error(
+        "TOO LOST PLATFORM LOOKUP FAILED:",
+        data
+      );
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message:
+            data?.message ||
+            data?.error ||
+            `Too Lost platform lookup failed (${response.status})`,
+          tooLostResponse: data
+        }),
+        {
+          status: response.status,
+          headers: {
+            ...corsHeaders,
+            "Content-Type":
+              "application/json"
+          }
+        }
+      );
+    }
+
+    let platforms = [];
+
+    if (
+      Array.isArray(
+        data?.data?.platforms
+      )
+    ) {
+      platforms =
+        data.data.platforms;
+
+    } else if (
+      Array.isArray(
+        data?.platforms
+      )
+    ) {
+      platforms =
+        data.platforms;
+
+    } else if (
+      Array.isArray(
+        data?.data
+      )
+    ) {
+      platforms =
+        data.data;
+
+    } else if (
+      Array.isArray(data)
+    ) {
+      platforms = data;
+    }
+
+    platforms = [
+      ...new Set(
+        platforms
+          .map(platform =>
+            String(
+              platform || ""
+            ).trim()
+          )
+          .filter(Boolean)
+      )
+    ];
+
+    console.log(
+      "TOO LOST PLATFORM NORMALIZATION:",
+      {
+        count:
+          platforms.length,
+        platforms
+      }
+    );
+
+    if (!platforms.length) {
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message:
+            "Too Lost returned no available platforms.",
+          tooLostResponse: data
+        }),
+        {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            "Content-Type":
+              "application/json"
+          }
+        }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: {
+          platforms
+        }
+      }),
+      {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type":
+            "application/json"
+        }
+      }
+    );
+
+  } catch (error) {
+
+    console.error(
+      "TOO LOST PLATFORM LOOKUP ERROR:",
+      error
+    );
+
+    return new Response(
+      JSON.stringify({
+        success: false,
+        message:
+          error?.message ||
+          "Unable to retrieve Too Lost platforms."
+      }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type":
+            "application/json"
+        }
+      }
+    );
+  }
+}
+
+// =============================================================
+// TOO LOST GENRE LOOKUP
+//
+// Audiory
+//   GET /api/toolost/genres
+//
+// Too Lost
+//   GET /v1/lookup/genres
+//
+// Too Lost returns:
+//
+// {
+//   "data": [
+//     "Alternative",
+//     "World/Afro-Beat",
+//     ...
+//   ]
+// }
+// =============================================================
+
+if (
+  request.method === "GET" &&
+  url.pathname === "/api/toolost/genres"
+) {
+  try {
+
+    const response = await fetch(
+      `${baseUrl}/lookup/genres`,
+      {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    const responseText =
+      await response.text();
+
+    console.log(
+      "TOO LOST GENRE RAW RESPONSE:",
+      {
+        status: response.status,
+        body: responseText
+      }
+    );
+
+    let data;
+
+    try {
+      data = JSON.parse(
+        responseText || "{}"
+      );
+    } catch (error) {
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message:
+            "Too Lost returned an invalid genre response.",
+          raw: responseText
+        }),
+        {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            "Content-Type":
+              "application/json"
+          }
+        }
+      );
+    }
+
+    if (!response.ok) {
+
+      console.error(
+        "TOO LOST GENRE LOOKUP FAILED:",
+        data
+      );
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message:
+            data?.message ||
+            data?.error ||
+            `Too Lost genre lookup failed (${response.status})`,
+          tooLostResponse: data
+        }),
+        {
+          status: response.status,
+          headers: {
+            ...corsHeaders,
+            "Content-Type":
+              "application/json"
+          }
+        }
+      );
+    }
+
+    let genres = [];
+
+    if (Array.isArray(data?.data)) {
+
+      genres =
+        data.data;
+
+    } else if (
+      Array.isArray(data?.data?.genres)
+    ) {
+
+      genres =
+        data.data.genres;
+
+    } else if (
+      Array.isArray(data?.genres)
+    ) {
+
+      genres =
+        data.genres;
+
+    } else if (Array.isArray(data)) {
+
+      genres =
+        data;
+    }
+
+    genres = [
+      ...new Set(
+        genres
+          .map(genre =>
+            String(
+              genre || ""
+            ).trim()
+          )
+          .filter(Boolean)
+      )
+    ];
+
+    console.log(
+      "TOO LOST GENRE NORMALIZATION:",
+      {
+        count: genres.length,
+        genres
+      }
+    );
+
+    if (!genres.length) {
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message:
+            "Too Lost returned no available genres.",
+          tooLostResponse: data
+        }),
+        {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            "Content-Type":
+              "application/json"
+          }
+        }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: {
+          genres
+        }
+      }),
+      {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type":
+            "application/json"
+        }
+      }
+    );
+
+  } catch (error) {
+
+    console.error(
+      "TOO LOST GENRE LOOKUP ERROR:",
+      error
+    );
+
+    return new Response(
+      JSON.stringify({
+        success: false,
+        message:
+          error?.message ||
+          "Unable to retrieve Too Lost genres."
+      }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type":
+            "application/json"
+        }
+      }
+    );
+  }
+}
+
+if (isReleasePath) {
+
+  if (!userId) {
+    return new Response(
+      JSON.stringify({
+        error: "Unauthorized: Invalid or missing authentication token."
+      }),
+      {
+        status: 401,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  
+// =============================================================
+// ROUTE 1: CREATE RELEASE DRAFT + UPDATE METADATA
+//
+// POST /api/releases
+//
+// Audiory
+//   -> POST /v1/releases
+//   -> PATCH /v1/releases/:id/metadata
+//
+// IMPORTANT:
+// Too Lost requires release creation and release metadata
+// to be handled as TWO separate API operations.
+//
+// POST /releases only creates the draft.
+// PATCH /releases/{releaseId}/metadata saves the metadata.
+// =============================================================
+
+if (
+  url.pathname === "/api/releases" &&
+  request.method === "POST"
+) {
+
+  // -------------------------------------------------------------
+  // READ AUDIORY REQUEST
+  // -------------------------------------------------------------
+
+  const payloadText = await request.text();
+
+  let payloadObj = {};
+
+  try {
+    payloadObj = JSON.parse(payloadText || "{}");
+  } catch (e) {
+
+    return new Response(
+      JSON.stringify({
+        error: "Invalid JSON request body."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  // =============================================================
+  // NORMALIZE BASIC RELEASE INFORMATION
+  // =============================================================
+
+  const title = String(
+    payloadObj.title ||
+    payloadObj.releaseTitle ||
+    ""
+  ).trim();
+
+  const type =
+    payloadObj.type ||
+    payloadObj.releaseType ||
+    "Single";
+
+  const language = String(
+    payloadObj.language ||
+    payloadObj.primaryLanguage ||
+    "en"
+  ).trim();
+
+  const label = String(
+    payloadObj.label ||
+    "Independent"
+  ).trim();
+
+
+  // =============================================================
+  // GENRES
+  //
+  // IMPORTANT:
+  // Use canonical camelCase fields FIRST.
+  //
+  // Do NOT allow `genre` to override `primaryGenre`.
+  // Do NOT send snake_case aliases to Too Lost.
+  // =============================================================
+
+  const primaryGenre = String(
+    payloadObj.primaryGenre ||
+    payloadObj.primary_genre ||
+    payloadObj.genre ||
+    ""
+  ).trim();
+
+  const secondaryGenre = String(
+    payloadObj.secondaryGenre ||
+    payloadObj.secondary_genre ||
+    payloadObj.subgenre ||
+    ""
+  ).trim();
+
+
+  // =============================================================
+  // OTHER METADATA
+  // =============================================================
+
+  const releaseDate =
+    payloadObj.releaseDate ||
+    payloadObj.release_date ||
+    null;
+
+  const originalReleaseDate =
+    payloadObj.originalReleaseDate ||
+    payloadObj.original_release_date ||
+    null;
+
+  // =============================================================
+// RELEASE TIME
+//
+// Too Lost expects H:i, e.g. "05:55".
+//
+// Audiory may send either:
+//   "05:55"
+// or:
+//   { time: "05:55", timeZone: "Africa/Nairobi" }
+//
+// Convert only valid values.
+// =============================================================
+
+let releaseTime = null;
+
+if (typeof payloadObj.releaseTime === "string") {
+
+  const candidate =
+    payloadObj.releaseTime.trim();
+
+  if (/^\d{2}:\d{2}$/.test(candidate)) {
+
+    const [hours, minutes] =
+      candidate.split(":").map(Number);
+
+    if (
+      hours >= 0 &&
+      hours <= 23 &&
+      minutes >= 0 &&
+      minutes <= 59
+    ) {
+      releaseTime = candidate;
+    }
+  }
+
+} else if (
+  payloadObj.releaseTime &&
+  typeof payloadObj.releaseTime === "object"
+) {
+
+  const candidate =
+    String(
+      payloadObj.releaseTime.time ||
+      ""
+    ).trim();
+
+  if (/^\d{2}:\d{2}$/.test(candidate)) {
+
+    const [hours, minutes] =
+      candidate.split(":").map(Number);
+
+    if (
+      hours >= 0 &&
+      hours <= 23 &&
+      minutes >= 0 &&
+      minutes <= 59
+    ) {
+      releaseTime = candidate;
+    }
+  }
+}
+
+  const timeZone =
+    payloadObj.timeZone ||
+    payloadObj.timezone ||
+    payloadObj.releaseTimezone ||
+    "Africa/Nairobi";
+
+  const licenseType =
+    payloadObj.licenseType ||
+    payloadObj.license_type ||
+    null;
+
+  const licenseInfo =
+    payloadObj.licenseInfo ||
+    payloadObj.license_info ||
+    null;
+
+  const cYear =
+    payloadObj.cYear ||
+    payloadObj.c_year ||
+    null;
+
+  const cLine =
+    payloadObj.cLine ||
+    payloadObj.c_line ||
+    null;
+
+  const pYear =
+    payloadObj.pYear ||
+    payloadObj.p_year ||
+    null;
+
+  const pLine =
+    payloadObj.pLine ||
+    payloadObj.p_line ||
+    null;
+
+  const upc =
+    payloadObj.upc ||
+    payloadObj.upc_code ||
+    null;
+
+  const coverUrl =
+    payloadObj.coverUrl ||
+    payloadObj.cover_url ||
+    payloadObj.cover_art ||
+    payloadObj.artwork ||
+    null;
+
+  const compressedArtwork =
+    payloadObj.compressedArtwork ||
+    payloadObj.compressed_artwork ||
+    coverUrl ||
+    null;
+
+  const version =
+    payloadObj.version ||
+    null;
+
+  const remixTitle =
+    payloadObj.remixTitle ||
+    payloadObj.remix_title ||
+    null;
+
+  const applePreorder =
+    payloadObj.applePreorder === true;
+
+  const applePreorderDate =
+    payloadObj.applePreorderDate ||
+    payloadObj.apple_preorder_date ||
+    null;
+
+  const isAiGenerated =
+    payloadObj.isAiGenerated === true ||
+    payloadObj.is_ai_generated === true;
+
+  const participants =
+    Array.isArray(payloadObj.participants)
+      ? payloadObj.participants
+      : (
+          Array.isArray(payloadObj.artists)
+            ? payloadObj.artists
+            : []
+        );
+
+
+  // =============================================================
+  // REQUIRED FIELD VALIDATION
+  // =============================================================
+
+  if (!title) {
+
+    return new Response(
+      JSON.stringify({
+        error: "Release title is required.",
+        field: "title"
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  if (!language) {
+
+    return new Response(
+      JSON.stringify({
+        error: "Language is required.",
+        field: "language"
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  if (!primaryGenre) {
+
+    return new Response(
+      JSON.stringify({
+        error: "Primary Genre is required.",
+        field: "primaryGenre"
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  // =============================================================
+// TOO LOST GENRE RESOLUTION
+//
+// Audiory has its own display names.
+//
+// Too Lost exposes the authoritative accepted genre list through:
+//
+// GET /lookup/genres
+//
+// We therefore:
+//   1. Keep explicit aliases for known Audiory names.
+//   2. Match exact Too Lost values.
+//   3. Match normalized values.
+//   4. Reject anything that cannot be matched.
+//
+// This prevents invalid genre values from ever being sent
+// blindly to Too Lost.
+// =============================================================
+
+const TOO_LOST_GENRE_ALIASES = {
+
+  // -----------------------------------------------------------
+  // AFRICAN / AFRO MUSIC
+  // -----------------------------------------------------------
+
+  "Afrobeats":
+    "World/Afro-Beat",
+
+  "Afrobeat":
+    "World/Afro-Beat",
+
+  "Afro Pop":
+    "World/Afro-Pop",
+
+  "Afropop":
+    "World/Afro-Pop",
+
+  "Afro-Pop":
+    "World/Afro-Pop",
+
+  "Afro Fusion":
+    "World/African",
+
+  "Highlife":
+    "World/African",
+
+  "Afro Drill":
+    "Hip-Hop/Rap",
+
+  "African":
+    "African",
+
+  "Afro House":
+    "Afro House",
+
+  "Amapiano":
+    "Amapiano",
+
+  "Amapiano (Gqom)":
+    "Amapiano (Gqom)",
+
+  "Alternative":
+    "Alternative",
+
+  "Alternative Rock":
+    "Alternative/Rock",
+
+  "Indie Rock":
+    "Indie Rock",
+
+  "Indie Pop":
+    "Alternative/Indie Pop",
+
+  "Dance":
+    "Dance",
+
+  "Dance Pop":
+    "Dance / Pop",
+
+  "Electropop":
+    "Dance / Electro Pop",
+
+  "Hip-Hop":
+    "Hip-Hop",
+
+  "Hip Hop":
+    "Hip-Hop",
+
+  "Hip-Hop/Rap":
+    "Hip-Hop/Rap",
+
+  "Trap":
+    "Trap / Wave",
+
+  "Boom Bap":
+    "Hip-Hop/Rap",
+
+  "Drill":
+    "Hip-Hop/Rap",
+
+  "Conscious Hip-Hop":
+    "Hip-Hop/Rap",
+
+  "Melodic Rap":
+    "Hip-Hop/Rap",
+
+  "Cloud Rap":
+    "Hip-Hop/Rap",
+
+  "Christian Hip-Hop":
+    "Hip-Hop/Rap",
+
+  "R&B":
+    "R&B",
+
+  "R&B/Soul":
+    "R&B",
+
+  "Contemporary R&B":
+    "R&B",
+
+  "Alternative R&B":
+    "R&B",
+
+  "Neo-Soul":
+    "Soul",
+
+  "Soul":
+    "Soul",
+
+  "Pop":
+    "Pop",
+
+  "K-Pop":
+    "Pop/K-Pop",
+
+  "Synth-Pop":
+    "Pop",
+
+  "House":
+    "House",
+
+  "Techno":
+    "Techno",
+
+  "Deep House":
+    "Deep House",
+
+  "EDM":
+    "Electronic/Dance",
+
+  "Dubstep":
+    "Dubstep",
+
+  "Trance":
+    "Trance Music",
+
+  "Reggae":
+    "Reggae",
+
+  "Reggae/Dancehall":
+    "Reggae",
+
+  "Dancehall":
+    "Reggae/Dancehall/Ska",
+
+  "Roots Reggae":
+    "Roots Reggae/Lovers Rock/One Drop",
+
+  "Dub":
+    "Dub",
+
+  "Latin":
+    "Latin",
+
+  "Reggaeton":
+    "Latin/Reggaeton",
+
+  "Bachata":
+    "Latin/Bachata",
+
+  "Salsa":
+    "Latin/Salsa",
+
+  "Latin Trap":
+    "Latin/Latin Rap",
+
+  "Gospel/Christian":
+    "Spiritual/Christian",
+
+  "Contemporary Gospel":
+    "Spiritual/Gospel",
+
+  "Worship":
+    "Spiritual/Gospel"
+};
+
+
+// =============================================================
+// NORMALIZE GENRE TEXT FOR COMPARISON
+// =============================================================
+
+const normalizeGenreComparison = (value) => {
+
+  return String(value || "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\u202F/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/[–—−]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s*-\s*/g, "-");
+};
+
+
+// =============================================================
+// RESOLVE GENRE AGAINST LIVE TOO LOST LIST
+// =============================================================
+
+const resolveTooLostGenre = (
+  value,
+  availableGenres
+) => {
+
+  const cleaned =
+    String(value || "")
+      .replace(/\u00A0/g, " ")
+      .replace(/\u202F/g, " ")
+      .trim();
+
+  if (!cleaned) {
+    return null;
+  }
+
+  const genres =
+    Array.isArray(availableGenres)
+      ? availableGenres
+      : [];
+
+  // -----------------------------------------------------------
+  // 1. EXPLICIT AUDIORY ALIAS
+  // -----------------------------------------------------------
+
+  const explicitAlias =
+    TOO_LOST_GENRE_ALIASES[cleaned];
+
+  if (explicitAlias) {
+
+    const explicitMatch =
+      genres.find(
+        genre =>
+          String(genre).trim() ===
+          explicitAlias
+      );
+
+    if (explicitMatch) {
+      return explicitMatch;
+    }
+
+    // If Too Lost ever returns the alias itself
+    // exactly as configured, accept it.
+    return explicitAlias;
+  }
+
+
+  // -----------------------------------------------------------
+  // 2. EXACT CASE-INSENSITIVE MATCH
+  // -----------------------------------------------------------
+
+  const exactMatch =
+    genres.find(
+      genre =>
+        String(genre)
+          .trim()
+          .toLowerCase() ===
+        cleaned.toLowerCase()
+    );
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+
+  // -----------------------------------------------------------
+  // 3. NORMALIZED MATCH
+  //
+  // Handles things such as:
+  //
+  // Hip Hop
+  // Hip-Hop
+  //
+  // and harmless spacing differences.
+  // -----------------------------------------------------------
+
+  const normalizedInput =
+    normalizeGenreComparison(cleaned);
+
+  const normalizedMatch =
+    genres.find(
+      genre =>
+        normalizeGenreComparison(
+          genre
+        ) === normalizedInput
+    );
+
+  if (normalizedMatch) {
+    return normalizedMatch;
+  }
+
+
+  // -----------------------------------------------------------
+  // 4. NO SAFE MATCH
+  // -----------------------------------------------------------
+
+  return null;
+};
+
+
+// =============================================================
+// FETCH LIVE TOO LOST GENRES
+// =============================================================
+
+const getTooLostGenres = async () => {
+
+  const response =
+    await fetch(
+      `${baseUrl}/lookup/genres`,
+      {
+        method: "GET",
+        headers: {
+          "Accept":
+            "application/json",
+          "Authorization":
+            `Bearer ${accessToken}`
+        }
+      }
+    );
+
+  const responseText =
+    await response.text();
+
+  let data = {};
+
+  try {
+    data =
+      JSON.parse(
+        responseText || "{}"
+      );
+  } catch (error) {
+    throw new Error(
+      "Too Lost returned invalid genre lookup JSON."
+    );
+  }
+
+  if (!response.ok) {
+
+    throw new Error(
+      data?.message ||
+      data?.error ||
+      `Too Lost genre lookup failed (${response.status})`
+    );
+  }
+
+  let genres = [];
+
+  if (Array.isArray(data?.data)) {
+
+    genres =
+      data.data;
+
+  } else if (
+    Array.isArray(data?.data?.genres)
+  ) {
+
+    genres =
+      data.data.genres;
+
+  } else if (
+    Array.isArray(data?.genres)
+  ) {
+
+    genres =
+      data.genres;
+
+  } else if (Array.isArray(data)) {
+
+    genres =
+      data;
+  }
+
+  return [
+    ...new Set(
+      genres
+        .map(
+          genre =>
+            String(
+              genre || ""
+            ).trim()
+        )
+        .filter(Boolean)
+    )
+  ];
+};
+
+
+// =============================================================
+// GET AUTHORITATIVE TOO LOST GENRE LIST
+// =============================================================
+
+let tooLostGenres = [];
+
+try {
+
+  tooLostGenres =
+    await getTooLostGenres();
+
+} catch (genreLookupError) {
+
+  console.error(
+    "TOO LOST GENRE LOOKUP FAILED:",
+    genreLookupError
+  );
+
+  return new Response(
+    JSON.stringify({
+      error:
+        "Unable to retrieve the current Too Lost genre list.",
+      details:
+        genreLookupError?.message ||
+        String(genreLookupError)
+    }),
+    {
+      status: 502,
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}
+
+
+// =============================================================
+// RESOLVE PRIMARY + SECONDARY GENRES
+// =============================================================
+
+const canonicalPrimaryGenre =
+  resolveTooLostGenre(
+    primaryGenre,
+    tooLostGenres
+  );
+
+const canonicalSecondaryGenre =
+  resolveTooLostGenre(
+    secondaryGenre,
+    tooLostGenres
+  );
+
+
+// =============================================================
+// FAIL EARLY IF AUDIORY SENT AN UNKNOWN GENRE
+// =============================================================
+
+if (
+  primaryGenre &&
+  !canonicalPrimaryGenre
+) {
+
+  return new Response(
+    JSON.stringify({
+      error:
+        "Audiory primary genre is not supported by the current Too Lost genre list.",
+      primaryGenre,
+      availableGenres:
+        tooLostGenres
+    }),
+    {
+      status: 400,
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}
+
+
+if (
+  secondaryGenre &&
+  !canonicalSecondaryGenre
+) {
+
+  return new Response(
+    JSON.stringify({
+      error:
+        "Audiory secondary genre is not supported by the current Too Lost genre list.",
+      secondaryGenre,
+      availableGenres:
+        tooLostGenres
+    }),
+    {
+      status: 400,
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}
+
+
+  // =============================================================
+  // LOG EXACT GENRES BEING SENT
+  //
+  // This is important for debugging and permanently prevents us
+  // from guessing what the frontend actually sent.
+  // =============================================================
+
+  console.log(
+    "AUDIORY -> TOO LOST GENRE RESOLUTION",
+    JSON.stringify({
+      primaryGenre: canonicalPrimaryGenre,
+      secondaryGenre: canonicalSecondaryGenre
+    })
+  );
+
+
+  // =============================================================
+  // CREATE RELEASE DRAFT
+  //
+  // StoreReleaseRequest only requires:
+  //
+  // participants
+  // title
+  // type
+  // label
+  // language
+  //
+  // Do NOT send release metadata here.
+  // =============================================================
+
+  const createPayload = {
+    participants,
+    title,
+    type,
+    label,
+    language
+  };
+
+
+  console.log(
+    "AUDIORY -> TOO LOST CREATE RELEASE",
+    JSON.stringify(createPayload)
+  );
+
+
+  let createResponse;
+
+  try {
+
+    createResponse =
+      await fetch(
+        `${baseUrl}/releases`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          },
+
+          body: JSON.stringify(createPayload)
+        }
+      );
+
+  } catch (e) {
+
+    console.error(
+      "Too Lost create release network error:",
+      e
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: "Unable to connect to Too Lost while creating release.",
+        details: e?.message || String(e)
+      }),
+      {
+        status: 502,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  const createResponseText =
+    await createResponse.text();
+
+  let createResponseJson = {};
+
+  try {
+
+    createResponseJson =
+      JSON.parse(createResponseText || "{}");
+
+  } catch (e) {
+
+    createResponseJson = {
+      raw: createResponseText
+    };
+  }
+
+
+  // -------------------------------------------------------------
+  // CREATE FAILED
+  // -------------------------------------------------------------
+
+  if (!createResponse.ok) {
+
+    console.error(
+      "Too Lost CREATE RELEASE ERROR:",
+      createResponse.status,
+      createResponseText
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: "Too Lost rejected release creation.",
+        status: createResponse.status,
+        response: createResponseJson
+      }),
+      {
+        status: createResponse.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  // =============================================================
+  // EXTRACT RELEASE ID
+  // =============================================================
+
+  const releaseId =
+    createResponseJson?.data?.id ||
+    createResponseJson?.id ||
+    null;
+
+
+  if (!releaseId) {
+
+    console.error(
+      "Too Lost created release but returned no release ID:",
+      createResponseJson
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: "Too Lost created the release but did not return a release ID.",
+        createResponse: createResponseJson
+      }),
+      {
+        status: 502,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  // =============================================================
+  // BUILD CANONICAL TOO LOST METADATA PAYLOAD
+  //
+  // PATCH:
+  // /v1/releases/{releaseId}/metadata
+  //
+  // Only send fields belonging to UpdateReleaseMetadataRequest.
+  // =============================================================
+
+  const metadataPayload = {
+
+    type,
+    title,
+    version,
+    remixTitle,
+    label,
+
+    primaryGenre: canonicalPrimaryGenre,
+
+    ...(canonicalSecondaryGenre
+      ? {
+          secondaryGenre: canonicalSecondaryGenre
+        }
+      : {}),
+
+    language,
+
+    releaseDate,
+    originalReleaseDate,
+
+    applePreorder,
+
+    ...(applePreorderDate
+      ? {
+          applePreorderDate
+        }
+      : {}),
+
+    ...(licenseType
+      ? {
+          licenseType
+        }
+      : {}),
+
+    ...(licenseInfo
+      ? {
+          licenseInfo
+        }
+      : {}),
+
+    ...(cYear
+      ? {
+          cYear
+        }
+      : {}),
+
+    ...(cLine
+      ? {
+          cLine
+        }
+      : {}),
+
+    ...(pYear
+      ? {
+          pYear
+        }
+      : {}),
+
+    ...(pLine
+      ? {
+          pLine
+        }
+      : {}),
+
+    ...(upc
+      ? {
+          upc
+        }
+      : {}),
+
+    ...(coverUrl
+      ? {
+          coverUrl
+        }
+      : {}),
+
+    ...(compressedArtwork
+      ? {
+          compressedArtwork
+        }
+      : {}),
+
+    isAiGenerated,
+
+    ...(releaseTime
+      ? {
+          releaseTime
+        }
+      : {}),
+
+    ...(timeZone
+      ? {
+          timeZone
+        }
+      : {}),
+
+    ...(participants.length
+      ? {
+          participants
+        }
+      : {})
+  };
+
+
+  console.log(
+    "AUDIORY -> TOO LOST PATCH METADATA",
+    JSON.stringify({
+      releaseId,
+      metadataPayload
+    })
+  );
+
+
+  // =============================================================
+  // PATCH RELEASE METADATA
+  // =============================================================
+
+  let metadataResponse;
+
+  try {
+
+    metadataResponse =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}/metadata`,
+        {
+          method: "PATCH",
+
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          },
+
+          body: JSON.stringify(metadataPayload)
+        }
+      );
+
+  } catch (e) {
+
+    console.error(
+      "Too Lost metadata network error:",
+      e
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: "Release was created, but Audiory could not connect to Too Lost to update its metadata.",
+        releaseId,
+        createResponse: createResponseJson,
+        details: e?.message || String(e)
+      }),
+      {
+        status: 502,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  const metadataResponseText =
+    await metadataResponse.text();
+
+  let metadataResponseJson = {};
+
+  try {
+
+    metadataResponseJson =
+      JSON.parse(metadataResponseText || "{}");
+
+  } catch (e) {
+
+    metadataResponseJson = {
+      raw: metadataResponseText
+    };
+  }
+
+
+  // =============================================================
+  // METADATA FAILED
+  // =============================================================
+
+  if (!metadataResponse.ok) {
+
+    console.error(
+      "Too Lost METADATA ERROR:",
+      metadataResponse.status,
+      metadataResponseText
+    );
+
+    return new Response(
+      JSON.stringify({
+
+        error:
+          "Release was created, but Too Lost rejected the release metadata.",
+
+        releaseId,
+
+        metadataSent: {
+          primaryGenre: canonicalPrimaryGenre,
+          secondaryGenre: canonicalSecondaryGenre,
+          language,
+          releaseDate,
+          coverUrl
+        },
+
+        createResponse: createResponseJson,
+
+        metadataStatus:
+          metadataResponse.status,
+
+        metadataResponse:
+          metadataResponseJson
+
+      }),
+      {
+        status: metadataResponse.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+  // =============================================================
+  // METADATA SUCCESS
+  // =============================================================
+
+  console.log(
+    "Too Lost metadata updated successfully:",
+    releaseId
+  );
+
+
+  // =============================================================
+  // SYNC RELEASE INTO AUDIORY KV
+  // =============================================================
+
+  if (env.AUDIORY_KV) {
+
+    try {
+
+      const userKvKey =
+        `RELEASES_USER_${userId}`;
+
+      let existingCached = [];
+
+      try {
+
+        existingCached =
+          JSON.parse(
+            (await env.AUDIORY_KV.get(userKvKey)) ||
+            "[]"
+          );
+
+      } catch (e) {
+
+        existingCached = [];
+
+      }
+
+
+      const metadataResponseData =
+        metadataResponseJson?.data ||
+        metadataResponseJson ||
+        {};
+
+
+      const localRelease = {
+
+        id: releaseId,
+
+        title,
+
+        type,
+
+        status:
+          createResponseJson?.data?.status ||
+          "draft",
+
+        label,
+
+        language,
+
+        primaryGenre:
+          canonicalPrimaryGenre,
+
+        secondaryGenre:
+          canonicalSecondaryGenre,
+
+        releaseDate,
+
+        originalReleaseDate,
+
+        coverUrl,
+
+        compressedArtwork,
+
+        participants,
+
+        submittedBy:
+          userId,
+
+        updatedAt:
+          new Date().toISOString()
+
+      };
+
+
+      const withoutDuplicate =
+        existingCached.filter(
+          item =>
+            String(item.id) !==
+            String(releaseId)
+        );
+
+
+      withoutDuplicate.unshift(
+        localRelease
+      );
+
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(withoutDuplicate)
+      );
+
+    } catch (kvError) {
+
+      console.error(
+        "Audiory KV sync after metadata update failed:",
+        kvError
+      );
+
+    }
+  }
+
+
+  // =============================================================
+  // RETURN SUCCESS
+  // =============================================================
+
+  return new Response(
+    JSON.stringify({
+
+      success: true,
+
+      message:
+        "Release draft and metadata created successfully.",
+
+      releaseId,
+
+      createResponse:
+        createResponseJson,
+
+      metadataResponse:
+        metadataResponseJson,
+
+      metadataSent: {
+        primaryGenre:
+          canonicalPrimaryGenre,
+
+        secondaryGenre:
+          canonicalSecondaryGenre,
+
+        language,
+
+        timeZone,
+
+        releaseDate,
+
+        coverUrl
+      }
+
+    }),
+    {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+// =============================================================
+// ROUTE 2A: UPLOAD TRACK FILE TO TOO LOST
+//
+// POST /api/releases/:id/tracks/upload
+//
+// Audiory frontend sends the actual FLAC file as multipart/form-data.
+//
+// Worker:
+//   1. Requests a Too Lost upload URL
+//   2. Uploads the FLAC to that URL
+//   3. Returns the Too Lost fileKey
+//
+// Supported kinds:
+//   audio
+//   instrumental
+//   dolby
+// =============================================================
+
+const trackUploadMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)\/tracks\/upload$/
+  );
+
+if (
+  trackUploadMatch &&
+  request.method === "POST"
+) {
+
+  const releaseId =
+    trackUploadMatch[1];
+
+  try {
+
+    // -----------------------------------------------------------
+    // Read multipart form
+    // -----------------------------------------------------------
+
+    const formData =
+      await request.formData();
+
+    const file =
+      formData.get("file");
+
+    const kind =
+      String(
+        formData.get("kind") || "audio"
+      ).trim();
+
+    // -----------------------------------------------------------
+    // Validate file
+    // -----------------------------------------------------------
+
+    if (!file || typeof file.arrayBuffer !== "function") {
+      return new Response(
+        JSON.stringify({
+          error: "No audio file was supplied."
+        }),
+        {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    if (
+      !["audio", "instrumental", "dolby"].includes(kind)
+    ) {
+      return new Response(
+        JSON.stringify({
+          error: "Invalid Too Lost track file kind.",
+          allowed: [
+            "audio",
+            "instrumental",
+            "dolby"
+          ]
+        }),
+        {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    // Too Lost requires FLAC for this upload operation.
+    const originalFileName =
+      String(
+        file.name ||
+        `track-${Date.now()}.flac`
+      ).trim();
+
+    if (!/\.flac$/i.test(originalFileName)) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "Too Lost requires FLAC audio files. Please upload a .flac file."
+        }),
+        {
+          status: 422,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    const fileName =
+      originalFileName
+        .replace(/[^A-Za-z0-9._-]/g, "_")
+        .slice(0, 255);
+
+    // -----------------------------------------------------------
+    // 1. REQUEST TOO LOST UPLOAD URL
+    // -----------------------------------------------------------
+
+    const uploadUrlResponse =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}/tracks/upload-url`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({
+            contentType: "audio/flac",
+            fileName,
+            kind
+          })
+        }
+      );
+
+    const uploadUrlText =
+      await uploadUrlResponse.text();
+
+    let uploadUrlJson = {};
+
+    try {
+      uploadUrlJson =
+        JSON.parse(
+          uploadUrlText || "{}"
+        );
+    } catch (e) {
+      uploadUrlJson = {
+        raw: uploadUrlText
+      };
+    }
+
+    if (!uploadUrlResponse.ok) {
+
+      console.error(
+        "TOO LOST TRACK UPLOAD URL ERROR:",
+        uploadUrlResponse.status,
+        uploadUrlText
+      );
+
+      return new Response(
+        JSON.stringify({
+          error:
+            "Too Lost rejected the track upload URL request.",
+          status:
+            uploadUrlResponse.status,
+          details:
+            uploadUrlJson
+        }),
+        {
+          status: uploadUrlResponse.status,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    const uploadData =
+      uploadUrlJson?.data ||
+      {};
+
+    const uploadUrl =
+      uploadData.uploadUrl;
+
+    const fileKey =
+      uploadData.fileKey;
+
+    const uploadMethod =
+      uploadData.method ||
+      "PUT";
+
+    const uploadHeaders =
+      uploadData.headers ||
+      {};
+
+    if (!uploadUrl || !fileKey) {
+
+      return new Response(
+        JSON.stringify({
+          error:
+            "Too Lost returned an invalid track upload URL response.",
+          response:
+            uploadUrlJson
+        }),
+        {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    // -----------------------------------------------------------
+    // 2. UPLOAD ACTUAL FLAC TO TOO LOST
+    // -----------------------------------------------------------
+
+    const fileBytes =
+      await file.arrayBuffer();
+
+    const tooLostFileResponse =
+      await fetch(
+        uploadUrl,
+        {
+          method: uploadMethod,
+          headers: uploadHeaders,
+          body: fileBytes
+        }
+      );
+
+    const tooLostFileText =
+      await tooLostFileResponse.text();
+
+    if (!tooLostFileResponse.ok) {
+
+      console.error(
+        "TOO LOST TRACK FILE UPLOAD ERROR:",
+        tooLostFileResponse.status,
+        tooLostFileText
+      );
+
+      return new Response(
+        JSON.stringify({
+          error:
+            "The audio file could not be uploaded to Too Lost.",
+          status:
+            tooLostFileResponse.status,
+          details:
+            tooLostFileText,
+          fileKey
+        }),
+        {
+          status: tooLostFileResponse.status,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+
+    // -----------------------------------------------------------
+    // SUCCESS
+    // -----------------------------------------------------------
+
+    console.log(
+      "TOO LOST TRACK FILE UPLOADED",
+      {
+        releaseId,
+        kind,
+        fileName,
+        fileKey
+      }
+    );
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        releaseId,
+        kind,
+        fileName,
+        fileKey,
+        expiresIn:
+          uploadData.expiresIn ||
+          null
+      }),
+      {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+  } catch (error) {
+
+    console.error(
+      "Audiory Too Lost track upload error:",
+      error
+    );
+
+    return new Response(
+      JSON.stringify({
+        error:
+          "Audiory could not upload the track to Too Lost.",
+        details:
+          error?.message ||
+          String(error)
+      }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+}
+
+// =============================================================
+// ROUTE 2B: REPLACE RELEASE TRACKS
+//
+// PUT /api/releases/:id/tracks
+//
+// Audiory -> Too Lost
+// PUT /releases/{releaseId}/tracks
+// =============================================================
+
+const releaseTracksMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)\/tracks$/
+  );
+
+if (
+  releaseTracksMatch &&
+  request.method === "PUT"
+) {
+
+  const releaseId =
+    releaseTracksMatch[1];
+
+  const payloadText =
+    await request.text();
+
+  let payloadObj = {};
+
+  try {
+    payloadObj =
+      JSON.parse(
+        payloadText || "{}"
+      );
+  } catch (e) {
+
+    return new Response(
+      JSON.stringify({
+        error:
+          "Invalid JSON request body."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  if (
+    !Array.isArray(payloadObj.tracks) ||
+    payloadObj.tracks.length === 0
+  ) {
+
+    return new Response(
+      JSON.stringify({
+        error:
+          "At least one release track is required."
+      }),
+      {
+        status: 422,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  console.log(
+    "AUDIORY -> TOO LOST PUT RELEASE TRACKS",
+    JSON.stringify({
+      releaseId,
+      trackCount:
+        payloadObj.tracks.length
+    })
+  );
+
+  const response =
+    await fetch(
+      `${baseUrl}/releases/${releaseId}/tracks`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          tracks:
+            payloadObj.tracks
+        })
+      }
+    );
+
+  const responseText =
+    await response.text();
+
+  console.log(
+    "TOO LOST RELEASE TRACKS RESPONSE",
+    response.status,
+    responseText
+  );
+
+  return new Response(
+    responseText,
+    {
+      status: response.status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+// =============================================================
+// ROUTE 2: SUBMIT RELEASE
+//
+// POST /api/releases/:id/submit
+//
+// IMPORTANT:
+// Too Lost validates the SAVED release.
+// Therefore we verify the release first.
+// =============================================================
+
+const submitMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)\/submit$/
+  );
+
+if (
+  submitMatch &&
+  request.method === "POST"
+) {
+
+  const releaseId =
+    submitMatch[1];
+
+  const payloadText =
+    await request.text();
+
+  let submitPayload = {};
+
+  try {
+    submitPayload =
+      JSON.parse(payloadText || "{}");
+  } catch (e) {
+    submitPayload = {};
+  }
+
+  // ===========================================================
+  // FETCH ACTUAL TOO LOST RELEASE
+  // ===========================================================
+
+  const releaseCheckResponse =
+    await fetch(
+      `${baseUrl}/releases/${releaseId}`,
+      {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        }
+      }
+    );
+
+  const releaseCheckText =
+    await releaseCheckResponse.text();
+
+  let releaseCheckData = {};
+
+  try {
+    releaseCheckData =
+      JSON.parse(releaseCheckText);
+  } catch (e) {
+    releaseCheckData = {};
+  }
+
+  if (!releaseCheckResponse.ok) {
+
+    console.error(
+      "Too Lost RELEASE CHECK FAILED:",
+      releaseCheckResponse.status,
+      releaseCheckText
+    );
+
+    return new Response(
+      releaseCheckText,
+      {
+        status: releaseCheckResponse.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  const release =
+    releaseCheckData?.data ||
+    releaseCheckData ||
+    {};
+
+  // ===========================================================
+  // CHECK PRIMARY GENRE
+  // Fall back to local KV cache if Too Lost GET didn't return it
+  // ===========================================================
+
+  let storedPrimaryGenre =
+    String(
+      release.primaryGenre ||
+      release.primary_genre ||
+      release.genre ||
+      release.metadata?.primaryGenre ||
+      release.metadata?.primary_genre ||
+      release.metadata?.genre ||
+      ""
+    ).trim();
+
+  // KV Fallback Check
+  if (!storedPrimaryGenre && env.AUDIORY_KV) {
+    try {
+      const userKvKey = `RELEASES_USER_${userId}`;
+      const cached = JSON.parse(await env.AUDIORY_KV.get(userKvKey) || "[]");
+      const localRelease = cached.find(item => String(item.id) === String(releaseId));
+      if (
+        localRelease?.primaryGenre ||
+        localRelease?.primary_genre ||
+        localRelease?.genre
+      ) {
+          storedPrimaryGenre = String(
+              localRelease.primaryGenre ||
+              localRelease.primary_genre ||
+              localRelease.genre
+          ).trim();
+      }
+    } catch (e) {
+      console.warn("KV fallback read failed during submit check:", e);
+    }
+  }
+
+  console.log(
+    "TOO LOST SUBMIT CHECK",
+    {
+      releaseId,
+      title: release.title,
+      primaryGenre: storedPrimaryGenre,
+      secondaryGenre: release.secondaryGenre || release.secondary_genre,
+      status: release.status
+    }
+  );
+
+  // ===========================================================
+  // DO NOT CALL SUBMIT IF GENRE IS STILL MISSING
+  // ===========================================================
+
+  if (!storedPrimaryGenre) {
+
+    return new Response(
+      JSON.stringify({
+        error: "Too Lost draft is missing Primary Genre.",
+        code: "MISSING_PRIMARY_GENRE_ON_DRAFT",
+        releaseId: releaseId,
+        tooLostRelease: {
+          id: release.id,
+          title: release.title,
+          primaryGenre:
+            release.primaryGenre ??
+            release.primary_genre ??
+            release.genre ??
+            release.metadata?.primaryGenre ??
+            release.metadata?.primary_genre ??
+            release.metadata?.genre ??
+            null,
+
+          secondaryGenre:
+            release.secondaryGenre ??
+            release.secondary_genre ??
+            release.subgenre ??
+            release.metadata?.secondaryGenre ??
+            release.metadata?.secondary_genre ??
+            release.metadata?.subgenre ??
+            null,
+          status: release.status ?? null
+        }
+      }),
+      {
+        status: 422,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // ===========================================================
+  // SUBMIT TO TOO LOST
+  // Sends both snake_case and camelCase boolean/string flags
+  // ===========================================================
+
+  const isTermsAccepted = submitPayload.acceptTerms === true || submitPayload.acceptTerms === "true";
+  const isRightsConfirmed = submitPayload.confirmRights === true || submitPayload.confirmRights === "true";
+
+  // ===========================================================
+  // RESOLVE CANONICAL TOO LOST GENRE FOR SUBMISSION
+  // ===========================================================
+
+  const submitPrimaryGenre = String(
+      release.genre ||
+      release.primaryGenre ||
+      release.primary_genre ||
+      release.metadata?.genre ||
+      release.metadata?.primaryGenre ||
+      release.metadata?.primary_genre ||
+      ""
+  ).trim();
+
+  const submitSecondaryGenre = String(
+      release.subgenre ||
+      release.secondaryGenre ||
+      release.secondary_genre ||
+      release.metadata?.subgenre ||
+      release.metadata?.secondaryGenre ||
+      release.metadata?.secondary_genre ||
+      ""
+  ).trim();
+
+  console.log(
+      "TOO LOST FINAL SUBMIT GENRE:",
+      JSON.stringify({
+          releaseId,
+          genre: submitPrimaryGenre,
+          subgenre: submitSecondaryGenre
+      })
+  );
+
+  if (!submitPrimaryGenre) {
+      return new Response(
+          JSON.stringify({
+              error: "Too Lost draft is missing Primary Genre.",
+              code: "MISSING_PRIMARY_GENRE_ON_DRAFT",
+              releaseId,
+              tooLostRelease: {
+                  id: release.id ?? null,
+                  title: release.title ?? null,
+                  genre: release.genre ?? null,
+                  primaryGenre: release.primaryGenre ?? null,
+                  subgenre: release.subgenre ?? null,
+                  secondaryGenre: release.secondaryGenre ?? null
+              }
+          }),
+          {
+              status: 422,
+              headers: {
+                  ...corsHeaders,
+                  "Content-Type": "application/json"
+              }
+          }
+      );
+  }
+
+  // ===========================================================
+  // SUBMIT BODY
+  // ===========================================================
+
+  const submitBody = {
+      // Canonical Too Lost genre fields
+      genre: submitPrimaryGenre,
+      subgenre: submitSecondaryGenre || null,
+
+      // Compatibility aliases
+      primaryGenre: submitPrimaryGenre,
+      primary_genre: submitPrimaryGenre,
+      secondaryGenre: submitSecondaryGenre || null,
+      secondary_genre: submitSecondaryGenre || null,
+
+      acceptTerms: String(isTermsAccepted),
+      accept_terms: isTermsAccepted,
+
+      confirmRights: String(isRightsConfirmed),
+      confirm_rights: isRightsConfirmed,
+
+      confirmYoutubeRights:
+          submitPayload.confirmYoutubeRights ?? null,
+
+      confirm_youtube_rights:
+          submitPayload.confirmYoutubeRights ?? null,
+
+      idempotencyKey:
+          submitPayload.idempotencyKey || crypto.randomUUID(),
+
+      idempotency_key:
+          submitPayload.idempotencyKey || crypto.randomUUID()
+  };
+
+  const submitResponse =
+    await fetch(
+      `${baseUrl}/releases/${releaseId}/submit`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`
+        },
+
+        body: JSON.stringify(submitBody)
+      }
+    );
+
+  const responseText =
+    await submitResponse.text();
+
+  // ===========================================================
+  // CACHE STATUS AFTER SUCCESS
+  // ===========================================================
+
+  if (
+    env.AUDIORY_KV &&
+    submitResponse.ok
+  ) {
+
+    const serverData =
+      (() => {
+        try {
+          return JSON.parse(responseText);
+        } catch (e) {
+          return {};
+        }
+      })();
+
+    const submittedRelease =
+      serverData?.data ||
+      serverData ||
+      {};
+
+    const userKvKey =
+      `RELEASES_USER_${userId}`;
+
+    let existingCached = [];
+
+    try {
+      existingCached =
+        JSON.parse(
+          await env.AUDIORY_KV.get(userKvKey) || "[]"
+        );
+    } catch (e) {
+      existingCached = [];
+    }
+
+    const idx =
+      existingCached.findIndex(
+        item =>
+          String(item.id) === String(releaseId)
+      );
+
+    if (idx !== -1) {
+
+      existingCached[idx] = {
+        ...existingCached[idx],
+
+        status:
+          submittedRelease.status ||
+          "in_review",
+
+        submittedAt:
+          submittedRelease.submittedAt ||
+          submittedRelease.submitted_at ||
+          new Date().toISOString()
+      };
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(existingCached)
+      );
+    }
+  }
+
+  // ===========================================================
+  // RETURN TOO LOST RESPONSE
+  // ===========================================================
+
+  return new Response(
+    responseText,
+    {
+      status: submitResponse.status,
+
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+  // =============================================================
+  // ROUTE 3: DELETE RELEASE DRAFT
+  //
+  // DELETE /api/releases/:id
+  // =============================================================
+
+  const deleteMatch =
+    url.pathname.match(
+      /^\/api\/releases\/([^/]+)$/
+    );
+
+
+  if (
+    deleteMatch &&
+    request.method === "DELETE"
+  ) {
+
+    const releaseId =
+      deleteMatch[1];
+
+
+    const response =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          }
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    // -------------------------------------------------------------
+    // Only remove local cache if Too Lost successfully deleted it.
+    // -------------------------------------------------------------
+
+    if (
+      response.ok &&
+      env.AUDIORY_KV
+    ) {
+
+      const userKvKey =
+        `RELEASES_USER_${userId}`;
+
+
+      let existingCached = [];
+
+      try {
+        existingCached =
+          JSON.parse(
+            await env.AUDIORY_KV.get(userKvKey) || "[]"
+          );
+      } catch (e) {
+        existingCached = [];
+      }
+
+
+      const filteredKV =
+        existingCached.filter(
+          item =>
+            String(item.id) !== String(releaseId)
+        );
+
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(filteredKV)
+      );
+    }
+
+
+    return new Response(
+      responseText || JSON.stringify({
+        message:
+          response.ok
+            ? "Release deleted successfully"
+            : "Unable to delete release"
+      }),
+      {
+        status: response.status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+
+
+ // =============================================================
+// ROUTE 4: RELEASE INFORMATION / UPDATE DRAFT
+//
+// Audiory:
+//   PUT   /api/releases/:id
+//   PATCH /api/releases/:id
+//
+// Too Lost:
+//   PATCH /v1/releases/:id/metadata
+//
+// IMPORTANT:
+// Audiory may use PUT/PATCH for its own edit endpoint.
+// Too Lost does NOT accept PUT /releases/:id.
+// Metadata edits MUST go to:
+// PATCH /releases/:id/metadata
+// =============================================================
+
+const releaseInfoMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)$/
+  );
+
+if (
+  releaseInfoMatch &&
+  (
+    request.method === "PUT" ||
+    request.method === "PATCH"
+  )
+) {
+
+  const releaseId =
+    releaseInfoMatch[1];
+
+  // -------------------------------------------------------------
+  // READ AUDIORY REQUEST
+  // -------------------------------------------------------------
+
+  const payloadText =
+    await request.text();
+
+  let payloadObj = {};
+
+  try {
+
+    payloadObj =
+      JSON.parse(
+        payloadText || "{}"
+      );
+
+  } catch (e) {
+
+    return new Response(
+      JSON.stringify({
+        error:
+          "Invalid JSON request body."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type":
+            "application/json"
+        }
+      }
+    );
+  }
+
+
+  // -------------------------------------------------------------
+  // RAW GENRES
+  // -------------------------------------------------------------
+
+  const rawPrimaryGenre =
+    String(
+      payloadObj.primaryGenre ||
+      payloadObj.primary_genre ||
+      payloadObj.genre ||
+      ""
+    ).trim();
+
+  const rawSecondaryGenre =
+    String(
+      payloadObj.secondaryGenre ||
+      payloadObj.secondary_genre ||
+      payloadObj.subgenre ||
+      ""
+    ).trim();
+
+
+  // -------------------------------------------------------------
+// LIVE TOO LOST GENRE RESOLUTION FOR EDIT
+// -------------------------------------------------------------
+
+let editTooLostGenres = [];
+
+try {
+
+  const genreLookupResponse =
+    await fetch(
+      `${baseUrl}/lookup/genres`,
+      {
+        method: "GET",
+        headers: {
+          "Accept":
+            "application/json",
+          "Authorization":
+            `Bearer ${accessToken}`
+        }
+      }
+    );
+
+  const genreLookupText =
+    await genreLookupResponse.text();
+
+  let genreLookupData = {};
+
+  try {
+
+    genreLookupData =
+      JSON.parse(
+        genreLookupText || "{}"
+      );
+
+  } catch (e) {
+
+    throw new Error(
+      "Too Lost returned invalid genre lookup JSON."
+    );
+  }
+
+  if (!genreLookupResponse.ok) {
+
+    throw new Error(
+      genreLookupData?.message ||
+      genreLookupData?.error ||
+      `Too Lost genre lookup failed (${genreLookupResponse.status})`
+    );
+  }
+
+  if (
+    Array.isArray(
+      genreLookupData?.data
+    )
+  ) {
+
+    editTooLostGenres =
+      genreLookupData.data;
+
+  } else if (
+    Array.isArray(
+      genreLookupData?.data?.genres
+    )
+  ) {
+
+    editTooLostGenres =
+      genreLookupData.data.genres;
+
+  } else if (
+    Array.isArray(
+      genreLookupData?.genres
+    )
+  ) {
+
+    editTooLostGenres =
+      genreLookupData.genres;
+
+  } else if (
+    Array.isArray(
+      genreLookupData
+    )
+  ) {
+
+    editTooLostGenres =
+      genreLookupData;
+  }
+
+  editTooLostGenres =
+    [
+      ...new Set(
+        editTooLostGenres
+          .map(
+            genre =>
+              String(
+                genre || ""
+              ).trim()
+          )
+          .filter(Boolean)
+      )
+    ];
+
+} catch (genreLookupError) {
+
+  console.error(
+    "TOO LOST EDIT GENRE LOOKUP FAILED:",
+    genreLookupError
+  );
+
+  return new Response(
+    JSON.stringify({
+      error:
+        "Unable to retrieve the current Too Lost genre list.",
+      details:
+        genreLookupError?.message ||
+        String(genreLookupError)
+    }),
+    {
+      status: 502,
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}
+
+
+// -------------------------------------------------------------
+// EDIT GENRE ALIASES
+// -------------------------------------------------------------
+
+const editGenreAliases = {
+
+  "Afrobeats":
+    "World/Afro-Beat",
+
+  "Afrobeat":
+    "World/Afro-Beat",
+
+  "Afro Pop":
+    "World/Afro-Pop",
+
+  "Afropop":
+    "World/Afro-Pop",
+
+  "Afro-Pop":
+    "World/Afro-Pop",
+
+  "Afro Fusion":
+    "World/African",
+
+  "Highlife":
+    "World/African",
+
+  "Afro Drill":
+    "Hip-Hop/Rap",
+
+  "African":
+    "African",
+
+  "Afro House":
+    "Afro House",
+
+  "Amapiano":
+    "Amapiano",
+
+  "Amapiano (Gqom)":
+    "Amapiano (Gqom)",
+
+  "Alternative":
+    "Alternative",
+
+  "Alternative Rock":
+    "Alternative/Rock",
+
+  "Indie Rock":
+    "Indie Rock",
+
+  "Indie Pop":
+    "Alternative/Indie Pop",
+
+  "Dance":
+    "Dance",
+
+  "Dance Pop":
+    "Dance / Pop",
+
+  "Electropop":
+    "Dance / Electro Pop",
+
+  "Hip-Hop":
+    "Hip-Hop",
+
+  "Hip Hop":
+    "Hip-Hop",
+
+  "Hip-Hop/Rap":
+    "Hip-Hop/Rap",
+
+  "Trap":
+    "Trap / Wave",
+
+  "Boom Bap":
+    "Hip-Hop/Rap",
+
+  "Drill":
+    "Hip-Hop/Rap",
+
+  "Conscious Hip-Hop":
+    "Hip-Hop/Rap",
+
+  "Melodic Rap":
+    "Hip-Hop/Rap",
+
+  "Cloud Rap":
+    "Hip-Hop/Rap",
+
+  "Christian Hip-Hop":
+    "Hip-Hop/Rap",
+
+  "R&B":
+    "R&B",
+
+  "R&B/Soul":
+    "R&B",
+
+  "Contemporary R&B":
+    "R&B",
+
+  "Alternative R&B":
+    "R&B",
+
+  "Neo-Soul":
+    "Soul",
+
+  "Soul":
+    "Soul",
+
+  "Pop":
+    "Pop",
+
+  "K-Pop":
+    "Pop/K-Pop",
+
+  "Synth-Pop":
+    "Pop",
+
+  "House":
+    "House",
+
+  "Techno":
+    "Techno",
+
+  "Deep House":
+    "Deep House",
+
+  "EDM":
+    "Electronic/Dance",
+
+  "Dubstep":
+    "Dubstep",
+
+  "Trance":
+    "Trance Music",
+
+  "Reggae":
+    "Reggae",
+
+  "Reggae/Dancehall":
+    "Reggae",
+
+  "Dancehall":
+    "Reggae/Dancehall/Ska",
+
+  "Roots Reggae":
+    "Roots Reggae/Lovers Rock/One Drop",
+
+  "Dub":
+    "Dub",
+
+  "Latin":
+    "Latin",
+
+  "Reggaeton":
+    "Latin/Reggaeton",
+
+  "Bachata":
+    "Latin/Bachata",
+
+  "Salsa":
+    "Latin/Salsa",
+
+  "Latin Trap":
+    "Latin/Latin Rap",
+
+  "Gospel/Christian":
+    "Spiritual/Christian",
+
+  "Contemporary Gospel":
+    "Spiritual/Gospel",
+
+  "Worship":
+    "Spiritual/Gospel"
+};
+
+
+// -------------------------------------------------------------
+// NORMALIZE GENRE FOR COMPARISON
+// -------------------------------------------------------------
+
+const normalizeEditGenre =
+  (value) => {
+
+    return String(
+      value || ""
+    )
+      .replace(
+        /\u00A0/g,
+        " "
+      )
+      .replace(
+        /\u202F/g,
+        " "
+      )
+      .trim()
+      .toLowerCase()
+      .replace(
+        /[–—−]/g,
+        "-"
+      )
+      .replace(
+        /\s+/g,
+        " "
+      )
+      .replace(
+        /\s*\/\s*/g,
+        "/"
+      )
+      .replace(
+        /\s*-\s*/g,
+        "-"
+      );
+  };
+
+
+// -------------------------------------------------------------
+// RESOLVE EDIT GENRE AGAINST LIVE TOO LOST LIST
+// -------------------------------------------------------------
+
+const resolveEditGenre =
+  (value) => {
+
+    const cleaned =
+      String(
+        value || ""
+      )
+        .replace(
+          /\u00A0/g,
+          " "
+        )
+        .replace(
+          /\u202F/g,
+          " "
+        )
+        .trim();
+
+    if (!cleaned) {
+      return null;
+    }
+
+
+    // 1. Audiory alias -> Too Lost value
+
+    const explicitAlias =
+      editGenreAliases[
+        cleaned
+      ];
+
+    if (explicitAlias) {
+
+      const explicitMatch =
+        editTooLostGenres.find(
+          genre =>
+            String(
+              genre
+            )
+              .trim()
+              .toLowerCase() ===
+            explicitAlias
+              .trim()
+              .toLowerCase()
+        );
+
+      if (explicitMatch) {
+        return explicitMatch;
+      }
+    }
+
+
+    // 2. Exact case-insensitive match
+
+    const exactMatch =
+      editTooLostGenres.find(
+        genre =>
+          String(
+            genre
+          )
+            .trim()
+            .toLowerCase() ===
+          cleaned.toLowerCase()
+      );
+
+    if (exactMatch) {
+      return exactMatch;
+    }
+
+
+    // 3. Normalized match
+
+    const normalizedInput =
+      normalizeEditGenre(
+        cleaned
+      );
+
+    const normalizedMatch =
+      editTooLostGenres.find(
+        genre =>
+          normalizeEditGenre(
+            genre
+          ) ===
+          normalizedInput
+      );
+
+    if (normalizedMatch) {
+      return normalizedMatch;
+    }
+
+
+    // 4. No supported match
+
+    return null;
+  };
+
+
+const canonicalPrimaryGenre =
+  resolveEditGenre(
+    rawPrimaryGenre
+  );
+
+const canonicalSecondaryGenre =
+  rawSecondaryGenre
+    ? resolveEditGenre(
+        rawSecondaryGenre
+      )
+    : null;
+
+
+// -------------------------------------------------------------
+// VALIDATE GENRES AGAINST LIVE TOO LOST LIST
+// -------------------------------------------------------------
+
+if (!canonicalPrimaryGenre) {
+
+  return new Response(
+    JSON.stringify({
+      error:
+        "Primary Genre is not supported by Too Lost.",
+      field:
+        "primaryGenre",
+      supplied:
+        rawPrimaryGenre
+    }),
+    {
+      status: 400,
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}
+
+
+if (
+  rawSecondaryGenre &&
+  !canonicalSecondaryGenre
+) {
+
+  return new Response(
+    JSON.stringify({
+      error:
+        "Secondary Genre is not supported by Too Lost.",
+      field:
+        "secondaryGenre",
+      supplied:
+        rawSecondaryGenre
+    }),
+    {
+      status: 400,
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}
+
+
+  // -------------------------------------------------------------
+  // BUILD TOO LOST METADATA PAYLOAD
+  // -------------------------------------------------------------
+
+  const metadataPayload = {
+
+    type:
+      payloadObj.type ||
+      payloadObj.releaseType ||
+      "Single",
+
+    title:
+      payloadObj.title ||
+      payloadObj.releaseTitle ||
+      "",
+
+    version:
+      payloadObj.version ||
+      null,
+
+    remixTitle:
+      payloadObj.remixTitle ||
+      payloadObj.remix_title ||
+      null,
+
+    label:
+      payloadObj.label ||
+      "Independent",
+
+    primaryGenre:
+      canonicalPrimaryGenre,
+
+    ...(canonicalSecondaryGenre
+      ? {
+          secondaryGenre:
+            canonicalSecondaryGenre
+        }
+      : {}),
+
+    language:
+      payloadObj.language ||
+      payloadObj.primaryLanguage ||
+      "en",
+
+    releaseDate:
+      payloadObj.releaseDate ||
+      payloadObj.release_date ||
+      null,
+
+    originalReleaseDate:
+      payloadObj.originalReleaseDate ||
+      payloadObj.original_release_date ||
+      null,
+
+    applePreorder:
+      Boolean(
+        payloadObj.applePreorder
+      ),
+
+    ...(payloadObj.applePreorderDate
+      ? {
+          applePreorderDate:
+            payloadObj.applePreorderDate
+        }
+      : {}),
+
+    ...(payloadObj.licenseType
+      ? {
+          licenseType:
+            payloadObj.licenseType
+        }
+      : {}),
+
+    ...(payloadObj.licenseInfo
+      ? {
+          licenseInfo:
+            payloadObj.licenseInfo
+        }
+      : {}),
+
+    ...(payloadObj.cYear
+      ? {
+          cYear:
+            payloadObj.cYear
+        }
+      : {}),
+
+    ...(payloadObj.cLine
+      ? {
+          cLine:
+            payloadObj.cLine
+        }
+      : {}),
+
+    ...(payloadObj.pYear
+      ? {
+          pYear:
+            payloadObj.pYear
+        }
+      : {}),
+
+    ...(payloadObj.pLine
+      ? {
+          pLine:
+            payloadObj.pLine
+        }
+      : {}),
+
+    ...(payloadObj.upc
+      ? {
+          upc:
+            payloadObj.upc
+        }
+      : {}),
+
+    ...(payloadObj.coverUrl
+      ? {
+          coverUrl:
+            payloadObj.coverUrl
+        }
+      : {}),
+
+    ...(payloadObj.compressedArtwork
+      ? {
+          compressedArtwork:
+            payloadObj.compressedArtwork
+        }
+      : {}),
+
+    ...(payloadObj.isAiGenerated !== undefined
+      ? {
+          isAiGenerated:
+            Boolean(
+              payloadObj.isAiGenerated
+            )
+        }
+      : {}),
+
+    ...(payloadObj.releaseTime
+      ? {
+          releaseTime:
+            payloadObj.releaseTime
+        }
+      : {}),
+
+    ...(payloadObj.timeZone
+      ? {
+          timeZone:
+            payloadObj.timeZone
+        }
+      : {}),
+
+    ...(Array.isArray(
+      payloadObj.participants
+    ) &&
+    payloadObj.participants.length
+      ? {
+          participants:
+            payloadObj.participants
+        }
+      : {})
+  };
+
+
+  // -------------------------------------------------------------
+  // DEBUG
+  // -------------------------------------------------------------
+
+  console.log(
+    "AUDIORY -> TOO LOST EDIT METADATA:",
+    JSON.stringify({
+      releaseId,
+      method:
+        request.method,
+      primaryGenre:
+        canonicalPrimaryGenre,
+      secondaryGenre:
+        canonicalSecondaryGenre,
+      metadataPayload
+    })
+  );
+
+
+  // -------------------------------------------------------------
+  // IMPORTANT:
+  //
+  // Audiory PUT/PATCH
+  //        ↓
+  // Too Lost PATCH /metadata
+  // -------------------------------------------------------------
+
+  let response;
+
+  try {
+
+    response =
+      await fetch(
+        `${baseUrl}/releases/${releaseId}/metadata`,
+        {
+          method: "PATCH",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            "Accept":
+              "application/json",
+
+            "Authorization":
+              `Bearer ${accessToken}`
+          },
+
+          body:
+            JSON.stringify(
+              metadataPayload
+            )
+        }
+      );
+
+  } catch (e) {
+
+    console.error(
+      "Too Lost EDIT METADATA NETWORK ERROR:",
+      e
+    );
+
+    return new Response(
+      JSON.stringify({
+        error:
+          "Unable to connect to Too Lost while updating release metadata.",
+
+        releaseId,
+
+        details:
+          e?.message ||
+          String(e)
+      }),
+      {
+        status: 502,
+        headers: {
+          ...corsHeaders,
+          "Content-Type":
+            "application/json"
+        }
+      }
+    );
+  }
+
+
+  // -------------------------------------------------------------
+  // READ TOO LOST RESPONSE
+  // -------------------------------------------------------------
+
+  const responseText =
+    await response.text();
+
+  let serverData = {};
+
+  try {
+
+    serverData =
+      JSON.parse(
+        responseText ||
+        "{}"
+      );
+
+  } catch (e) {
+
+    serverData = {
+      raw:
+        responseText
+    };
+  }
+
+
+  // -------------------------------------------------------------
+  // TOO LOST REJECTED UPDATE
+  // -------------------------------------------------------------
+
+  if (!response.ok) {
+
+    console.error(
+      "TOO LOST EDIT METADATA ERROR:",
+      response.status,
+      responseText
+    );
+
+    return new Response(
+      JSON.stringify({
+
+        error:
+          "Too Lost rejected the release metadata update.",
+
+        releaseId,
+
+        status:
+          response.status,
+
+        details:
+          serverData,
+
+        metadataSent:
+          metadataPayload
+      }),
+      {
+        status:
+          response.status,
+
+        headers: {
+          ...corsHeaders,
+          "Content-Type":
+            "application/json"
+        }
+      }
+    );
+  }
+
+
+  // -------------------------------------------------------------
+  // SYNC UPDATED METADATA TO AUDIORY KV
+  // -------------------------------------------------------------
+
+  if (env.AUDIORY_KV) {
+
+    try {
+
+      const userKvKey =
+        `RELEASES_USER_${userId}`;
+
+      let existingCached = [];
+
+      try {
+
+        existingCached =
+          JSON.parse(
+            (await env.AUDIORY_KV.get(
+              userKvKey
+            )) || "[]"
+          );
+
+      } catch (e) {
+
+        existingCached = [];
+
+      }
+
+
+      const returnedRelease =
+        serverData?.data ||
+        serverData ||
+        {};
+
+
+      const updatedItem = {
+
+        id:
+          releaseId,
+
+        title:
+          returnedRelease.title ||
+          metadataPayload.title ||
+          "Untitled",
+
+        type:
+          returnedRelease.type ||
+          metadataPayload.type ||
+          "Single",
+
+        status:
+          returnedRelease.status ||
+          "draft",
+
+        label:
+          typeof returnedRelease.label ===
+          "string"
+            ? returnedRelease.label
+            : metadataPayload.label,
+
+        primaryGenre:
+          canonicalPrimaryGenre,
+
+        secondaryGenre:
+          canonicalSecondaryGenre,
+
+        language:
+          returnedRelease.language ||
+          metadataPayload.language,
+
+        releaseDate:
+          returnedRelease.releaseDate ||
+          returnedRelease.release_date ||
+          metadataPayload.releaseDate,
+
+        originalReleaseDate:
+          returnedRelease.originalReleaseDate ||
+          returnedRelease.original_release_date ||
+          metadataPayload.originalReleaseDate,
+
+        coverUrl:
+          returnedRelease.coverUrl ||
+          returnedRelease.cover_url ||
+          metadataPayload.coverUrl ||
+          "",
+
+        compressedArtwork:
+          returnedRelease.compressedArtwork ||
+          returnedRelease.compressed_artwork ||
+          metadataPayload.compressedArtwork ||
+          metadataPayload.coverUrl ||
+          "",
+
+        participants:
+          returnedRelease.participants ||
+          returnedRelease.artists ||
+          metadataPayload.participants ||
+          [],
+
+        upc:
+          returnedRelease.upc ||
+          returnedRelease.upc_code ||
+          metadataPayload.upc ||
+          "Pending",
+
+        submittedBy:
+          userId,
+
+        updatedAt:
+          new Date().toISOString()
+      };
+
+
+      const idx =
+        existingCached.findIndex(
+          item =>
+            String(item.id) ===
+            String(releaseId)
+        );
+
+
+      if (idx !== -1) {
+
+        // IMPORTANT:
+        // Merge instead of replacing.
+        //
+        // This preserves existing:
+        // tracks
+        // delivery
+        // territories
+        // platforms
+        // audio file keys
+        // writers
+        // credits
+        // lyrics
+        // artwork
+        // and other locally cached data.
+
+        existingCached[idx] = {
+          ...existingCached[idx],
+          ...updatedItem
+        };
+
+      } else {
+
+        existingCached.unshift(
+          updatedItem
+        );
+
+      }
+
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(
+          existingCached
+        )
+      );
+
+    } catch (kvError) {
+
+      console.error(
+        "Audiory KV sync after release edit failed:",
+        kvError
+      );
+
+    }
+  }
+
+
+  // -------------------------------------------------------------
+  // RETURN SUCCESS
+  // -------------------------------------------------------------
+
+  return new Response(
+    JSON.stringify({
+
+      success:
+        true,
+
+      message:
+        "Release metadata updated successfully.",
+
+      releaseId,
+
+      metadataResponse:
+        serverData,
+
+      metadataSent:
+        metadataPayload
+
+    }),
+    {
+      status:
+        200,
+
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}   
+
+// =============================================================
+// ROUTE 5: RELEASE DELIVERY & TARGETS
+//
+// PUT /api/releases/:id/delivery
+// PATCH /api/releases/:id/delivery
+//
+// Audiory -> Too Lost
+// PUT /releases/:id/delivery
+// PATCH /releases/:id/delivery
+// =============================================================
+
+const deliveryMatch =
+  url.pathname.match(
+    /^\/api\/releases\/([^/]+)\/delivery$/
+  );
+
+if (
+  deliveryMatch &&
+  (
+    request.method === "PUT" ||
+    request.method === "PATCH"
+  )
+) {
+  const releaseId = deliveryMatch[1];
+  const payloadText = await request.text();
+
+  let payloadObj = {};
+
+  try {
+    payloadObj = JSON.parse(payloadText || "{}");
+  } catch (e) {
+    return new Response(
+      JSON.stringify({
+        error: "Invalid JSON request body."
+      }),
+      {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+
+  // Extract platforms/DSPs and territories
+  const resolvedPlatforms =
+    payloadObj.platforms ||
+    payloadObj.dsps ||
+    payloadObj.delivery?.platforms ||
+    payloadObj.delivery?.dsps ||
+    [];
+
+  const resolvedTerritories =
+    payloadObj.territories ||
+    payloadObj.delivery?.territories ||
+    [];
+
+  // ===========================================================
+  // NORMALIZE DELIVERY PAYLOAD FOR TOO LOST
+  // ===========================================================
+
+  const deliveryPayload = {
+    delivery: {
+      platforms: resolvedPlatforms,
+      territories: resolvedTerritories,
+      additional: payloadObj.delivery?.additional || {},
+      beatPort: Boolean(payloadObj.delivery?.beatPort)
+    }
+  };
+
+  console.log("Audiory -> Too Lost DELIVERY UPDATE", {
+    releaseId,
+    method: request.method,
+    platformCount: resolvedPlatforms.length,
+    territoryCount: resolvedTerritories.length
+  });
+
+  // ===========================================================
+  // FORWARD TO TOO LOST
+  // ===========================================================
+
+  const response = await fetch(
+    `${baseUrl}/releases/${releaseId}/delivery`,
+    {
+      method: request.method,
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(deliveryPayload)
+    }
+  );
+
+  const responseText = await response.text();
+
+  // ===========================================================
+  // SYNC DELIVERY CONFIG TO LOCAL KV CACHE
+  // ===========================================================
+
+  if (response.ok && env.AUDIORY_KV) {
+    const userKvKey = `RELEASES_USER_${userId}`;
+    let existingCached = [];
+
+    try {
+      existingCached = JSON.parse(
+        (await env.AUDIORY_KV.get(userKvKey)) || "[]"
+      );
+    } catch (e) {
+      existingCached = [];
+    }
+
+    const idx = existingCached.findIndex(
+      (item) => String(item.id) === String(releaseId)
+    );
+
+    if (idx !== -1) {
+      existingCached[idx] = {
+        ...existingCached[idx],
+        platforms: resolvedPlatforms,
+        dsps: resolvedPlatforms,
+        territories: resolvedTerritories,
+        delivery: deliveryPayload.delivery,
+        updatedAt: new Date().toISOString()
+      };
+
+      await env.AUDIORY_KV.put(
+        userKvKey,
+        JSON.stringify(existingCached)
+      );
+    }
+  }
+
+  // ===========================================================
+  // RETURN TOO LOST RESPONSE
+  // ===========================================================
+
+  return new Response(
+    responseText,
+    {
+      status: response.status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+
+
+  // =============================================================
+// ROUTE 6: FETCH USER CATALOGUE
+//
+// GET /api/releases
+//
+// IMPORTANT:
+// Audiory KV is the ownership source.
+// Too Lost provides the latest release data.
+// Only Too Lost releases already owned by this Audiory user
+// in KV are allowed into the final catalogue.
+// =============================================================
+
+if (
+  url.pathname === "/api/releases" &&
+  request.method === "GET"
+) {
+
+  // -------------------------------------------------------------
+  // Get Audiory local cache FIRST
+  // -------------------------------------------------------------
+
+  let userCachedReleases = [];
+
+  if (env.AUDIORY_KV) {
+
+    const userKvKey =
+      `RELEASES_USER_${userId}`;
+
+    try {
+
+      const cachedValue =
+        await env.AUDIORY_KV.get(userKvKey);
+
+      if (cachedValue) {
+
+        const parsed =
+          JSON.parse(cachedValue);
+
+        if (Array.isArray(parsed)) {
+          userCachedReleases = parsed;
+        }
+
+      }
+
+    } catch (e) {
+
+      console.error(
+        "Audiory KV Release Cache Error:",
+        e
+      );
+
+      userCachedReleases = [];
+    }
+  }
+
+
+  // -------------------------------------------------------------
+  // Build ownership list from Audiory KV
+  //
+  // This is the security boundary.
+  // A Too Lost release is only accepted if its ID is already
+  // associated with this Audiory user.
+  // -------------------------------------------------------------
+
+  const ownedReleaseIds =
+    new Set(
+      userCachedReleases
+        .filter(item => item?.id)
+        .map(item => String(item.id))
+    );
+
+
+  // -------------------------------------------------------------
+  // Fetch releases from Too Lost
+  // -------------------------------------------------------------
+
+  let apiReleases = [];
+
+  let tooLostError = null;
+
+  try {
+
+    const response =
+      await fetch(
+        `${baseUrl}/releases${url.search}`,
+        {
+          method: "GET",
+
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          }
+        }
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    // -----------------------------------------------------------
+    // Handle Too Lost errors explicitly
+    // -----------------------------------------------------------
+
+    if (!response.ok) {
+
+      console.error(
+        "Too Lost Fetch Error:",
+        response.status,
+        responseText
+      );
+
+      tooLostError = {
+        status: response.status,
+        body: responseText
+      };
+
+    } else {
+
+      let resJson = {};
+
+      try {
+
+        resJson =
+          JSON.parse(responseText);
+
+      } catch (e) {
+
+        console.error(
+          "Too Lost returned invalid JSON:",
+          responseText
+        );
+
+        tooLostError = {
+          status: 502,
+          body: "Too Lost returned invalid JSON."
+        };
+      }
+
+
+      // ---------------------------------------------------------
+      // Normalize Too Lost response
+      // ---------------------------------------------------------
+
+      if (!tooLostError) {
+
+        const rawList =
+          Array.isArray(resJson)
+            ? resJson
+            : (
+                Array.isArray(resJson?.data)
+                  ? resJson.data
+                  : (
+                      Array.isArray(resJson?.releases)
+                        ? resJson.releases
+                        : []
+                    )
+              );
+
+
+        // -------------------------------------------------------
+        // SECURITY FILTER
+        //
+        // NEVER use:
+        //
+        // !item.submittedBy
+        //
+        // because submittedBy is Audiory's local ownership field,
+        // not a reliable Too Lost ownership identifier.
+        // -------------------------------------------------------
+
+        apiReleases =
+          rawList.filter(item => {
+
+            if (!item?.id) {
+              return false;
+            }
+
+            return ownedReleaseIds.has(
+              String(item.id)
+            );
+          });
+      }
+    }
+
+  } catch (e) {
+
+    console.error(
+      "Too Lost Fetch Error:",
+      e
+    );
+
+    tooLostError = {
+      status: 502,
+      body: e?.message ||
+        "Unable to contact Too Lost."
+    };
+  }
+
+
+  // -------------------------------------------------------------
+  // Merge Too Lost data with Audiory's local data
+  //
+  // Start with the user's KV releases so locally-created drafts
+  // remain visible even if Too Lost is temporarily unavailable.
+  // -------------------------------------------------------------
+
+  const combinedMap =
+    new Map();
+
+
+  userCachedReleases.forEach(item => {
+
+    if (!item?.id) {
+      return;
+    }
+
+    combinedMap.set(
+      String(item.id),
+      {
+        ...item
+      }
+    );
+
+  });
+
+
+  // -------------------------------------------------------------
+  // Overlay the latest Too Lost data
+  // -------------------------------------------------------------
+
+  apiReleases.forEach(item => {
+
+    if (!item?.id) {
+      return;
+    }
+
+    const key =
+      String(item.id);
+
+    const existing =
+      combinedMap.get(key);
+
+
+    if (existing) {
+
+      combinedMap.set(
+        key,
+        {
+          ...existing,
+          ...item,
+
+          // Too Lost is authoritative for current status.
+          status:
+            item.status ??
+            existing.status,
+
+          // Audiory remains authoritative for ownership.
+          submittedBy:
+            existing.submittedBy ||
+            userId
+        }
+      );
+
+    }
+
+  });
+
+
+  // -------------------------------------------------------------
+  // Final catalogue
+  //
+  // Only releases already belonging to this Audiory user
+  // are present here.
+  // -------------------------------------------------------------
+
+  const finalCatalog =
+    Array.from(
+      combinedMap.values()
+    );
+
+
+  // -------------------------------------------------------------
+  // Return catalogue
+  // -------------------------------------------------------------
+
+  return new Response(
+    JSON.stringify(
+      finalCatalog
+    ),
+    {
+      status: 200,
+
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+
+// -------------------------------------------------------------
+// Unknown release route
+// -------------------------------------------------------------
+
+return new Response(
+  JSON.stringify({
+    error: "Unknown release API route."
+  }),
+  {
+    status: 404,
+
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json"
+    }
+  }
+);
+}
+
+// -------------------------------------------------------------
+// ROUTE 3.5: ANALYTICS CATCH-ALL PROXY
+// -------------------------------------------------------------
+
+if (url.pathname.startsWith("/api/analytics")) {
+
+  if (!userId) {
+
+    return new Response(
+      JSON.stringify({
+        error: "Unauthorized: Missing authentication token."
+      }),
+      {
+        status: 401,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+  }
+
+
+  // -------------------------------------------------------------
+  // TOO LOST BASE URL
+  // -------------------------------------------------------------
+
+  const baseUrl = (
+    env.TOO_LOST_BASE_URL ||
+    "https://api-sandbox.toolost.com/v1"
+  ).replace(/\/$/, "");
+
+
+  // -------------------------------------------------------------
+  // GET TOO LOST ACCESS TOKEN
+  // -------------------------------------------------------------
+
+  let tooLostAccessToken;
+
+  try {
+
+    tooLostAccessToken =
+      await getAccessToken(env);
+
+  } catch (authError) {
+
+    console.error(
+      "Too Lost Analytics Authentication Error:",
+      authError
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: "Too Lost Authentication Failed",
+        details:
+          authError?.message ||
+          "Unable to authenticate with Too Lost."
+      }),
+      {
+        status: 401,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+  }
+
+
+  // -------------------------------------------------------------
+  // REMOVE AUDIORY FRONTEND PREFIX
+  //
+  // Example:
+  //
+  // /api/analytics/platforms
+  //
+  // becomes:
+  //
+  // /analytics/platforms
+  // -------------------------------------------------------------
+
+  const subPath =
+    url.pathname.replace(
+      /^\/api\/analytics/,
+      ""
+    );
+
+
+  // -------------------------------------------------------------
+  // BUILD TOO LOST URL
+  // -------------------------------------------------------------
+
+  const targetUrl =
+    `${baseUrl}/analytics${subPath}${url.search || ""}`;
+
+
+  // -------------------------------------------------------------
+  // FETCH OPTIONS
+  // -------------------------------------------------------------
+
+  const fetchOptions = {
+
+    method: request.method,
+
+    headers: {
+
+      "Accept":
+        "application/json",
+
+      "Authorization":
+        `Bearer ${tooLostAccessToken}`
+
+    }
+
+  };
+
+
+  // -------------------------------------------------------------
+  // PASS REQUEST BODY FOR NON-GET REQUESTS
+  // -------------------------------------------------------------
+
+  if (
+    request.method !== "GET" &&
+    request.method !== "HEAD"
+  ) {
+
+    fetchOptions.body =
+      await request.text();
+
+    const contentType =
+      request.headers.get(
+        "Content-Type"
+      );
+
+    if (contentType) {
+
+      fetchOptions.headers[
+        "Content-Type"
+      ] = contentType;
+
+    }
+
+  }
+
+
+  // -------------------------------------------------------------
+  // CALL TOO LOST
+  // -------------------------------------------------------------
+
+  try {
+
+    console.log(
+      "Audiory Analytics -> Too Lost:",
+      targetUrl
+    );
+
+
+    const res =
+      await fetch(
+        targetUrl,
+        fetchOptions
+      );
+
+
+    const resText =
+      await res.text();
+
+
+    // -----------------------------------------------------------
+    // TRY TO PARSE TOO LOST RESPONSE
+    // -----------------------------------------------------------
+
+    let parsed = null;
+
+    try {
+
+      parsed =
+        JSON.parse(
+          resText || "{}"
+        );
+
+    } catch (parseError) {
+
+      parsed = null;
+
+    }
+
+
+    // -----------------------------------------------------------
+    // LOG ALL NON-2XX ANALYTICS RESPONSES
+    //
+    // This is especially important for:
+    //
+    // /platforms/total-streams
+    //
+    // because Too Lost is currently returning HTTP 500
+    // for Spotify.
+    // -----------------------------------------------------------
+
+    if (!res.ok) {
+
+      console.error(
+        "Too Lost Analytics Upstream Error:",
+        {
+          status: res.status,
+          endpoint: subPath,
+          query: url.search,
+          targetUrl: targetUrl,
+          response: parsed !== null
+            ? parsed
+            : resText
+        }
+      );
+
+    }
+
+
+    // -----------------------------------------------------------
+    // RELEASE LINKS
+    //
+    // Too Lost may return a 5xx when release-link analytics
+    // are unavailable in the current sandbox/account.
+    //
+    // Preserve the existing working Release Links behavior.
+    // -----------------------------------------------------------
+
+    if (
+
+      res.status >= 500 &&
+
+      subPath.startsWith(
+        "/release-links/top-releases"
+      )
+
+    ) {
+
+      console.error(
+        "Too Lost Release Links upstream error:",
+        {
+          status: res.status,
+          response:
+            parsed !== null
+              ? parsed
+              : resText
+        }
+      );
+
+
+      return new Response(
+
+        JSON.stringify({
+
+          data: [],
+
+          currentPage: 1,
+
+          perPage: 10,
+
+          totalItems: 0,
+
+          totalPages: 0,
+
+          available: false,
+
+          message:
+            "Release link analytics are not currently available from Too Lost."
+
+        }),
+
+        {
+
+          status: 200,
+
+          headers: {
+
+            ...corsHeaders,
+
+            "Content-Type":
+              "application/json"
+
+          }
+
+        }
+
+      );
+
+    }
+
+
+    // -----------------------------------------------------------
+    // PLATFORM TOTAL STREAMS
+    //
+    // IMPORTANT:
+    //
+    // Do NOT convert a Too Lost 500 into fake empty analytics.
+    //
+    // Return a structured error so the frontend can see the
+    // actual Too Lost response.
+    //
+    // This lets us determine whether Spotify itself does not
+    // support this endpoint or whether Too Lost has another
+    // platform-specific requirement.
+    // -----------------------------------------------------------
+
+    if (
+
+      res.status >= 500 &&
+
+      subPath ===
+        "/platforms/total-streams"
+
+    ) {
+
+      const upstreamDetails =
+        parsed !== null
+          ? parsed
+          : (
+              resText ||
+              "Too Lost returned an empty error response."
+            );
+
+
+      return new Response(
+
+        JSON.stringify({
+
+          error:
+            "Too Lost platform total-streams analytics failed.",
+
+          endpoint:
+            "/analytics/platforms/total-streams",
+
+          status:
+            res.status,
+
+          platform:
+            url.searchParams.get(
+              "platform"
+            ),
+
+          period:
+            url.searchParams.get(
+              "period"
+            ),
+
+          release:
+            url.searchParams.get(
+              "release"
+            ),
+
+          tooLostResponse:
+            upstreamDetails
+
+        }),
+
+        {
+
+          status:
+            res.status,
+
+          headers: {
+
+            ...corsHeaders,
+
+            "Content-Type":
+              "application/json"
+
+          }
+
+        }
+
+      );
+
+    }
+
+
+    // -----------------------------------------------------------
+    // PLATFORM OVERVIEW
+    //
+    // Do not hide platform overview errors either.
+    // -----------------------------------------------------------
+
+    if (
+
+      res.status >= 500 &&
+
+      subPath ===
+        "/platforms/data"
+
+    ) {
+
+      const upstreamDetails =
+        parsed !== null
+          ? parsed
+          : (
+              resText ||
+              "Too Lost returned an empty error response."
+            );
+
+
+      return new Response(
+
+        JSON.stringify({
+
+          error:
+            "Too Lost platform overview analytics failed.",
+
+          endpoint:
+            "/analytics/platforms/data",
+
+          status:
+            res.status,
+
+          platform:
+            url.searchParams.get(
+              "platform"
+            ),
+
+          period:
+            url.searchParams.get(
+              "period"
+            ),
+
+          release:
+            url.searchParams.get(
+              "release"
+            ),
+
+          tooLostResponse:
+            upstreamDetails
+
+        }),
+
+        {
+
+          status:
+            res.status,
+
+          headers: {
+
+            ...corsHeaders,
+
+            "Content-Type":
+              "application/json"
+
+          }
+
+        }
+
+      );
+
+    }
+
+
+    // -----------------------------------------------------------
+    // PLATFORM ADDITIONAL ANALYTICS
+    // -----------------------------------------------------------
+
+    if (
+
+      res.status >= 500 &&
+
+      (
+        subPath ===
+          "/platforms/additional" ||
+
+        subPath ===
+          "/platforms/additional/info"
+
+      )
+
+    ) {
+
+      const upstreamDetails =
+        parsed !== null
+          ? parsed
+          : (
+              resText ||
+              "Too Lost returned an empty error response."
+            );
+
+
+      return new Response(
+
+        JSON.stringify({
+
+          error:
+            "Too Lost platform additional analytics failed.",
+
+          endpoint:
+            `/analytics${subPath}`,
+
+          status:
+            res.status,
+
+          platform:
+            url.searchParams.get(
+              "platform"
+            ),
+
+          type:
+            url.searchParams.get(
+              "type"
+            ),
+
+          period:
+            url.searchParams.get(
+              "period"
+            ),
+
+          release:
+            url.searchParams.get(
+              "release"
+            ),
+
+          tooLostResponse:
+            upstreamDetails
+
+        }),
+
+        {
+
+          status:
+            res.status,
+
+          headers: {
+
+            ...corsHeaders,
+
+            "Content-Type":
+              "application/json"
+
+          }
+
+        }
+
+      );
+
+    }
+
+
+    // -----------------------------------------------------------
+    // NORMAL RESPONSE
+    //
+    // Preserve Too Lost's original HTTP status and JSON body.
+    // -----------------------------------------------------------
+
+    return new Response(
+
+      parsed !== null
+        ? JSON.stringify(parsed)
+        : resText,
+
+      {
+
+        status:
+          res.status,
+
+        headers: {
+
+          ...corsHeaders,
+
+          "Content-Type":
+            "application/json"
+
+        }
+
+      }
+
+    );
+
+
+  } catch (fetchErr) {
+
+    // -----------------------------------------------------------
+    // NETWORK / CLOUDFLARE FETCH FAILURE
+    // -----------------------------------------------------------
+
+    console.error(
+      "Too Lost Analytics Proxy Error:",
+      fetchErr
+    );
+
+
+    return new Response(
+
+      JSON.stringify({
+
+        error:
+          "Upstream Proxy Fetch Failed",
+
+        details:
+          fetchErr?.message ||
+          "Unable to contact Too Lost."
+
+      }),
+
+      {
+
+        status: 502,
+
+        headers: {
+
+          ...corsHeaders,
+
+          "Content-Type":
+            "application/json"
+
+        }
+
+      }
+
+    );
+
+  }
+
+}
+
+      // -------------------------------------------------------------
+      // ROUTE 3.6: Too Lost Sales Routes
+      // -------------------------------------------------------------
+      if (url.pathname.startsWith("/api/toolost/sales/")) {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
+
+        let tooLostAccessToken;
+        try {
+          tooLostAccessToken = await getAccessToken(env);
+        } catch (authError) {
+          return new Response(
+            JSON.stringify({ error: "Too Lost Authentication Failed", details: authError.message }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const subPath = url.pathname.replace(/^\/api\/toolost\/sales/, "");
+        let salesEndpoint = null;
+
+        if (subPath === "/overview") salesEndpoint = "/sales/overview";
+        else if (subPath === "/territories") salesEndpoint = "/sales/territories";
+        else if (subPath === "/stream-rates") salesEndpoint = "/sales/stream-rates";
+        else if (subPath === "/artists") salesEndpoint = "/sales/artists";
+        else if (subPath === "/releases") salesEndpoint = "/sales/releases";
+        else if (subPath === "/channels") salesEndpoint = "/sales/channels";
+        else if (subPath === "/tracks") salesEndpoint = "/sales/tracks";
+        else {
+          const trackChannelsMatch = subPath.match(/^\/tracks\/([^\/]+)\/channels$/);
+          if (trackChannelsMatch) {
+            salesEndpoint = `/sales/tracks/${trackChannelsMatch[1]}/channels`;
+          }
+        }
+
+        if (!salesEndpoint) {
+          return new Response(
+            JSON.stringify({ error: "Not Found", message: "Unknown Sales endpoint." }),
+            { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        try {
+          const tooLostUrl = new URL(`${baseUrl}${salesEndpoint}`);
+          url.searchParams.forEach((value, key) => tooLostUrl.searchParams.set(key, value));
+
+          const response = await fetch(tooLostUrl.toString(), {
+            method: "GET",
+            headers: {
+              "Accept": "application/json",
+              "Authorization": `Bearer ${tooLostAccessToken}`
+            }
+          });
+
+          // Handle Sandbox 404s gracefully by returning empty arrays
+          if (response.status === 404) {
+            return new Response(JSON.stringify([]), {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" }
+            });
+          }
+
+          const responseText = await response.text();
+          return new Response(responseText, {
+            status: response.status,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+
+        } catch (err) {
+          return new Response(
+            JSON.stringify({ error: "Too Lost Sales API Request Failed", details: err.message }),
+            { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+
+      // -------------------------------------------------------------
+      // ROUTE 4: Get & Submit Withdrawals (/api/withdrawals)
+      // -------------------------------------------------------------
+      if (url.pathname === "/api/withdrawals") {
+        if (!userId) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid or missing authentication token." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const kvKey = `WITHDRAWALS_USER_${userId}`;
+
+        if (request.method === "GET") {
+          let userWithdrawals = [];
+          if (env.AUDIORY_KV) {
+            userWithdrawals = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+          }
+          return new Response(JSON.stringify(userWithdrawals), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        if (request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          const amount = parseFloat(body.amount);
+
+          const currentDay = new Date().getUTCDate();
+          if (currentDay < 15 || currentDay > 25) {
+            return new Response(
+              JSON.stringify({ error: "Withdrawals are allowed exclusively between the 15th and 25th of each month." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          if (isNaN(amount) || amount < 20) {
+            return new Response(
+              JSON.stringify({ error: "Minimum withdrawal amount is $20.00." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          let existingRequests = [];
+          if (env.AUDIORY_KV) {
+            existingRequests = JSON.parse((await env.AUDIORY_KV.get(kvKey)) || "[]");
+          }
+
+          const currentMonth = new Date().toISOString().slice(0, 7);
+          const hasExisting = existingRequests.some(r => r.date && r.date.startsWith(currentMonth));
+          if (hasExisting) {
+            return new Response(
+              JSON.stringify({ error: "You have already submitted a withdrawal request for this monthly cycle." }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          const newRequest = {
+            id: `wd_${Date.now()}`,
+            amount: amount,
+            method: body.method || "mpesa",
+            details: body.details || "",
+            status: "Pending",
+            date: new Date().toISOString()
+          };
+
+          existingRequests.unshift(newRequest);
+
+          if (env.AUDIORY_KV) {
+            await env.AUDIORY_KV.put(kvKey, JSON.stringify(existingRequests));
+          }
+
+          return new Response(JSON.stringify({ success: true, request: newRequest }), {
+            status: 201,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+      }
+
+      // -------------------------------------------------------------
+      // ROUTE 5: Proxy Requests to Too Lost API v1
+      // -------------------------------------------------------------
+      if (url.pathname.startsWith("/api/toolost") && url.pathname !== "/api/toolost/earnings") {
+        let endpoint = url.pathname.replace(/^\/api\/toolost\/?/, "");
+        const baseUrl = (env.TOO_LOST_BASE_URL || "https://api-sandbox.toolost.com/v1").replace(/\/$/, "");
+        const targetUrl = `${baseUrl}/${endpoint}${url.search}`;
+
+        let accessToken;
+        try {
+          accessToken = await getAccessToken(env);
+        } catch (authError) {
+          return new Response(
+            JSON.stringify({ error: "Too Lost Authentication Failed", details: authError.message }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const toolostHeaders = new Headers({
+          "Accept": "application/json",
+          "Authorization": `Bearer ${accessToken}`,
+        });
+
+        const init = {
+          method: request.method,
+          headers: toolostHeaders,
+        };
+
+        if (["POST", "PUT", "PATCH"].includes(request.method)) {
+          toolostHeaders.set("Content-Type", "application/json");
+          init.body = await request.text();
+        }
+
+        const apiResponse = await fetch(targetUrl, init);
+        const responseData = await apiResponse.text();
+
+        return new Response(responseData, {
+          status: apiResponse.status,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": apiResponse.headers.get("content-type") || "application/json",
+          },
+        });
+      }
+
+      // -------------------------------------------------------------
+      // ROUTE 6: Upload Cover & Audio Files to Cloudflare R2
+      // -------------------------------------------------------------
+      if (url.pathname === "/api/upload" && request.method === "POST") {
+        if (!env.MEDIA_BUCKET) {
+          return new Response(
+            JSON.stringify({ error: "Cloudflare R2 Bucket 'MEDIA_BUCKET' is not bound to this worker." }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const formData = await request.formData();
+        const file = formData.get("file");
+        const folder = formData.get("folder") || "general";
+
+        if (!file) {
+          return new Response(JSON.stringify({ error: "No file provided" }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const fileKey = `${folder}/${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
+
+        await env.MEDIA_BUCKET.put(fileKey, file.stream(), {
+          httpMetadata: { contentType: file.type },
+        });
+
+        const fileUrl = `${env.R2_PUBLIC_DOMAIN || 'https://pub-r2.audiory.site'}/${fileKey}`;
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            key: fileKey,
+            url: fileUrl,
+            size: file.size,
+            type: file.type,
+          }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // Default Health Check Endpoint
+      return new Response(JSON.stringify({ status: "Audiory API Gateway Online" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+
+    } catch (error) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  },
 };
