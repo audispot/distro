@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voltaic Mail - Custom Web Development Studio</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            400: '#38bdf8',
+                            500: '#06b6d4',
+                            600: '#0284c7',
+                            900: '#0f172a',
+                            950: '#080d1a',
+                        }
+                    },
+                    animation: {
+                        'float-slow': 'float 6s ease-in-out infinite',
+                        'float-delayed': 'float 6s ease-in-out 3s infinite',
+                        'pulse-glow': 'pulseGlow 3s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-15px)' },
+                        },
+                        pulseGlow: {
+                            '0%, 100%': { opacity: '0.4' },
+                            '50%': { opacity: '0.8' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-[#070b14] text-slate-100 font-sans antialiased overflow-x-hidden">
+
+    <!-- Navigation -->
+    <header class="sticky top-0 z-50 backdrop-blur-md bg-[#070b14]/80 border-b border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-20">
+                <!-- Logo -->
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/30 animate-pulse">
+                        <i data-lucide="zap" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <div>
+                        <span class="text-xl font-bold tracking-tight text-white block">voltaicmail<span class="text-cyan-400">.xyz</span></span>
+                        <span class="text-xs text-slate-400 font-medium tracking-wider">WEB DESIGN STUDIO</span>
+                    </div>
+                </div>
+
+                <!-- Desktop Nav -->
+                <nav class="hidden md:flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-full px-4 py-1.5 shadow-inner">
+                    <a href="#home" class="px-4 py-2 text-sm font-medium text-white hover:text-cyan-400 transition-colors">Home</a>
+                    <a href="#services" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-400 transition-colors">Services</a>
+                    <a href="#showcase" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-400 transition-colors">Showcase</a>
+                    <a href="#pricing" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-400 transition-colors">Pricing</a>
+                    <a href="#contact" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-400 transition-colors">Contact</a>
+                </nav>
+
+                <!-- Action Button -->
+                <div class="hidden sm:flex items-center">
+                    <a href="#contact" class="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold px-6 py-2.5 rounded-full shadow-lg shadow-cyan-500/25 transition-all transform hover:scale-105 active:scale-95">
+                        Start Your Website
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section id="home" class="relative py-12 md:py-24 overflow-hidden">
+        <!-- Glowing background blobs -->
+        <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-cyan-600/15 rounded-full blur-[120px] pointer-events-none"></div>
+
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+                
+                <!-- Hero Text -->
+                <div class="lg:col-span-6 text-center lg:text-left">
+                    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-800/80 border border-cyan-500/30 text-cyan-300 text-xs font-semibold mb-6 shadow-md">
+                        <i data-lucide="sparkles" class="w-4 h-4 text-cyan-400 animate-spin"></i>
+                        <span>We Create Stunning Websites That Grow Your Business</span>
+                    </div>
+
+                    <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight">
+                        We Build Modern <br/>
+                        <span class="bg-gradient-to-r from-cyan-400 via-sky-300 to-blue-500 bg-clip-text text-transparent">
+                            High-Converting
+                        </span> Websites.
+                    </h1>
+
+                    <p class="mt-6 text-lg text-slate-300 max-w-xl mx-auto lg:mx-0 leading-relaxed">
+                        Say goodbye to slow, outdated templates. We design eye-catching, super-fast, and mobile-friendly websites that turn visitors into paying customers.
+                    </p>
+
+                    <div class="mt-8 flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
+                        <a href="#contact" class="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-lg px-8 py-4 rounded-xl shadow-lg shadow-cyan-500/30 transition-all transform hover:-translate-y-1">
+                            Get Free Quote
+                            <i data-lucide="arrow-right" class="w-5 h-5"></i>
+                        </a>
+                        <a href="#showcase" class="inline-flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-lg px-8 py-4 rounded-xl transition-all">
+                            View Our Work
+                        </a>
+                    </div>
+
+                    <!-- Trust Stats -->
+                    <div class="mt-12 grid grid-cols-3 gap-6 border-t border-slate-800/80 pt-8 text-center lg:text-left">
+                        <div>
+                            <div class="text-3xl font-bold text-cyan-400">100%</div>
+                            <div class="text-xs text-slate-400 mt-1">Mobile Friendly</div>
+                        </div>
+                        <div>
+                            <div class="text-3xl font-bold text-cyan-400">Super Fast</div>
+                            <div class="text-xs text-slate-400 mt-1">Instant Loading</div>
+                        </div>
+                        <div>
+                            <div class="text-3xl font-bold text-cyan-400">24/7</div>
+                            <div class="text-xs text-slate-400 mt-1">Expert Support</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hero Image (Image 4) with Cartoon Floating Animations -->
+                <div class="lg:col-span-6 relative">
+                    <div class="relative mx-auto max-w-lg lg:max-w-none">
+                        <!-- Decorative glow -->
+                        <div class="absolute inset-0 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-3xl blur-2xl opacity-20"></div>
+                        
+                        <!-- Main Cartoon Graphic (Image 4) -->
+                        <div class="relative bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-2xl overflow-hidden animate-float-slow">
+                            <img src="Laughing-Samurai-Pros-and-Cons-of-Using-Animations-in-Your-Web-Design-scaled.jpg" alt="Team building website illustration" class="w-full h-auto rounded-2xl object-cover transform transition-transform duration-700 hover:scale-105">
+                        </div>
+
+                        <!-- Animated Floating Badges -->
+                        <div class="absolute -top-6 -left-6 bg-slate-900/90 border border-slate-700 backdrop-blur-md p-4 rounded-2xl shadow-xl hidden sm:flex items-center gap-3 animate-float-delayed">
+                            <div class="w-10 h-10 rounded-lg bg-green-500/20 text-green-400 flex items-center justify-center">
+                                <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+                            </div>
+                            <div>
+                                <p class="text-xs text-slate-400">Design Status</p>
+                                <p class="text-sm font-bold text-white">100% Client Approved</p>
+                            </div>
+                        </div>
+
+                        <div class="absolute -bottom-6 -right-6 bg-slate-900/90 border border-slate-700 backdrop-blur-md p-4 rounded-2xl shadow-xl hidden sm:flex items-center gap-3 animate-float-slow">
+                            <div class="w-10 h-10 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
+                                <i data-lucide="rocket" class="w-6 h-6 animate-bounce"></i>
+                            </div>
+                            <div>
+                                <p class="text-xs text-slate-400">Website Speed</p>
+                                <p class="text-sm font-bold text-white">Lightning Fast</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Services Section -->
+    <section id="services" class="py-20 bg-slate-950/50 border-y border-slate-800/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-xs uppercase font-bold tracking-widest text-cyan-400 mb-2">What We Build</h2>
+                <p class="text-3xl sm:text-4xl font-extrabold text-white">Everything your business needs to shine online.</p>
+                <p class="mt-4 text-slate-400 text-base">We handle all the technical details so you can focus on running your business.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- Service 1 -->
+                <div class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl hover:border-cyan-500/50 transition-all duration-300 group hover:-translate-y-2">
+                    <div class="w-14 h-14 bg-cyan-500/10 text-cyan-400 rounded-xl flex items-center justify-center mb-6 group-hover:bg-cyan-500 group-hover:text-white transition-all">
+                        <i data-lucide="layout" class="w-7 h-7"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-3">Custom Website Design</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed">Unique, modern designs built around your brand. No generic templates, just tailored sites that look amazing on phone and desktop.</p>
+                </div>
+
+                <!-- Service 2 -->
+                <div class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl hover:border-cyan-500/50 transition-all duration-300 group hover:-translate-y-2">
+                    <div class="w-14 h-14 bg-cyan-500/10 text-cyan-400 rounded-xl flex items-center justify-center mb-6 group-hover:bg-cyan-500 group-hover:text-white transition-all">
+                        <i data-lucide="shopping-cart" class="w-7 h-7"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-3">Online Stores & E-Commerce</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed">Sell your products effortlessly online with secure payment gateways, simple checkout experiences, and easy product management.</p>
+                </div>
+
+                <!-- Service 3 -->
+                <div class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl hover:border-cyan-500/50 transition-all duration-300 group hover:-translate-y-2">
+                    <div class="w-14 h-14 bg-cyan-500/10 text-cyan-400 rounded-xl flex items-center justify-center mb-6 group-hover:bg-cyan-500 group-hover:text-white transition-all">
+                        <i data-lucide="trending-up" class="w-7 h-7"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-3">Google Search Optimization</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed">We optimize your website so customers in your city and around the world can easily find you when searching on Google.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Cartoon Illustration Interlude -->
+    <section class="py-16 bg-slate-900/30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="bg-gradient-to-r from-slate-900 to-slate-950 border border-slate-800 rounded-3xl p-8 lg:p-12 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                <div class="lg:col-span-7">
+                    <h3 class="text-2xl sm:text-3xl font-bold text-white mb-4">Crafted Piece by Piece for Perfection</h3>
+                    <p class="text-slate-300 leading-relaxed mb-6">
+                        Just like a well-oiled machine, our design team carefully constructs every page, button, and image to make sure your visitors have a smooth, enjoyable experience.
+                    </p>
+                    <div class="flex flex-wrap gap-4 text-sm text-cyan-400 font-semibold">
+                        <span class="flex items-center gap-2 bg-slate-800 px-4 py-2 rounded-full"><i data-lucide="check" class="w-4 h-4"></i> Mobile Ready</span>
+                        <span class="flex items-center gap-2 bg-slate-800 px-4 py-2 rounded-full"><i data-lucide="check" class="w-4 h-4"></i> Fast Load Times</span>
+                        <span class="flex items-center gap-2 bg-slate-800 px-4 py-2 rounded-full"><i data-lucide="check" class="w-4 h-4"></i> Secure Setup</span>
+                    </div>
+                </div>
+                <div class="lg:col-span-5 flex justify-center">
+                    <img src="creative-web-homepage-illustration_52683-79847.avif" alt="Building websites illustration" class="w-full max-w-sm rounded-2xl shadow-lg animate-float-slow">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Showcase Section -->
+    <section id="showcase" class="py-20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-xs uppercase font-bold tracking-widest text-cyan-400 mb-2">Our Work</h2>
+                <p class="text-3xl sm:text-4xl font-extrabold text-white">Recent Projects We've Built</p>
+                <p class="mt-4 text-slate-400">Take a look at some of the websites created for our happy clients.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- Showcase Item 1 -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-cyan-500/50 transition-all group">
+                    <div class="relative overflow-hidden h-48 bg-slate-800">
+                        <img src="GettyImages-1148771003.webp" alt="Website showcase" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
+                    </div>
+                    <div class="p-6">
+                        <h4 class="text-lg font-bold text-white mb-2">Modern Business Portal</h4>
+                        <p class="text-slate-400 text-sm mb-6">A sleek corporate site designed to convert prospective visitors into long-term clients.</p>
+                        <a href="#" class="inline-flex items-center gap-2 w-full justify-center bg-cyan-600/20 hover:bg-cyan-500 border border-cyan-500/40 text-cyan-300 hover:text-white font-medium py-2.5 rounded-xl transition-all">
+                            Visit Website
+                            <i data-lucide="external-link" class="w-4 h-4"></i>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Showcase Item 2 -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-cyan-500/50 transition-all group">
+                    <div class="relative overflow-hidden h-48 bg-slate-800">
+                        <img src="Bringing-websites-to-life-with-Lottie.svg" alt="Website showcase" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
+                    </div>
+                    <div class="p-6">
+                        <h4 class="text-lg font-bold text-white mb-2">Interactive Web App</h4>
+                        <p class="text-slate-400 text-sm mb-6">Clean, animated interface for a digital service platform designed for mobile ease.</p>
+                        <a href="#" class="inline-flex items-center gap-2 w-full justify-center bg-cyan-600/20 hover:bg-cyan-500 border border-cyan-500/40 text-cyan-300 hover:text-white font-medium py-2.5 rounded-xl transition-all">
+                            Visit Website
+                            <i data-lucide="external-link" class="w-4 h-4"></i>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Showcase Item 3 -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-cyan-500/50 transition-all group">
+                    <div class="relative overflow-hidden h-48 bg-slate-800">
+                        <img src="creative-web-homepage-illustration_52683-79847.avif" alt="Website showcase" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
+                    </div>
+                    <div class="p-6">
+                        <h4 class="text-lg font-bold text-white mb-2">E-Commerce Storefront</h4>
+                        <p class="text-slate-400 text-sm mb-6">Full-featured online shop with product search, cart features, and checkout.</p>
+                        <a href="#" class="inline-flex items-center gap-2 w-full justify-center bg-cyan-600/20 hover:bg-cyan-500 border border-cyan-500/40 text-cyan-300 hover:text-white font-medium py-2.5 rounded-xl transition-all">
+                            Visit Website
+                            <i data-lucide="external-link" class="w-4 h-4"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="pricing" class="py-20 bg-slate-950/60 border-t border-slate-800/60">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-xs uppercase font-bold tracking-widest text-cyan-400 mb-2">Simple Pricing</h2>
+                <p class="text-3xl sm:text-4xl font-extrabold text-white">Affordable Packages for Every Business</p>
+                <p class="mt-4 text-slate-400">Clear pricing with no hidden fees or unexpected costs.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- Starter Plan -->
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 flex flex-col justify-between hover:border-slate-700 transition-all">
+                    <div>
+                        <h3 class="text-xl font-bold text-white mb-2">Starter</h3>
+                        <p class="text-slate-400 text-sm mb-6">Perfect for small businesses & personal sites.</p>
+                        <div class="flex items-baseline mb-6">
+                            <span class="text-4xl font-extrabold text-white">$299</span>
+                            <span class="text-slate-400 text-sm ml-2">one-time</span>
+                        </div>
+                        <ul class="space-y-4 text-sm text-slate-300 mb-8">
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Up to 3 Custom Pages</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> 100% Mobile Responsive</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Contact Form Integration</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Super Fast Loading</li>
+                        </ul>
+                    </div>
+                    <a href="#contact" class="w-full text-center bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3 rounded-xl transition-all">Get Started</a>
+                </div>
+
+                <!-- Business Plan (Featured) -->
+                <div class="bg-gradient-to-b from-slate-900 to-slate-900 border-2 border-cyan-500 rounded-3xl p-8 flex flex-col justify-between shadow-2xl shadow-cyan-500/10 relative transform md:-translate-y-4">
+                    <div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-cyan-500 text-white text-xs font-bold px-4 py-1 rounded-full uppercase tracking-wider">Most Popular</div>
+                    <div>
+                        <h3 class="text-xl font-bold text-white mb-2">Professional</h3>
+                        <p class="text-slate-400 text-sm mb-6">Ideal for growing companies & agencies.</p>
+                        <div class="flex items-baseline mb-6">
+                            <span class="text-4xl font-extrabold text-white">$599</span>
+                            <span class="text-slate-400 text-sm ml-2">one-time</span>
+                        </div>
+                        <ul class="space-y-4 text-sm text-slate-300 mb-8">
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Up to 8 Custom Pages</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Mobile & Desktop Optimized</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Google SEO Setup</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Custom Animations</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Priority Support</li>
+                        </ul>
+                    </div>
+                    <a href="#contact" class="w-full text-center bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold py-3 rounded-xl shadow-lg shadow-cyan-500/30 transition-all">Choose Professional</a>
+                </div>
+
+                <!-- Custom Plan -->
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 flex flex-col justify-between hover:border-slate-700 transition-all">
+                    <div>
+                        <h3 class="text-xl font-bold text-white mb-2">E-Commerce / Custom</h3>
+                        <p class="text-slate-400 text-sm mb-6">For online stores & advanced web apps.</p>
+                        <div class="flex items-baseline mb-6">
+                            <span class="text-4xl font-extrabold text-white">$999+</span>
+                            <span class="text-slate-400 text-sm ml-2">custom</span>
+                        </div>
+                        <ul class="space-y-4 text-sm text-slate-300 mb-8">
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Full Online Store Setup</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Unlimited Products</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Payment Gateway Setup</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Advanced Security & Speed</li>
+                        </ul>
+                    </div>
+                    <a href="#contact" class="w-full text-center bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3 rounded-xl transition-all">Contact Us</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact Section -->
+    <section id="contact" class="py-20">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 sm:p-12 shadow-2xl">
+                <div class="text-center mb-10">
+                    <h2 class="text-3xl font-bold text-white">Let's Build Your Website</h2>
+                    <p class="mt-2 text-slate-400">Fill out the form below and we'll reply with a free quote within 24 hours.</p>
+                </div>
+
+                <form class="space-y-6">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-2">Your Name</label>
+                            <input type="text" placeholder="John Doe" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-2">Email Address</label>
+                            <input type="email" placeholder="john@example.com" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">What kind of website do you need?</label>
+                        <select class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors">
+                            <option>Business Website ($299)</option>
+                            <option>Professional Package ($599)</option>
+                            <option>Online Store / E-Commerce ($999+)</option>
+                            <option>Custom Request</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">Project Details</label>
+                        <textarea rows="4" placeholder="Tell us about your business and what you're looking for..." class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors"></textarea>
+                    </div>
+                    <button type="button" class="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-cyan-500/25 transition-all">
+                        Send Message & Get Quote
+                    </button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800/80 py-8 bg-slate-950">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:flex sm:justify-between sm:items-center">
+            <p class="text-slate-400 text-sm">© 2026 Voltaic Mail Studio. All rights reserved.</p>
+            <div class="mt-4 sm:mt-0 flex justify-center space-x-6 text-sm text-slate-400">
+                <a href="#home" class="hover:text-cyan-400">Home</a>
+                <a href="#services" class="hover:text-cyan-400">Services</a>
+                <a href="#pricing" class="hover:text-cyan-400">Pricing</a>
+                <a href="#contact" class="hover:text-cyan-400">Contact</a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Initialize Icons -->
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>
