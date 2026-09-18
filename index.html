@@ -4,6 +4,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Voltaic Mail - Custom Web Development Studio</title>
+    <meta name="description" content="Custom, high-converting, lightning-fast web design and development studio for modern businesses.">
+
+    <!-- Google Structured Data (Schema.org) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "ProfessionalService",
+      "name": "Voltaic Mail Web Design Studio",
+      "url": "https://voltaicmail.xyz",
+      "logo": "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=150&auto=format&fit=crop",
+      "image": "https://images.unsplash.com/photo-1522542550221-31fd19575a2d?w=1200&auto=format&fit=crop",
+      "description": "We build fast, responsive, and high-converting custom websites tailored for modern businesses.",
+      "priceRange": "$299 - $999+",
+      "address": {
+        "@type": "PostalAddress",
+        "addressCountry": "US"
+      },
+      "openingHours": "Mo-Fr 09:00-18:00",
+      "sameAs": [
+        "https://voltaicmail.xyz"
+      ]
+    }
+    </script>
+
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Lucide Icons -->
@@ -46,43 +70,60 @@
 </head>
 <body class="bg-[#070b14] text-slate-100 font-sans antialiased overflow-x-hidden">
 
-    <!-- Navigation -->
-    <header class="sticky top-0 z-50 backdrop-blur-md bg-[#070b14]/80 border-b border-slate-800">
+    <!-- Navigation Header -->
+    <header class="sticky top-0 z-50 backdrop-blur-md bg-[#070b14]/90 border-b border-slate-800">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-20">
                 <!-- Logo -->
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/30 animate-pulse">
+                <a href="#home" class="flex items-center gap-3 group">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/30 group-hover:scale-105 transition-transform">
                         <i data-lucide="zap" class="w-6 h-6 text-white"></i>
                     </div>
                     <div>
                         <span class="text-xl font-bold tracking-tight text-white block">voltaicmail<span class="text-cyan-400">.xyz</span></span>
-                        <span class="text-xs text-slate-400 font-medium tracking-wider">WEB DESIGN STUDIO</span>
+                        <span class="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">Web Design Studio</span>
                     </div>
-                </div>
+                </a>
 
                 <!-- Desktop Nav -->
                 <nav class="hidden md:flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-full px-4 py-1.5 shadow-inner">
                     <a href="#home" class="px-4 py-2 text-sm font-medium text-white hover:text-cyan-400 transition-colors">Home</a>
                     <a href="#services" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-400 transition-colors">Services</a>
+                    <a href="#process" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-400 transition-colors">Process</a>
                     <a href="#showcase" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-400 transition-colors">Showcase</a>
                     <a href="#pricing" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-400 transition-colors">Pricing</a>
                     <a href="#contact" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-400 transition-colors">Contact</a>
                 </nav>
 
-                <!-- Action Button -->
-                <div class="hidden sm:flex items-center">
+                <!-- Desktop Action Button -->
+                <div class="hidden md:flex items-center">
                     <a href="#contact" class="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold px-6 py-2.5 rounded-full shadow-lg shadow-cyan-500/25 transition-all transform hover:scale-105 active:scale-95">
                         Start Your Website
                     </a>
                 </div>
+
+                <!-- Mobile Hamburger Button -->
+                <button id="mobile-menu-btn" aria-label="Toggle navigation menu" class="md:hidden text-slate-300 hover:text-white focus:outline-none p-2 rounded-lg bg-slate-900 border border-slate-800">
+                    <i data-lucide="menu" id="menu-icon" class="w-6 h-6"></i>
+                    <i data-lucide="x" id="close-icon" class="w-6 h-6 hidden"></i>
+                </button>
             </div>
+        </div>
+
+        <!-- Mobile Drawer Navigation -->
+        <div id="mobile-menu" class="hidden md:hidden border-b border-slate-800 bg-[#070b14]/95 backdrop-blur-xl px-4 pt-2 pb-6 space-y-3">
+            <a href="#home" class="mobile-link block px-4 py-2.5 text-base font-medium text-white rounded-lg hover:bg-slate-900">Home</a>
+            <a href="#services" class="mobile-link block px-4 py-2.5 text-base font-medium text-slate-300 rounded-lg hover:bg-slate-900">Services</a>
+            <a href="#process" class="mobile-link block px-4 py-2.5 text-base font-medium text-slate-300 rounded-lg hover:bg-slate-900">Process</a>
+            <a href="#showcase" class="mobile-link block px-4 py-2.5 text-base font-medium text-slate-300 rounded-lg hover:bg-slate-900">Showcase</a>
+            <a href="#pricing" class="mobile-link block px-4 py-2.5 text-base font-medium text-slate-300 rounded-lg hover:bg-slate-900">Pricing</a>
+            <a href="#contact" class="mobile-link block px-4 py-2.5 text-base font-medium text-slate-300 rounded-lg hover:bg-slate-900">Contact</a>
+            <a href="#contact" class="mobile-link block text-center w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold py-3 rounded-xl mt-4">Start Your Website</a>
         </div>
     </header>
 
     <!-- Hero Section -->
     <section id="home" class="relative py-12 md:py-24 overflow-hidden">
-        <!-- Glowing background blobs -->
         <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-cyan-600/15 rounded-full blur-[120px] pointer-events-none"></div>
 
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -133,24 +174,22 @@
                     </div>
                 </div>
 
-                <!-- Hero Image (Image 4) with Cartoon Floating Animations -->
+                <!-- Animated Hero Graphic -->
                 <div class="lg:col-span-6 relative">
                     <div class="relative mx-auto max-w-lg lg:max-w-none">
-                        <!-- Decorative glow -->
                         <div class="absolute inset-0 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-3xl blur-2xl opacity-20"></div>
                         
-                        <!-- Main Cartoon Graphic (Image 4) -->
-                        <div class="relative bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-2xl overflow-hidden animate-float-slow">
-                            <img src="Laughing-Samurai-Pros-and-Cons-of-Using-Animations-in-Your-Web-Design-scaled.jpg" alt="Team building website illustration" class="w-full h-auto rounded-2xl object-cover transform transition-transform duration-700 hover:scale-105">
+                        <div class="relative bg-slate-900 border border-slate-800 rounded-3xl p-3 shadow-2xl overflow-hidden animate-float-slow">
+                            <img src="https://images.unsplash.com/photo-1522542550221-31fd19575a2d?w=900&auto=format&fit=crop&q=80" alt="Team building web illustration" class="w-full h-auto rounded-2xl object-cover transform transition-transform duration-700 hover:scale-105">
                         </div>
 
-                        <!-- Animated Floating Badges -->
+                        <!-- Floating Badges -->
                         <div class="absolute -top-6 -left-6 bg-slate-900/90 border border-slate-700 backdrop-blur-md p-4 rounded-2xl shadow-xl hidden sm:flex items-center gap-3 animate-float-delayed">
                             <div class="w-10 h-10 rounded-lg bg-green-500/20 text-green-400 flex items-center justify-center">
                                 <i data-lucide="check-circle-2" class="w-6 h-6"></i>
                             </div>
                             <div>
-                                <p class="text-xs text-slate-400">Design Status</p>
+                                <p class="text-xs text-slate-400">Design Quality</p>
                                 <p class="text-sm font-bold text-white">100% Client Approved</p>
                             </div>
                         </div>
@@ -160,7 +199,7 @@
                                 <i data-lucide="rocket" class="w-6 h-6 animate-bounce"></i>
                             </div>
                             <div>
-                                <p class="text-xs text-slate-400">Website Speed</p>
+                                <p class="text-xs text-slate-400">Website Performance</p>
                                 <p class="text-sm font-bold text-white">Lightning Fast</p>
                             </div>
                         </div>
@@ -177,11 +216,10 @@
             <div class="text-center max-w-3xl mx-auto mb-16">
                 <h2 class="text-xs uppercase font-bold tracking-widest text-cyan-400 mb-2">What We Build</h2>
                 <p class="text-3xl sm:text-4xl font-extrabold text-white">Everything your business needs to shine online.</p>
-                <p class="mt-4 text-slate-400 text-base">We handle all the technical details so you can focus on running your business.</p>
+                <p class="mt-4 text-slate-400 text-base">We handle all technical details so you can focus on running your business.</p>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <!-- Service 1 -->
                 <div class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl hover:border-cyan-500/50 transition-all duration-300 group hover:-translate-y-2">
                     <div class="w-14 h-14 bg-cyan-500/10 text-cyan-400 rounded-xl flex items-center justify-center mb-6 group-hover:bg-cyan-500 group-hover:text-white transition-all">
                         <i data-lucide="layout" class="w-7 h-7"></i>
@@ -190,7 +228,6 @@
                     <p class="text-slate-400 text-sm leading-relaxed">Unique, modern designs built around your brand. No generic templates, just tailored sites that look amazing on phone and desktop.</p>
                 </div>
 
-                <!-- Service 2 -->
                 <div class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl hover:border-cyan-500/50 transition-all duration-300 group hover:-translate-y-2">
                     <div class="w-14 h-14 bg-cyan-500/10 text-cyan-400 rounded-xl flex items-center justify-center mb-6 group-hover:bg-cyan-500 group-hover:text-white transition-all">
                         <i data-lucide="shopping-cart" class="w-7 h-7"></i>
@@ -199,7 +236,6 @@
                     <p class="text-slate-400 text-sm leading-relaxed">Sell your products effortlessly online with secure payment gateways, simple checkout experiences, and easy product management.</p>
                 </div>
 
-                <!-- Service 3 -->
                 <div class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl hover:border-cyan-500/50 transition-all duration-300 group hover:-translate-y-2">
                     <div class="w-14 h-14 bg-cyan-500/10 text-cyan-400 rounded-xl flex items-center justify-center mb-6 group-hover:bg-cyan-500 group-hover:text-white transition-all">
                         <i data-lucide="trending-up" class="w-7 h-7"></i>
@@ -211,30 +247,64 @@
         </div>
     </section>
 
-    <!-- Cartoon Illustration Interlude -->
-    <section class="py-16 bg-slate-900/30">
+    <!-- Animated Web Building Process & Pros vs Cons -->
+    <section id="process" class="py-20">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="bg-gradient-to-r from-slate-900 to-slate-950 border border-slate-800 rounded-3xl p-8 lg:p-12 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-                <div class="lg:col-span-7">
-                    <h3 class="text-2xl sm:text-3xl font-bold text-white mb-4">Crafted Piece by Piece for Perfection</h3>
-                    <p class="text-slate-300 leading-relaxed mb-6">
-                        Just like a well-oiled machine, our design team carefully constructs every page, button, and image to make sure your visitors have a smooth, enjoyable experience.
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-xs uppercase font-bold tracking-widest text-cyan-400 mb-2">How We Build</h2>
+                <p class="text-3xl sm:text-4xl font-extrabold text-white">Why Choose Our Custom Studio Over Cheap Builders</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-16">
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 relative overflow-hidden">
+                    <div class="flex items-center gap-4 mb-6">
+                        <div class="w-12 h-12 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
+                            <i data-lucide="code-2" class="w-6 h-6 animate-pulse"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-xl font-bold text-white">Crafted Piece by Piece</h3>
+                            <p class="text-xs text-slate-400">Hand-coded speed & tailored precision</p>
+                        </div>
+                    </div>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-6">
+                        Unlike DIY drag-and-drop builders that load heavy unnecessary scripts, our custom builds load instantly. Every animation, color, and line of code is structured to convert visitors.
                     </p>
-                    <div class="flex flex-wrap gap-4 text-sm text-cyan-400 font-semibold">
-                        <span class="flex items-center gap-2 bg-slate-800 px-4 py-2 rounded-full"><i data-lucide="check" class="w-4 h-4"></i> Mobile Ready</span>
-                        <span class="flex items-center gap-2 bg-slate-800 px-4 py-2 rounded-full"><i data-lucide="check" class="w-4 h-4"></i> Fast Load Times</span>
-                        <span class="flex items-center gap-2 bg-slate-800 px-4 py-2 rounded-full"><i data-lucide="check" class="w-4 h-4"></i> Secure Setup</span>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div class="bg-slate-950 p-4 rounded-xl border border-emerald-500/20">
+                            <div class="flex items-center gap-2 text-emerald-400 font-bold text-sm mb-2">
+                                <i data-lucide="check" class="w-4 h-4"></i> Custom Studio Site
+                            </div>
+                            <ul class="text-xs text-slate-400 space-y-1.5">
+                                <li>• Under 1s load time</li>
+                                <li>• High conversion layout</li>
+                                <li>• Zero plugin maintenance</li>
+                            </ul>
+                        </div>
+                        <div class="bg-slate-950 p-4 rounded-xl border border-rose-500/20">
+                            <div class="flex items-center gap-2 text-rose-400 font-bold text-sm mb-2">
+                                <i data-lucide="x" class="w-4 h-4"></i> Cheap Template Builders
+                            </div>
+                            <ul class="text-xs text-slate-400 space-y-1.5">
+                                <li>• Slow 4-6s load time</li>
+                                <li>• Generic look & feel</li>
+                                <li>• Constant plugin updates</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
-                <div class="lg:col-span-5 flex justify-center">
-                    <img src="creative-web-homepage-illustration_52683-79847.avif" alt="Building websites illustration" class="w-full max-w-sm rounded-2xl shadow-lg animate-float-slow">
+
+                <!-- Animated Illustration -->
+                <div class="relative flex justify-center">
+                    <div class="w-full max-w-md bg-gradient-to-tr from-cyan-900/30 to-blue-900/30 p-2 rounded-3xl border border-slate-800">
+                        <img src="https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop&q=80" alt="Building websites illustration" class="w-full h-72 object-cover rounded-2xl shadow-xl animate-float-slow">
+                    </div>
                 </div>
             </div>
         </div>
     </section>
 
     <!-- Showcase Section -->
-    <section id="showcase" class="py-20">
+    <section id="showcase" class="py-20 bg-slate-950/50 border-t border-slate-800/50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center max-w-3xl mx-auto mb-16">
                 <h2 class="text-xs uppercase font-bold tracking-widest text-cyan-400 mb-2">Our Work</h2>
@@ -246,12 +316,12 @@
                 <!-- Showcase Item 1 -->
                 <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-cyan-500/50 transition-all group">
                     <div class="relative overflow-hidden h-48 bg-slate-800">
-                        <img src="GettyImages-1148771003.webp" alt="Website showcase" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
+                        <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&auto=format&fit=crop&q=80" alt="Modern Business Portal" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
                     </div>
                     <div class="p-6">
                         <h4 class="text-lg font-bold text-white mb-2">Modern Business Portal</h4>
                         <p class="text-slate-400 text-sm mb-6">A sleek corporate site designed to convert prospective visitors into long-term clients.</p>
-                        <a href="#" class="inline-flex items-center gap-2 w-full justify-center bg-cyan-600/20 hover:bg-cyan-500 border border-cyan-500/40 text-cyan-300 hover:text-white font-medium py-2.5 rounded-xl transition-all">
+                        <a href="#contact" class="inline-flex items-center gap-2 w-full justify-center bg-cyan-600/20 hover:bg-cyan-500 border border-cyan-500/40 text-cyan-300 hover:text-white font-medium py-2.5 rounded-xl transition-all">
                             Visit Website
                             <i data-lucide="external-link" class="w-4 h-4"></i>
                         </a>
@@ -261,12 +331,12 @@
                 <!-- Showcase Item 2 -->
                 <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-cyan-500/50 transition-all group">
                     <div class="relative overflow-hidden h-48 bg-slate-800">
-                        <img src="Bringing-websites-to-life-with-Lottie.svg" alt="Website showcase" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
+                        <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&auto=format&fit=crop&q=80" alt="Interactive Web App" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
                     </div>
                     <div class="p-6">
                         <h4 class="text-lg font-bold text-white mb-2">Interactive Web App</h4>
                         <p class="text-slate-400 text-sm mb-6">Clean, animated interface for a digital service platform designed for mobile ease.</p>
-                        <a href="#" class="inline-flex items-center gap-2 w-full justify-center bg-cyan-600/20 hover:bg-cyan-500 border border-cyan-500/40 text-cyan-300 hover:text-white font-medium py-2.5 rounded-xl transition-all">
+                        <a href="#contact" class="inline-flex items-center gap-2 w-full justify-center bg-cyan-600/20 hover:bg-cyan-500 border border-cyan-500/40 text-cyan-300 hover:text-white font-medium py-2.5 rounded-xl transition-all">
                             Visit Website
                             <i data-lucide="external-link" class="w-4 h-4"></i>
                         </a>
@@ -276,12 +346,12 @@
                 <!-- Showcase Item 3 -->
                 <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-cyan-500/50 transition-all group">
                     <div class="relative overflow-hidden h-48 bg-slate-800">
-                        <img src="creative-web-homepage-illustration_52683-79847.avif" alt="Website showcase" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
+                        <img src="https://images.unsplash.com/photo-1472851294608-062f824d29cc?w=600&auto=format&fit=crop&q=80" alt="E-Commerce Storefront" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
                     </div>
                     <div class="p-6">
                         <h4 class="text-lg font-bold text-white mb-2">E-Commerce Storefront</h4>
-                        <p class="text-slate-400 text-sm mb-6">Full-featured online shop with product search, cart features, and checkout.</p>
-                        <a href="#" class="inline-flex items-center gap-2 w-full justify-center bg-cyan-600/20 hover:bg-cyan-500 border border-cyan-500/40 text-cyan-300 hover:text-white font-medium py-2.5 rounded-xl transition-all">
+                        <p class="text-slate-400 text-sm mb-6">Full-featured online shop with product search, cart features, and payment processing.</p>
+                        <a href="#contact" class="inline-flex items-center gap-2 w-full justify-center bg-cyan-600/20 hover:bg-cyan-500 border border-cyan-500/40 text-cyan-300 hover:text-white font-medium py-2.5 rounded-xl transition-all">
                             Visit Website
                             <i data-lucide="external-link" class="w-4 h-4"></i>
                         </a>
@@ -292,7 +362,7 @@
     </section>
 
     <!-- Pricing Section -->
-    <section id="pricing" class="py-20 bg-slate-950/60 border-t border-slate-800/60">
+    <section id="pricing" class="py-20">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center max-w-3xl mx-auto mb-16">
                 <h2 class="text-xs uppercase font-bold tracking-widest text-cyan-400 mb-2">Simple Pricing</h2>
@@ -333,9 +403,9 @@
                         <ul class="space-y-4 text-sm text-slate-300 mb-8">
                             <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Up to 8 Custom Pages</li>
                             <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Mobile & Desktop Optimized</li>
-                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Google SEO Setup</li>
-                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Custom Animations</li>
-                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Priority Support</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Google Search Schema Added</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Custom Interactive Animations</li>
+                            <li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-cyan-400"></i> Priority 24/7 Support</li>
                         </ul>
                     </div>
                     <a href="#contact" class="w-full text-center bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold py-3 rounded-xl shadow-lg shadow-cyan-500/30 transition-all">Choose Professional</a>
@@ -364,7 +434,7 @@
     </section>
 
     <!-- Contact Section -->
-    <section id="contact" class="py-20">
+    <section id="contact" class="py-20 bg-slate-950/50 border-t border-slate-800/50">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 sm:p-12 shadow-2xl">
                 <div class="text-center mb-10">
@@ -386,7 +456,7 @@
                     <div>
                         <label class="block text-sm font-medium text-slate-300 mb-2">What kind of website do you need?</label>
                         <select class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors">
-                            <option>Business Website ($299)</option>
+                            <option>Starter Package ($299)</option>
                             <option>Professional Package ($599)</option>
                             <option>Online Store / E-Commerce ($999+)</option>
                             <option>Custom Request</option>
@@ -417,9 +487,39 @@
         </div>
     </footer>
 
-    <!-- Initialize Icons -->
+    <!-- Mobile Navigation Toggle Script -->
     <script>
+        // Initialize Lucide Icons
         lucide.createIcons();
+
+        // Mobile Menu Toggle
+        const menuBtn = document.getElementById('mobile-menu-btn');
+        const mobileMenu = document.getElementById('mobile-menu');
+        const menuIcon = document.getElementById('menu-icon');
+        const closeIcon = document.getElementById('close-icon');
+        const mobileLinks = document.querySelectorAll('.mobile-link');
+
+        menuBtn.addEventListener('click', () => {
+            const isOpen = !mobileMenu.classList.contains('hidden');
+            if (isOpen) {
+                mobileMenu.classList.add('hidden');
+                menuIcon.classList.remove('hidden');
+                closeIcon.classList.add('hidden');
+            } else {
+                mobileMenu.classList.remove('hidden');
+                menuIcon.classList.add('hidden');
+                closeIcon.classList.remove('hidden');
+            }
+        });
+
+        // Close Mobile Menu on Link Click
+        mobileLinks.forEach(link => {
+            link.addEventListener('click', () => {
+                mobileMenu.classList.add('hidden');
+                menuIcon.classList.remove('hidden');
+                closeIcon.classList.add('hidden');
+            });
+        });
     </script>
 </body>
 </html>
